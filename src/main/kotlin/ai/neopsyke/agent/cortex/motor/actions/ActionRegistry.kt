@@ -20,6 +20,8 @@ class ActionRegistry private constructor(
 ) : AutoCloseable {
     private val pluginByType: Map<ActionType, AgentActionPlugin> = plugins.associateBy { it.descriptor.actionType }
 
+    fun pluginFor(actionType: ActionType): AgentActionPlugin? = pluginByType[actionType]
+
     fun actionTypes(): Set<ActionType> = pluginByType.keys
 
     fun descriptor(actionType: ActionType): ActionDescriptor? = pluginByType[actionType]?.descriptor

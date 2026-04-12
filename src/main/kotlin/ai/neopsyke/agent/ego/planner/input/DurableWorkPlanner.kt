@@ -5,6 +5,7 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.model.DurableWorkCommand
+import ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload
 import ai.neopsyke.agent.ego.planner.model.WorkItemReference
 import ai.neopsyke.agent.ego.planner.model.SerializedDurableWorkCommand
 import ai.neopsyke.agent.ego.planner.prompt.SharedPromptSections
@@ -82,6 +83,12 @@ class WorkPlanBuilder(
                     - If the user requests a recurring schedule, set cron_expression to a standard 5-field cron string (minute hour day-of-month month day-of-week).
                     - Examples: "every 5 minutes" -> "*/5 * * * *", "daily at 9:30 am" -> "30 9 * * *", "every Monday at 8am" -> "0 8 * * 1", "hourly" -> "0 * * * *".
                     - If the request is not recurring, set cron_expression to null.
+                    - Always generate plan_steps for create: a short list of concrete execution steps.
+                    - Each step should map to an available action (web_search, website_fetch, contact_user, etc.).
+                    - Steps that fetch external data should set grounding_requirement to "required".
+                    - The final step should deliver the result to the user (contact_user).
+                    - Runtime facts (date, time, timezone) are always available; do NOT create steps for these.
+                    - Step outputs flow forward via requires/produces, so later steps can reference earlier step outputs.
 
                     For management operations (list, status, pause, resume, complete, delete, delete_all, update, revise_plan, reprioritize):
                     - Goal reference resolution: the active goals list is numbered starting at 1.
@@ -115,6 +122,7 @@ class WorkPlanBuilder(
                       "completion_criteria":"for create/update",
                       "priority":"low|medium|high|critical (for create/update/reprioritize)",
                       "cron_expression":"5-field cron or null (for create/update)",
+                      "plan_steps":[{"id":"step1","description":"...","acceptance_criteria":"...","grounding_requirement":"required|not_required","requires":[],"produces":["artifact"],"max_attempts":3}],
                       "assistant_response":"required when operation=fallback",
                       "reason":"optional"
                     }
@@ -189,6 +197,23 @@ class WorkPlanBuilder(
             ?.let { runCatching { WorkItemPriority.valueOf(it) }.getOrNull() }
             ?: WorkItemPriority.MEDIUM
 
+        val planSteps = payload.planSteps
+            ?.mapNotNull { step ->
+                val desc = step.description?.trim().orEmpty()
+                if (desc.isBlank()) null
+                else DurableWorkPlanStepPayload(
+                    id = step.id?.trim()?.ifBlank { null },
+                    description = desc,
+                    acceptanceCriteria = step.acceptanceCriteria?.trim().orEmpty(),
+                    groundingRequirement = step.groundingRequirement?.trim()?.lowercase(),
+                    requires = step.requires.orEmpty().toSet(),
+                    produces = step.produces.orEmpty().toSet(),
+                    maxAttempts = step.maxAttempts?.coerceIn(1, 10),
+                )
+            }
+            ?.take(config.planner.maxPlanSteps)
+            ?.takeIf { it.isNotEmpty() }
+
         val command = DurableWorkCommand.Create(
             title = TextSecurity.clamp(title.ifBlank { "Persistent goal" }, GOAL_TITLE_MAX_CHARS),
             instruction = TextSecurity.clamp(instruction, GOAL_INSTRUCTION_MAX_CHARS),
@@ -198,6 +223,7 @@ class WorkPlanBuilder(
                 GOAL_COMPLETION_CRITERIA_MAX_CHARS,
             ),
             cronExpression = payload.cronExpression?.trim()?.ifBlank { null },
+            planSteps = planSteps,
         )
 
         return goalOperationDecision(command, context)
@@ -390,9 +416,24 @@ class WorkPlanBuilder(
         val priority: String? = null,
         @param:JsonProperty("cron_expression")
         val cronExpression: String? = null,
+        @param:JsonProperty("plan_steps")
+        val planSteps: List<PlanStepPayload>? = null,
         @param:JsonProperty("assistant_response")
         val assistantResponse: String? = null,
         val reason: String? = null,
+    )
+
+    private data class PlanStepPayload(
+        val id: String? = null,
+        val description: String? = null,
+        @param:JsonProperty("acceptance_criteria")
+        val acceptanceCriteria: String? = null,
+        @param:JsonProperty("grounding_requirement")
+        val groundingRequirement: String? = null,
+        val requires: List<String>? = null,
+        val produces: List<String>? = null,
+        @param:JsonProperty("max_attempts")
+        val maxAttempts: Int? = null,
     )
 
     private data class WorkItemReferencePayload(
@@ -417,7 +458,7 @@ class WorkPlanBuilder(
                 {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["operation", "work_item_reference", "title", "instruction", "completion_criteria", "priority", "cron_expression", "assistant_response", "reason"],
+                  "required": ["operation", "work_item_reference", "title", "instruction", "completion_criteria", "priority", "cron_expression", "plan_steps", "assistant_response", "reason"],
                   "properties": {
                     "operation": { "type": "string" },
                     "work_item_reference": {
@@ -437,6 +478,23 @@ class WorkPlanBuilder(
                     "completion_criteria": { "type": ["string", "null"], "maxLength": 200 },
                     "priority": { "type": ["string", "null"], "enum": ["low", "medium", "high", "critical", null] },
                     "cron_expression": { "type": ["string", "null"], "maxLength": 40 },
+                    "plan_steps": {
+                      "type": ["array", "null"],
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["id", "description", "acceptance_criteria", "grounding_requirement", "requires", "produces", "max_attempts"],
+                        "properties": {
+                          "id": { "type": "string" },
+                          "description": { "type": "string" },
+                          "acceptance_criteria": { "type": "string" },
+                          "grounding_requirement": { "type": "string", "enum": ["required", "not_required"] },
+                          "requires": { "type": "array", "items": { "type": "string" } },
+                          "produces": { "type": "array", "items": { "type": "string" } },
+                          "max_attempts": { "type": "integer", "minimum": 1 }
+                        }
+                      }
+                    },
                     "assistant_response": { "type": ["string", "null"] },
                     "reason": { "type": ["string", "null"], "maxLength": 160 }
                   }

@@ -36,6 +36,7 @@ data class DurableWorkOperationRequest(
     val cronExpression: String? = null,
     val contactChannel: String? = null,
     val reason: String? = null,
+    val planSteps: List<ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload>? = null,
 )
 
 data class DurableWorkOperationResult(

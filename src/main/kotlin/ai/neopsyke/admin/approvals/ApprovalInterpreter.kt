@@ -18,6 +18,7 @@ private val logger = KotlinLogging.logger {}
 data class ApprovalInterpreterInput(
     val reply: String,
     val canonicalSummary: String,
+    val approvalContextText: String = "",
     val sessionId: String,
     val rootInputId: String?,
 )
@@ -68,17 +69,23 @@ class DefaultApprovalInterpreter(
                             You classify owner replies for an approval control plane.
                             Return strict JSON with one field: decision.
                             Allowed values: approve, deny, deny_and_reissue, unclear.
-                            Approve only if the reply clearly authorizes the exact staged action.
-                            If the reply changes timing, target, or instructions, return deny_and_reissue.
+                            Approve only if the reply clearly authorizes the exact staged action without modifications.
+                            If the reply changes timing, target, instructions, or plan steps, return deny_and_reissue.
+                            If the reply says "approve, but ..." with any modification, return deny_and_reissue (not approve).
+                            Plan-edit replies like "combine steps", "use web search instead", "remove that step", "add a step" are deny_and_reissue.
                             """.trimIndent()
                         ),
                         ChatMessage(
                             role = ChatRole.USER,
-                            content = """
-                            Canonical approval summary:
-                            ${input.canonicalSummary}
-                            Raw reply: ${input.reply}
-                            """.trimIndent()
+                            content = buildString {
+                                appendLine("Canonical approval summary:")
+                                appendLine(input.canonicalSummary)
+                                if (input.approvalContextText.isNotBlank()) {
+                                    appendLine("Approval context:")
+                                    appendLine(input.approvalContextText)
+                                }
+                                appendLine("Raw reply: ${input.reply}")
+                            }.trimEnd()
                         )
                     ),
                     options = ChatRequestOptions(
@@ -137,6 +144,7 @@ class DefaultApprovalInterpreter(
             reply = reply,
             replyWithTerminalPunctuation = replyWithTerminalPunctuation,
             canonicalSummary = canonicalizeSummary(input.canonicalSummary),
+            approvalContextText = input.approvalContextText,
             sessionId = input.sessionId,
             rootInputId = input.rootInputId,
         )
@@ -183,7 +191,7 @@ class DefaultApprovalInterpreter(
         if (approveTail.isBlank() || approveTail in COURTESY_TAILS) {
             return ApprovalClassificationKind.APPROVE
         }
-        if (containsRedirectCue(approveTail)) {
+        if (containsRedirectCue(approveTail) || containsConditionalModifier(approveTail)) {
             return ApprovalClassificationKind.DENY_AND_REISSUE
         }
         if (containsAmbiguityCue(approveTail)) {
@@ -223,6 +231,9 @@ class DefaultApprovalInterpreter(
             text.contains(marker)
         }
 
+    private fun containsConditionalModifier(text: String): Boolean =
+        CONDITIONAL_MODIFIERS.any { marker -> text.startsWith(marker) || text.contains(" $marker") }
+
     private fun containsAmbiguityCue(text: String): Boolean =
         AMBIGUITY_MARKERS.any { marker ->
             text.contains(marker)
@@ -232,6 +243,7 @@ class DefaultApprovalInterpreter(
         val reply: String,
         val replyWithTerminalPunctuation: String,
         val canonicalSummary: String,
+        val approvalContextText: String = "",
         val sessionId: String,
         val rootInputId: String?,
     )
@@ -263,7 +275,18 @@ class DefaultApprovalInterpreter(
             "later",
             "change",
             "different",
+            "combine",
+            "merge",
+            "remove step",
+            "add a step",
+            "add step",
+            "use web search",
+            "use search",
+            "swap",
+            "replace",
+            "reorder",
         )
+        private val CONDITIONAL_MODIFIERS = listOf("but ", "except ", "only if ", "as long as ")
         private val AMBIGUITY_MARKERS = listOf(
             "maybe",
             "probably",

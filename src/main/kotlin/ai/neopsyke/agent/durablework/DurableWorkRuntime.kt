@@ -465,6 +465,7 @@ class DurableWorkRuntime(
                         completionCriteria = request.completionCriteria ?: "User confirms the work item is met.",
                         cronExpression = cronExpression.ifBlank { null },
                         contactChannel = request.contactChannel?.trim()?.ifBlank { null },
+                        planSteps = request.planSteps,
                     )
                     if (workItemId.isBlank()) {
                         DurableWorkOperationResult(false, "Work item creation was rejected.")
@@ -583,7 +584,38 @@ class DurableWorkRuntime(
                 if (state == null) {
                     logger.warn { "REVISE_PLAN work item not found: workItemId='$workItemId' available=${states.keys}" }
                     DurableWorkOperationResult(false, "Work item not found.")
+                } else if (request.planSteps != null && request.planSteps.isNotEmpty()) {
+                    val steps = request.planSteps.mapIndexed { i, step ->
+                        PlanStep(
+                            id = step.id?.trim()?.ifBlank { null } ?: "step-${i + 1}",
+                            description = step.description,
+                            status = StepStatus.PENDING,
+                            acceptanceCriteria = step.acceptanceCriteria?.trim().orEmpty()
+                                .ifBlank { state.workItem.completionCriteria },
+                            requires = step.requires,
+                            produces = step.produces,
+                            maxAttempts = (step.maxAttempts ?: DEFAULT_STEP_MAX_ATTEMPTS).coerceIn(1, MAX_STEP_ATTEMPTS),
+                            groundingRequirement = parseGroundingRequirement(step.groundingRequirement),
+                        )
+                    }
+                    val plan = WorkItemPlan(steps = steps, generatedAt = java.time.Instant.now())
+                    applyEvent(
+                        workItemId,
+                        WorkItemEvent.PlanRevised(
+                            workItemId = workItemId,
+                            plan = plan,
+                            reason = request.reason ?: "Revised by user request",
+                        )
+                    )
+                    DurableWorkOperationResult(true, "Work item plan revised.", workItemId)
                 } else {
+                    logger.warn { "REVISE_PLAN without pre-built plan steps for workItemId='$workItemId'; using deterministic fallback." }
+                    instrumentation.emit(
+                        ai.neopsyke.instrumentation.AgentEvent(
+                            type = "durable_work_missing_plan",
+                            data = mapOf("work_item_id" to workItemId, "path" to "revise_plan_fallback")
+                        )
+                    )
                     val plan = planner.generatePlan(state.workItem)
                     applyEvent(
                         workItemId,
@@ -663,6 +695,7 @@ class DurableWorkRuntime(
         completionCriteria: String = "User confirms the work item is met.",
         cronExpression: String? = null,
         contactChannel: String? = null,
+        planSteps: List<ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload>? = null,
     ): String {
         val activeCount = states.values.count { !it.isTerminal() }
         if (activeCount >= config.maxActiveWorkItems) {
@@ -695,7 +728,18 @@ class DurableWorkRuntime(
         if (!cronExpression.isNullOrBlank()) {
             timerScheduler?.registerCron(workItemId, cronExpression)
         }
-        generatePlan(workItemId)
+        if (planSteps != null && planSteps.isNotEmpty()) {
+            applyPreBuiltPlan(workItemId, planSteps, completionCriteria)
+        } else {
+            logger.warn { "CREATE without pre-built plan steps for workItemId='$workItemId'; using deterministic fallback." }
+            instrumentation.emit(
+                ai.neopsyke.instrumentation.AgentEvent(
+                    type = "durable_work_missing_plan",
+                    data = mapOf("work_item_id" to workItemId, "path" to "create_fallback")
+                )
+            )
+            generatePlan(workItemId)
+        }
         instrumentation.emit(AgentEvents.durableWorkCreated(workItemId, title, priority.name))
         logger.info { "Work item created: $workItemId ('$title')" }
         return workItemId
@@ -703,6 +747,27 @@ class DurableWorkRuntime(
 
     fun applyEventExternal(workItemId: String, event: WorkItemEvent) {
         applyEvent(workItemId, event)
+    }
+
+    private fun applyPreBuiltPlan(
+        workItemId: String,
+        planSteps: List<ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload>,
+        fallbackAcceptanceCriteria: String = "",
+    ) {
+        val steps = planSteps.mapIndexed { i, step ->
+            PlanStep(
+                id = step.id?.trim()?.ifBlank { null } ?: "step-${i + 1}",
+                description = step.description,
+                status = StepStatus.PENDING,
+                acceptanceCriteria = step.acceptanceCriteria?.trim().orEmpty().ifBlank { fallbackAcceptanceCriteria },
+                requires = step.requires,
+                produces = step.produces,
+                maxAttempts = (step.maxAttempts ?: DEFAULT_STEP_MAX_ATTEMPTS).coerceIn(1, MAX_STEP_ATTEMPTS),
+                groundingRequirement = parseGroundingRequirement(step.groundingRequirement),
+            )
+        }
+        val plan = WorkItemPlan(steps = steps, generatedAt = java.time.Instant.now())
+        applyEvent(workItemId, WorkItemEvent.PlanGenerated(workItemId, plan))
     }
 
     private fun generatePlan(workItemId: String) {
@@ -1318,6 +1383,16 @@ class DurableWorkRuntime(
     }
 
     companion object {
+        const val DEFAULT_STEP_MAX_ATTEMPTS: Int = 3
+        const val MAX_STEP_ATTEMPTS: Int = 10
+
+        fun parseGroundingRequirement(raw: String?): ai.neopsyke.agent.model.GroundingRequirement =
+            when (raw?.trim()?.lowercase()) {
+                "required" -> ai.neopsyke.agent.model.GroundingRequirement.REQUIRED
+                "not_required", "", null -> ai.neopsyke.agent.model.GroundingRequirement.NOT_REQUIRED
+                else -> ai.neopsyke.agent.model.GroundingRequirement.NOT_REQUIRED
+            }
+
         private const val ACTIVATION_JOURNAL_DETAIL_MAX_CHARS: Int = 200
         private const val DEFAULT_PLAN_REVISION: Int = 1
         private const val EFFECT_REASON_MAX_CHARS: Int = 180

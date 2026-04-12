@@ -378,6 +378,9 @@ class DefaultActionControlService(
         // highly concurrent for the same root input across threads/processes, allocation should be
         // tightened into a transactional staging path rather than relying on pre-insert sequence reads.
         val threadSequence = action.rootInputId?.let(store::nextThreadSequence)
+        val approvalContext = actionRegistry.pluginFor(action.type)
+            ?.buildApprovalContext(action.payload)
+            .orEmpty()
         val staged = store.saveStagedAction(
             StagedAction(
                 id = nextId(),
@@ -413,6 +416,7 @@ class DefaultActionControlService(
                 requiresFollowUpThought = action.requiresFollowUpThought,
                 followUpPrefix = action.followUpPrefix,
                 intentionId = action.intentionId,
+                approvalContext = approvalContext,
             )
         )
         saveStagedLedgerEntry(

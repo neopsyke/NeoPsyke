@@ -485,6 +485,52 @@ object AgentEvents {
             )
         )
 
+    fun planRefinementCompleted(
+        planKind: String,
+        refinementMode: String,
+        originalStepCount: Int,
+        refinedStepCount: Int,
+        droppedStepCount: Int,
+        reason: String = "",
+    ): AgentEvent =
+        AgentEvent(
+            type = "plan_refinement_completed",
+            data = mapOf(
+                "plan_kind" to planKind,
+                "refinement_mode" to refinementMode,
+                "original_step_count" to originalStepCount,
+                "refined_step_count" to refinedStepCount,
+                "dropped_step_count" to droppedStepCount,
+                "reason" to reason,
+            )
+        )
+
+    fun planRefinementFallback(
+        reason: String,
+        planKind: String,
+        originalStepCount: Int,
+    ): AgentEvent =
+        AgentEvent(
+            type = "plan_refinement_fallback",
+            data = mapOf(
+                "reason" to reason,
+                "plan_kind" to planKind,
+                "original_step_count" to originalStepCount,
+            )
+        )
+
+    fun durableWorkMissingPlan(
+        workItemId: String,
+        path: String,
+    ): AgentEvent =
+        AgentEvent(
+            type = "durable_work_missing_plan",
+            data = mapOf(
+                "work_item_id" to workItemId,
+                "path" to path,
+            )
+        )
+
     fun planStepsEnqueued(
         planId: String,
         totalSteps: Int,

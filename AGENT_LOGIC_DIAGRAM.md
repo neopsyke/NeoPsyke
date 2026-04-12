@@ -90,9 +90,10 @@ flowchart LR
     MC -.->|"temporal intent -> episodic recall + vector cues"| LB
     E --> TWS["ScratchpadStore (Thread Workspace + Intention Drafts)"]
     E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
+    E --> PR["PlanRefiner (LLM or Noop)"]
     E --> PG["DurableWorkGateway (optional durable runtime boundary)"]
     PG --> PM["DurableWorkRuntime"]
-    PM --> PP["WorkPlanBuilder"]
+    PM --> DWP["DeterministicWorkPlanBuilder (fallback only)"]
     PM --> PV["WorkStepVerifier"]
     PM --> AOR["AsyncOperationRegistry"]
     PM --> PS["WorkItemStateMachine + WorkItemStore"]
@@ -134,6 +135,31 @@ flowchart LR
     DS --> OT["Thread Inspection (/api/obs/threads*)"]
     DS --> OX["Action Control Page (/action-control)"]
     DS --> ACAPI["Action Control API + SSE (/api/action-control/*)"]
+```
+
+---
+
+## L1: Plan Refinement and Durable Work Plan Ownership
+
+```mermaid
+flowchart TD
+    subgraph "Inline Ego Plans"
+        P1["Planner lane returns\nEgoDecision.EnqueuePlan"] --> PR1["PlanRefiner.refine()"]
+        PR1 --> DD["DecisionDispatcher\n(hash/dedup/enqueue)"]
+    end
+    subgraph "Durable Work CREATE"
+        GP["Goal Planner generates\nDurableWorkCommand.Create\nwith planSteps"] --> PR2["PlanRefiner.refine()"]
+        PR2 --> FI["EgoDecision.FormIntention\n(CREATE payload with refined plan)"]
+        FI --> AC["ActionControlService\n(stage with approvalContext)"]
+        AC --> AR["ApprovalRuntime\n(shows plan in prompt)"]
+        AR -->|"APPROVE"| DWR["DurableWorkRuntime\n(uses pre-built plan)"]
+        AR -->|"DENY_AND_REISSUE"| RI["Reissue to Ego\n(re-plan with feedback)"]
+    end
+    subgraph "Durable Work REVISE_PLAN"
+        REV["Ego builds revised plan\nfrom work-item context"] --> PR3["PlanRefiner.refine()"]
+        PR3 --> FI2["EgoDecision.FormIntention\n(REVISE_PLAN with plan)"]
+        FI2 --> DWR2["DurableWorkRuntime\n(applies supplied plan)"]
+    end
 ```
 
 ---

@@ -355,23 +355,62 @@ Phase 1 and phase 2 do not need full external-event generalization.
 ### 5. Move plan generation into the Ego and add plan refinement
 
 Plan generation for durable work must move from the motor layer into the Ego.
-The Ego planner should produce plan steps as part of the durable work CREATE
-decision, with full access to available actions, memory, and context. The
-runtime receives pre-built plans and stores them; it does not make LLM calls
-for plan generation.
+The Ego planner should produce plan steps as part of the durable work `CREATE`
+and `REVISE_PLAN` decisions, with full access to available actions, memory, and
+context. The runtime receives pre-built plans and stores or applies them; it
+does not make LLM calls for plan generation or runtime-side replanning.
+
+This is a clean ownership boundary:
+
+- the Ego owns plan generation and plan revision
+- the runtime owns persistence, revision history, wake semantics, and plan
+  application
+
+The durable-work plan contract must preserve the full runtime step model rather
+than collapse to prose-only steps. At minimum this includes:
+
+- step description
+- acceptance criteria
+- grounding requirement
+- dependency inputs (`requires`)
+- produced keys (`produces`)
+- retry budget (`max_attempts`)
 
 A shared `PlanRefiner` component should validate and improve all plans before
 they are committed, whether they originate from durable work creation or from
-Ego inline plan decomposition. The refiner makes a single LLM call that checks
+Ego inline plan decomposition. The refiner should be a single bounded
+LLM-powered repair/refinement step, not a stack of pre-processing layers. It checks
 achievability (steps map to available actions), non-redundancy (no steps for
-runtime facts), correct data flow between steps, and minimal sufficiency. The
-refiner can revise the plan in the same call, not just accept or reject it.
+runtime facts), correct data flow between steps, minimal sufficiency, and
+preservation of the durable-work step contract. The refiner can revise the plan
+in the same pass, not just accept or reject it.
+
+The refiner should be designed for endurance:
+
+- repair malformed-but-recoverable plans instead of rejecting them
+- preserve intent over literal wording
+- prefer conservative edits over aggressive rewrites
+- keep semantic judgment inside the model rather than deterministic text logic
+
+The refiner must not apply one universal terminal rule to every plan. It should
+receive plan-kind and terminal-policy signals so durable-work plans are not
+forced into the same "end with direct user delivery" rubric as inline
+conversational plans.
+
+Outside the refiner, the system should keep only minimal mechanical boundary
+checks required for execution/storage safety. It should not add a separate
+deterministic semantic normalizer, because that would reintroduce brittle
+natural-language interpretation outside the model.
 
 Plan steps should be visible to the user at approval time through a
 generalized approval context mechanism, not a durable-work-specific rendering
 path. The user should be able to review the plan before the work item is
 created, and request changes through the existing `DENY_AND_REISSUE` approval
-flow without any ad-hoc plan-revision protocol.
+flow without any ad-hoc plan-revision protocol. Because plan-edit replies are
+often more specific than the approval summary, the approval interpreter should
+also receive the rendered approval context as classification input. This should
+strengthen model-based classification, not add a new layer of deterministic
+semantic marker parsing for plan-edit text.
 
 See `docs/EGO_PLAN_REFINEMENT_DESIGN.md` for the detailed implementation
 design.
@@ -663,18 +702,29 @@ Included:
 - single-process leases with runtime-owned wake coalescing
 - coarse runtime-level digest flushing if digest delivery is enabled
 - Ego-level plan generation: the Ego planner produces plan steps as part of
-  the durable work CREATE decision, with full access to available actions,
-  memory, episodic context, and runtime facts. The runtime receives pre-built
-  plans and does not make LLM calls for plan generation.
+  the durable work `CREATE` and `REVISE_PLAN` decisions, with full access to
+  available actions, memory, episodic context, and runtime facts. The runtime
+  receives pre-built plans and does not make LLM calls for plan generation or
+  runtime-side replanning.
 - plan refinement: a shared `PlanRefiner` validates and improves all plans
-  (durable work and Ego inline) before they are committed. Single LLM call,
-  best-effort (falls back to original plan on failure).
+  (durable work and Ego inline) before they are committed. It is a single
+  bounded LLM-powered repair/refinement step that can fix malformed-but-
+  recoverable plans and return one canonical final plan. Refinement is
+  best-effort and falls back to the original planner plan on failure when
+  meaning is still preserved and final mechanical execution/storage safety
+  checks pass.
+- full step-contract preservation: durable-work plans keep dependencies,
+  produced keys, grounding requirements, and retry budgets when planning moves
+  into Ego.
 - generalized approval context: approvals carry structured context entries
   (label + content) that any action type can populate. For durable work
   creation, the plan steps are surfaced to the user at approval time.
 - plan feedback via existing approval flows: the user can request plan changes
   through `DENY_AND_REISSUE`, which forwards their feedback as normal input
   for the Ego to re-plan. No ad-hoc plan-revision protocol.
+- approval interpretation strengthened for plan edits: the approval interpreter
+  receives approval-context content so replies like "merge steps 2 and 3" or
+  "approve, but use web search first" can be treated as reissue requests.
 
 Excluded:
 
@@ -704,17 +754,23 @@ Excluded:
   wakes; the Ego owns reasoning per activation.
 - Plan generation happens in the Ego with full context. The runtime does not
   make LLM calls for plan generation. Plans for durable work are produced as
-  part of the Ego planner's CREATE decision.
+  part of the Ego planner's `CREATE` and `REVISE_PLAN` decisions.
 - All plans (durable work and Ego inline) pass through a shared refinement step
-  that validates achievability against available actions, removes redundant
-  steps, and verifies data flow. Refinement is best-effort and falls back to
-  the original plan on failure.
+  that repairs malformed-but-recoverable structure, validates achievability
+  against available actions, removes redundant steps, verifies data flow, and
+  preserves the durable-work step contract. Refinement is best-effort and falls
+  back to the original planner plan on failure when meaning is still preserved
+  and final mechanical execution/storage safety checks pass.
 - The user sees the plan steps at approval time before the work item is created.
   Approval context is a generic mechanism available to any action type, not a
   durable-work-specific rendering path.
 - The user can request plan changes by denying the approval with feedback. The
   feedback flows through the existing `DENY_AND_REISSUE` path: the Ego
-  re-plans with the user's corrections visible in episodic context.
+  re-plans with the user's corrections visible in episodic context and approval
+  context available to the interpreter.
+- Once planning ownership moves into Ego, the runtime no longer silently
+  re-generates plans. Missing plans on `CREATE` or `REVISE_PLAN` fail closed by
+  default; any deterministic fallback exists only as an explicit recovery mode.
 - The feature can be considered production-stable for reminders, recurring
   checks, and simple sequential durable work before phase 2 begins.
 
@@ -761,7 +817,7 @@ Excluded:
   the shared durable-work model.
 - Phase-1 plan generation, refinement, approval context, and user feedback
   mechanisms remain stable. Phase-2 does not introduce separate plan generation
-  paths or ad-hoc plan-revision protocols.
+  paths, runtime-side hidden replanning, or ad-hoc plan-revision protocols.
 - Phase-1 schemas, leases, side-effect semantics, recovery rules, and user
   observability remain valid without requiring a redesign of the phase-1 core.
 - Phase 1 behavior remains stable and does not regress while the richer state

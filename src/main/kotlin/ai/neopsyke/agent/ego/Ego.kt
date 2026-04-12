@@ -24,6 +24,8 @@ import ai.neopsyke.agent.id.WorkItemRegistry
 import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
 import ai.neopsyke.agent.durablework.DurableWorkActivation
 import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
+import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
@@ -52,6 +54,7 @@ class Ego(
     private val goalRegistry: WorkItemRegistry = EmptyWorkItemRegistry,
     private val durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
     private val evidenceArtifactStore: EvidenceArtifactStore = InMemoryEvidenceArtifactStore(),
+    private val planRefiner: PlanRefiner = NoopPlanRefiner(),
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
     @Volatile private var approvalStagingHook: ApprovalStagingHook? = null
@@ -131,7 +134,7 @@ class Ego(
     )
     private val dispatcher = DecisionDispatcher(
         scheduler, config, instrumentation, deliberation, memory, motorCortex,
-        scratchpadStore, telemetry, fallbackHandler,
+        scratchpadStore, telemetry, fallbackHandler, planRefiner,
         dialogueFor = ::dialogueFor,
         resolveSessionId = ::resolveSessionId,
         inputScope = ::inputScope,

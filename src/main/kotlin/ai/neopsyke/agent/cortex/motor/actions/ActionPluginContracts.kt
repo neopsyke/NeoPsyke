@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.cortex.motor.actions
 
 import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.model.ApprovalContextEntry
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionType
@@ -165,6 +166,8 @@ interface AgentActionPlugin : AutoCloseable {
     ): ActionDeterministicReview? = null
 
     fun repairPlannerPayload(raw: String): String = raw
+
+    fun buildApprovalContext(payload: String): List<ApprovalContextEntry> = emptyList()
 
     override fun close() {}
 }

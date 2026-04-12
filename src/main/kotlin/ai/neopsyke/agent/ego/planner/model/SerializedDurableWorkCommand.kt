@@ -23,6 +23,8 @@ data class SerializedDurableWorkCommand(
     @param:JsonProperty("contact_channel")
     val contactChannel: String? = null,
     val reason: String? = null,
+    @param:JsonProperty("plan_steps")
+    val planSteps: List<DurableWorkPlanStepPayload>? = null,
 ) {
     fun toDurableWorkCommand(): DurableWorkCommand? {
         val normalizedCommand = command.trim().lowercase()
@@ -41,6 +43,7 @@ data class SerializedDurableWorkCommand(
                         completionCriteria = completionCriteria?.trim().orEmpty(),
                         cronExpression = cronExpression?.trim()?.ifBlank { null },
                         contactChannel = contactChannel?.trim()?.ifBlank { null },
+                        planSteps = planSteps?.takeIf { it.isNotEmpty() },
                     )
                 }
             }
@@ -62,7 +65,7 @@ data class SerializedDurableWorkCommand(
                     contactChannel = contactChannel?.trim()?.ifBlank { null },
                 )
             }
-            "revise_plan" -> reference?.let { DurableWorkCommand.RevisePlan(reference = it, reason = reason?.trim()?.ifBlank { null }) }
+            "revise_plan" -> reference?.let { DurableWorkCommand.RevisePlan(reference = it, reason = reason?.trim()?.ifBlank { null }, planSteps = planSteps?.takeIf { s -> s.isNotEmpty() }) }
             "reprioritize" -> {
                 val parsedPriority = parsePriority(priority) ?: return null
                 reference?.let { DurableWorkCommand.Reprioritize(reference = it, newPriority = parsedPriority) }
@@ -82,6 +85,7 @@ data class SerializedDurableWorkCommand(
                     completionCriteria = command.completionCriteria,
                     cronExpression = command.cronExpression,
                     contactChannel = command.contactChannel,
+                    planSteps = command.planSteps,
                 )
                 is DurableWorkCommand.List -> SerializedDurableWorkCommand(command = command.operationName)
                 is DurableWorkCommand.Status -> fromReferenceCommand(command.operationName, command.reference)
@@ -106,6 +110,7 @@ data class SerializedDurableWorkCommand(
                     workItemReference = SerializedWorkItemReference.fromWorkItemReference(command.reference),
                     workItemId = resolvedWorkItemId(command.reference),
                     reason = command.reason,
+                    planSteps = command.planSteps,
                 )
                 is DurableWorkCommand.Reprioritize -> SerializedDurableWorkCommand(
                     command = command.operationName,

@@ -2,6 +2,16 @@ package ai.neopsyke.agent.model
 
 import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 
+/**
+ * Generic labeled context block attached to a staged action for approval display.
+ * The producer builds display-ready text from canonical structured payloads.
+ * This text is never parsed back into runtime state.
+ */
+data class ApprovalContextEntry(
+    val label: String,
+    val content: String,
+)
+
 enum class CommitMode {
     NOT_APPLICABLE,
     APPROVAL_BACKED,
@@ -96,6 +106,7 @@ data class StagedAction(
     val requiresFollowUpThought: Boolean = false,
     val followUpPrefix: String = "Action completed.",
     val intentionId: String? = null,
+    val approvalContext: List<ApprovalContextEntry> = emptyList(),
 )
 
 data class CommitAuthorization(

@@ -1205,7 +1205,7 @@ internal object AppModeRunners {
                                                         ai.neopsyke.agent.durablework.DurableWorkRuntime(
                                                             config = config.durableWork,
                                                             store = ai.neopsyke.agent.durablework.WorkItemStore(config.durableWork.workspaceRoot),
-                                                            planner = ai.neopsyke.agent.durablework.LlmWorkPlanBuilder(plannerClient, config),
+                                                            planner = ai.neopsyke.agent.durablework.DeterministicWorkPlanBuilder(),
                                                             verifier = ai.neopsyke.agent.durablework.LlmWorkStepVerifier(plannerClient, config),
                                                             instrumentation = instrumentation,
                                                             cueEmitter = sensoryCortex::offerDurableWorkCue,
@@ -1267,7 +1267,7 @@ internal object AppModeRunners {
                                                                     }
                                                                 },
                                                                 laneModelClientResolver = plannerLaneClientResolver,
-                                                            )
+                                                            ).let { EgoAssembler.PlannerBuildResult(planner = it.planner, planRefiner = it.planRefiner) }
                                                         },
                                                         superegoFactory = { registry ->
                                                             Superego(
@@ -1780,7 +1780,7 @@ internal object AppModeRunners {
                                                     ai.neopsyke.agent.durablework.DurableWorkRuntime(
                                                         config = config.durableWork,
                                                         store = ai.neopsyke.agent.durablework.WorkItemStore(config.durableWork.workspaceRoot),
-                                                        planner = ai.neopsyke.agent.durablework.LlmWorkPlanBuilder(plannerClient, config),
+                                                        planner = ai.neopsyke.agent.durablework.DeterministicWorkPlanBuilder(),
                                                         verifier = ai.neopsyke.agent.durablework.LlmWorkStepVerifier(plannerClient, config),
                                                         instrumentation = instrumentation,
                                                         cueEmitter = sensoryCortex::offerDurableWorkCue,
@@ -1819,7 +1819,7 @@ internal object AppModeRunners {
                                                             onPlannerNoop = { metrics.recordPlannerNoop() },
                                                             onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() },
                                                             laneModelClientResolver = plannerLaneClientResolver,
-                                                        )
+                                                        ).let { EgoAssembler.PlannerBuildResult(planner = it.planner, planRefiner = it.planRefiner) }
                                                     },
                                                     superegoFactory = { registry ->
                                                         Superego(
@@ -2950,6 +2950,11 @@ private fun buildPlannerLaneModelClientResolver(
 /**
  * Factory for the HierarchicalEgoPlanner, replacing LlmEgoPlanner.
  */
+private data class PlannerAssembly(
+    val planner: Ego.Planner,
+    val planRefiner: ai.neopsyke.agent.ego.planner.PlanRefiner,
+)
+
 private fun buildHierarchicalPlanner(
     plannerClient: ai.neopsyke.llm.ChatModelClient,
     config: ai.neopsyke.agent.config.AgentConfig,
@@ -2958,7 +2963,7 @@ private fun buildHierarchicalPlanner(
     onPlannerNoop: () -> Unit = {},
     onPlannerOutputRepaired: () -> Unit = {},
     laneModelClientResolver: ((LaneId, ai.neopsyke.agent.ego.planner.ResolvedLaneConfig) -> ai.neopsyke.llm.ChatModelClient?)? = null,
-): Ego.Planner {
+): PlannerAssembly {
     val runtime = PlannerRuntime(
         defaultModelClient = plannerClient,
         config = config,
@@ -2992,7 +2997,13 @@ private fun buildHierarchicalPlanner(
     val durableWorkLanePlannerLane = DurableWorkLanePlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
 
-    return HierarchicalEgoPlanner(
+    val planRefiner: ai.neopsyke.agent.ego.planner.PlanRefiner = if (config.planner.planRefinementEnabled) {
+        ai.neopsyke.agent.ego.planner.LlmPlanRefiner(runtime, instrumentation)
+    } else {
+        ai.neopsyke.agent.ego.planner.NoopPlanRefiner()
+    }
+
+    val planner = HierarchicalEgoPlanner(
         runtime = runtime,
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
@@ -3000,4 +3011,6 @@ private fun buildHierarchicalPlanner(
         durableWorkLanePlanner = durableWorkLanePlannerLane,
         impulsePlanner = impulsePlannerLane,
     )
+
+    return PlannerAssembly(planner = planner, planRefiner = planRefiner)
 }

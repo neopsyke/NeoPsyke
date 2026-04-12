@@ -12,6 +12,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
+import ai.neopsyke.agent.model.ApprovalContextEntry
 import ai.neopsyke.agent.ego.planner.model.DurableWorkCommand
 import ai.neopsyke.agent.ego.planner.model.WorkItemReference
 import ai.neopsyke.agent.ego.planner.model.SerializedDurableWorkCommand
@@ -86,6 +87,28 @@ class DurableWorkOperationActionPlugin(
         return mapper.writeValueAsString(SerializedDurableWorkCommand.fromDurableWorkCommand(command))
     }
 
+    override fun buildApprovalContext(payload: String): List<ApprovalContextEntry> {
+        val command = parseDurableWorkCommand(payload) ?: return emptyList()
+        return when (command) {
+            is DurableWorkCommand.Create -> buildPlanContextEntries(command.planSteps)
+            else -> emptyList()
+        }
+    }
+
+    private fun buildPlanContextEntries(
+        steps: kotlin.collections.List<ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload>?,
+    ): List<ApprovalContextEntry> {
+        if (steps.isNullOrEmpty()) return emptyList()
+        val content = steps.mapIndexed { i, step ->
+            val desc = step.description
+            val acc = step.acceptanceCriteria?.takeIf { a -> a.isNotBlank() }?.let { a -> " (acceptance: $a)" } ?: ""
+            val req = if (step.requires.isNotEmpty()) " (requires: ${step.requires.joinToString(",")})" else ""
+            val prod = if (step.produces.isNotEmpty()) " (produces: ${step.produces.joinToString(",")})" else ""
+            "${i + 1}. $desc$acc$req$prod"
+        }.joinToString("\n")
+        return listOf(ApprovalContextEntry(label = "Plan", content = content))
+    }
+
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
         val command = parseDurableWorkCommand(action.payload)
             ?: return ActionOutcome(
@@ -121,6 +144,7 @@ class DurableWorkOperationActionPlugin(
                 completionCriteria = command.completionCriteria,
                 cronExpression = command.cronExpression,
                 contactChannel = command.contactChannel,
+                planSteps = command.planSteps,
             )
             is DurableWorkCommand.List -> DurableWorkOperationRequest(operation = DurableWorkOperation.LIST)
             is DurableWorkCommand.Status -> DurableWorkOperationRequest(
@@ -158,6 +182,7 @@ class DurableWorkOperationActionPlugin(
                 operation = DurableWorkOperation.REVISE_PLAN,
                 workItemId = resolvedWorkItemId(command.reference) ?: return null,
                 reason = command.reason,
+                planSteps = command.planSteps,
             )
             is DurableWorkCommand.Reprioritize -> DurableWorkOperationRequest(
                 operation = DurableWorkOperation.REPRIORITIZE,

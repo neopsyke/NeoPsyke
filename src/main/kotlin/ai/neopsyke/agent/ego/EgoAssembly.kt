@@ -22,6 +22,8 @@ import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
 import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
+import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 import ai.neopsyke.instrumentation.AgentInstrumentation
@@ -60,9 +62,14 @@ object EgoAssembler {
             runId = runId,
         )
 
+    data class PlannerBuildResult(
+        val planner: Ego.Planner,
+        val planRefiner: PlanRefiner = NoopPlanRefiner(),
+    )
+
     fun assemble(
         config: AgentConfig,
-        plannerFactory: (MotorCortex) -> Ego.Planner,
+        plannerFactory: (MotorCortex) -> PlannerBuildResult,
         superegoFactory: (ActionRegistry) -> Superego,
         sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
         instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
@@ -105,8 +112,9 @@ object EgoAssembler {
         )
         val motorCortex = MotorCortex(actionRegistry = actionRegistry)
         val actionControlService = actionControlServiceFactory(motorCortex)
+        val plannerBuild = plannerFactory(motorCortex)
         val ego = Ego(
-            planner = plannerFactory(motorCortex),
+            planner = plannerBuild.planner,
             superego = superegoFactory(actionRegistry),
             motorCortex = motorCortex,
             config = config,
@@ -120,6 +128,7 @@ object EgoAssembler {
             goalRegistry = durableWorkGateway,
             durableWorkGateway = durableWorkGateway,
             evidenceArtifactStore = evidenceArtifactStore,
+            planRefiner = plannerBuild.planRefiner,
         )
         return EgoAssembly(
             ego = ego,

@@ -183,10 +183,15 @@ class ApprovalRuntime(
             return OwnerIngressResult.Consumed("Stale approval reply ignored.")
         }
         val replayedClassification = replayedClassification(request, message)
+        val approvalContextText = actionControlService.stagedAction(request.stagedActionId)
+            ?.approvalContext
+            ?.joinToString("\n") { "${it.label}: ${it.content}" }
+            .orEmpty()
         val classification = replayedClassification ?: interpreter.classify(
             ApprovalInterpreterInput(
                 reply = message.content,
                 canonicalSummary = request.canonicalSummary,
+                approvalContextText = approvalContextText,
                 sessionId = message.conversationContext.sessionId,
                 rootInputId = request.rootInputId,
             )
@@ -630,6 +635,11 @@ class ApprovalRuntime(
             appendLine("Action: ${stagedAction.actionType.id}")
             appendLine("Summary: ${request.summary}")
             appendLine("Reason: ${request.reason}")
+            stagedAction.approvalContext.forEach { entry ->
+                appendLine()
+                appendLine("${entry.label}:")
+                appendLine(entry.content.take(APPROVAL_CONTEXT_MAX_CHARS))
+            }
             appendLine("Approval ref: ${promptReference(request)}")
             append(bindingInstruction(request))
         }
@@ -863,6 +873,7 @@ class ApprovalRuntime(
         )
         val MUTABLE_REQUEST_STATUSES = LIVE_REQUEST_STATUSES + ApprovalRequestStatus.QUEUED
         const val UNROUTED_PROVIDER: String = "unrouted"
+        const val APPROVAL_CONTEXT_MAX_CHARS: Int = 2_000
         const val DUPLICATE_TERMINAL_REPLY_WINDOW_MS: Long = 60_000
         const val PROMPT_REFERENCE_CHARS: Int = 8
         val APPROVAL_REF_REGEX: Regex = Regex("""(?:approval\s*ref|ref)\s*[:#]?\s*([a-z0-9]{8})""")

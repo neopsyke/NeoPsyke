@@ -1,6 +1,24 @@
 package ai.neopsyke.agent.ego.planner.model
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import ai.neopsyke.agent.durablework.WorkItemPriority
+
+/**
+ * Shared step payload for durable-work plans, carried in Create and RevisePlan.
+ * Preserves the existing runtime step semantics.
+ */
+data class DurableWorkPlanStepPayload(
+    val id: String? = null,
+    val description: String,
+    @param:JsonProperty("acceptance_criteria")
+    val acceptanceCriteria: String? = null,
+    @param:JsonProperty("grounding_requirement")
+    val groundingRequirement: String? = null,
+    val requires: Set<String> = emptySet(),
+    val produces: Set<String> = emptySet(),
+    @param:JsonProperty("max_attempts")
+    val maxAttempts: Int? = null,
+)
 
 /**
  * Typed goal command sealed hierarchy. Produced by GoalPlanner; consumed by
@@ -15,6 +33,7 @@ sealed interface DurableWorkCommand {
         val completionCriteria: String = "",
         val cronExpression: String? = null,
         val contactChannel: String? = null,
+        val planSteps: kotlin.collections.List<DurableWorkPlanStepPayload>? = null,
     ) : DurableWorkCommand
 
     data object List : DurableWorkCommand
@@ -44,6 +63,7 @@ sealed interface DurableWorkCommand {
     data class RevisePlan(
         val reference: WorkItemReference,
         val reason: String? = null,
+        val planSteps: kotlin.collections.List<DurableWorkPlanStepPayload>? = null,
     ) : DurableWorkCommand
 
     data class Reprioritize(
