@@ -788,11 +788,13 @@ internal class DecisionDispatcher(
     }
 
     private fun buildInlineRuntimeFacts(plannerContext: PlannerContext?): Map<String, String> {
-        val now = java.time.ZonedDateTime.now()
+        // Runtime fact keys tell the refiner which facts the executor already has,
+        // so it can prune redundant steps. The actual values are volatile (date/time)
+        // and irrelevant for plan structure validation.
         val facts = linkedMapOf(
-            "date" to now.toLocalDate().toString(),
-            "time" to now.toLocalTime().toString().take(RUNTIME_FACT_TIME_CHARS),
-            "timezone" to now.zone.id,
+            "date" to "available at execution time",
+            "time" to "available at execution time",
+            "timezone" to "available at execution time",
         )
         plannerContext?.opportunityKind?.let { facts["opportunity_kind"] = it.name.lowercase() }
         plannerContext?.conversationContext?.sessionId
@@ -804,6 +806,5 @@ internal class DecisionDispatcher(
     private companion object {
         const val PLAN_ID_LENGTH: Int = 8
         const val REDUNDANCY_SIGNAL_MIN_HITS: Int = 2
-        const val RUNTIME_FACT_TIME_CHARS: Int = 5
     }
 }

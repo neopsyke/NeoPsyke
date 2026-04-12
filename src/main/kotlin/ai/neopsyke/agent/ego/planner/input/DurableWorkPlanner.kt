@@ -34,6 +34,9 @@ import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
+import mu.KotlinLogging
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * L2 sub-planner: unified goal planner handling both creation and management.
@@ -192,6 +195,10 @@ class WorkPlanBuilder(
     private fun handleCreate(payload: GoalPayload, context: PlannerContext): EgoDecision {
         val title = payload.title?.trim().orEmpty()
         val instruction = payload.instruction?.trim().orEmpty()
+        logger.debug {
+            "handleCreate: title='${title.take(60)}' instruction='${instruction.take(80)}' " +
+                "cron=${payload.cronExpression} raw_plan_steps=${payload.planSteps?.size ?: 0}"
+        }
 
         if (instruction.isBlank()) {
             if (payload.assistantResponse?.isNotBlank() == true) {
@@ -265,6 +272,9 @@ class WorkPlanBuilder(
         context: PlannerContext,
     ): EgoDecision {
         val ref = resolveWorkItemReference(payload.workItemReference, context.goalIndex)
+        logger.debug {
+            "handleManagement: operation=$operation reference_type=${ref.javaClass.simpleName}"
+        }
 
         if (ref is WorkItemReference.Ambiguous) {
             return contactUser(
@@ -505,12 +515,7 @@ class WorkPlanBuilder(
             ActionSummary(actionType = actionType.id, description = actionType.id)
         }
 
-        val now = java.time.ZonedDateTime.now()
-        val runtimeFacts = mapOf(
-            "date" to now.toLocalDate().toString(),
-            "time" to now.toLocalTime().toString().take(5),
-            "timezone" to now.zone.id,
-        )
+        val runtimeFacts = RUNTIME_FACT_KEYS
 
         val request = PlanRefinementRequest(
             planKind = planKind,
@@ -635,6 +640,15 @@ class WorkPlanBuilder(
         const val GOAL_INSTRUCTION_MAX_CHARS: Int = 400
         const val GOAL_COMPLETION_CRITERIA_MAX_CHARS: Int = 200
         const val DEFAULT_COMPLETION_CRITERIA: String = "User confirms the goal is met."
+
+        /** Runtime fact keys available to the executor. The refiner needs to know
+         *  which facts exist (for non-redundancy checks) but not their volatile
+         *  values, which change between runs and break cache hashing. */
+        val RUNTIME_FACT_KEYS: Map<String, String> = mapOf(
+            "date" to "available at execution time",
+            "time" to "available at execution time",
+            "timezone" to "available at execution time",
+        )
 
         val GOAL_RESPONSE_FORMAT = ChatResponseFormat.JsonSchema(
             name = "durable_work_operation",

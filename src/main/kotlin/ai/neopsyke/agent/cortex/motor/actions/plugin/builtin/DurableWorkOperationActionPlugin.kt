@@ -26,6 +26,9 @@ import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
+import mu.KotlinLogging
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * Goal operation action plugin.
@@ -89,10 +92,15 @@ class DurableWorkOperationActionPlugin(
 
     override fun buildApprovalContext(payload: String): List<ApprovalContextEntry> {
         val command = parseDurableWorkCommand(payload) ?: return emptyList()
-        return when (command) {
+        val entries = when (command) {
             is DurableWorkCommand.Create -> buildPlanContextEntries(command.planSteps)
             else -> emptyList()
         }
+        logger.debug {
+            "Approval context built: command=${command.operationName} entries=${entries.size}" +
+                if (command is DurableWorkCommand.Create) " plan_steps=${command.planSteps?.size ?: 0}" else ""
+        }
+        return entries
     }
 
     private fun buildPlanContextEntries(

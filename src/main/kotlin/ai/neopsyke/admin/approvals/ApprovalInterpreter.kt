@@ -37,9 +37,19 @@ class DefaultApprovalInterpreter(
         // This makes audit/replay stable and prevents raw planner text from becoming
         // hidden interpreter input later.
         deterministic(canonical.reply, canonical.replyWithTerminalPunctuation)?.let {
-            return ApprovalClassification(it, usedModelAssistance = false)
+            val result = ApprovalClassification(it, usedModelAssistance = false)
+            logger.debug {
+                "Approval classified: kind=${result.kind.name.lowercase()} model_assisted=false " +
+                    "reply='${ai.neopsyke.agent.support.TextSecurity.preview(input.reply, 80)}'"
+            }
+            return result
         }
-        return llmFallback(canonical)
+        val result = llmFallback(canonical)
+        logger.debug {
+            "Approval classified: kind=${result.kind.name.lowercase()} model_assisted=${result.usedModelAssistance} " +
+                "reply='${ai.neopsyke.agent.support.TextSecurity.preview(input.reply, 80)}'"
+        }
+        return result
     }
 
     private fun deterministic(

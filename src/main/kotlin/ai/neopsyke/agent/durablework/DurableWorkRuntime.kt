@@ -801,14 +801,14 @@ class DurableWorkRuntime(
         val normalized = planSteps.mapIndexed { i, step ->
             val description = step.description.trim()
             if (description.isBlank()) {
-                logger.warn { "Plan step validation failed: blank description at index=$i" }
+                logger.warn { "Plan step validation failed: check=blank_description index=$i" }
                 return null
             }
 
             val baseId = step.id?.trim()?.ifBlank { null } ?: "step-${i + 1}"
             val uniqueId = normalizeUniqueStepId(baseId, normalizedIds)
             val groundingRequirement = parseGroundingRequirementStrict(step.groundingRequirement) ?: run {
-                logger.warn { "Plan step validation failed: invalid grounding_requirement='${step.groundingRequirement}' id='$baseId'" }
+                logger.warn { "Plan step validation failed: check=invalid_grounding grounding_requirement='${step.groundingRequirement}' id='$baseId'" }
                 return null
             }
 
@@ -838,12 +838,12 @@ class DurableWorkRuntime(
                 .map { req -> "${step.id}:$req" }
         }
         if (missingRequires.isNotEmpty()) {
-            logger.warn { "Plan step validation failed: missing requires references=$missingRequires" }
+            logger.warn { "Plan step validation failed: check=missing_requires references=$missingRequires" }
             return null
         }
 
         if (hasDependencyCycle(normalized)) {
-            logger.warn { "Plan step validation failed: dependency cycle detected." }
+            logger.warn { "Plan step validation failed: check=dependency_cycle" }
             return null
         }
 
@@ -858,6 +858,9 @@ class DurableWorkRuntime(
                 maxAttempts = step.maxAttempts,
                 groundingRequirement = step.groundingRequirement,
             )
+        }
+        logger.debug {
+            "Plan payload validated: step_count=${steps.size} step_ids=${steps.map { it.id }}"
         }
         return WorkItemPlan(steps = steps, generatedAt = java.time.Instant.now())
     }

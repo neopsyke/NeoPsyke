@@ -1299,6 +1299,237 @@ class DurableWorkRuntimeTest {
         return (cronField.get(timer) as ConcurrentHashMap<String, String>).toMap()
     }
 
+    // ── Plan validation boundary checks ──
+
+    @Test
+    fun `createWorkItem rejects plan with dependency cycle`() {
+        val root = Files.createTempDirectory("psyke-pm-cycle")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Cyclic plan",
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "a",
+                        description = "Step A",
+                        requires = setOf("b-out"),
+                        produces = setOf("a-out"),
+                    ),
+                    DurableWorkPlanStepPayload(
+                        id = "b",
+                        description = "Step B",
+                        requires = setOf("a-out"),
+                        produces = setOf("b-out"),
+                    ),
+                ),
+            )
+
+            assertEquals("", id, "Cyclic dependency graph should be rejected")
+            assertTrue(manager.allWorkItems().isEmpty())
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `createWorkItem rejects plan with invalid grounding requirement`() {
+        val root = Files.createTempDirectory("psyke-pm-grounding")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Bad grounding",
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "step-1",
+                        description = "Step with invalid grounding",
+                        groundingRequirement = "maybe",
+                    ),
+                ),
+            )
+
+            assertEquals("", id, "Invalid grounding_requirement should be rejected")
+            assertTrue(manager.allWorkItems().isEmpty())
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `createWorkItem coerces maxAttempts bounds`() {
+        val root = Files.createTempDirectory("psyke-pm-attempts")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Coerced attempts",
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "low",
+                        description = "Step with zero attempts",
+                        maxAttempts = 0,
+                        produces = setOf("low-out"),
+                    ),
+                    DurableWorkPlanStepPayload(
+                        id = "high",
+                        description = "Step with excessive attempts",
+                        maxAttempts = 999,
+                        requires = setOf("low-out"),
+                    ),
+                ),
+            )
+
+            assertTrue(id.isNotBlank(), "Plan with coercible maxAttempts should be accepted")
+            val state = manager.workItemStatus(id)
+            assertNotNull(state)
+            val steps = state!!.workItem.plan.steps
+            assertEquals(1, steps[0].maxAttempts, "maxAttempts=0 should be coerced to 1")
+            assertEquals(10, steps[1].maxAttempts, "maxAttempts=999 should be coerced to MAX_STEP_ATTEMPTS(10)")
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `createWorkItem normalizes duplicate step ids`() {
+        val root = Files.createTempDirectory("psyke-pm-dup-ids")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Duplicate ids",
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "fetch",
+                        description = "First fetch",
+                        produces = setOf("data-1"),
+                    ),
+                    DurableWorkPlanStepPayload(
+                        id = "fetch",
+                        description = "Second fetch",
+                        requires = setOf("data-1"),
+                    ),
+                ),
+            )
+
+            assertTrue(id.isNotBlank(), "Duplicate step ids should be normalized, not rejected")
+            val state = manager.workItemStatus(id)
+            assertNotNull(state)
+            val ids = state!!.workItem.plan.steps.map { it.id }
+            assertEquals(2, ids.toSet().size, "Normalized step ids must be unique: $ids")
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `revise_plan happy path applies pre-built plan`() {
+        val root = Files.createTempDirectory("psyke-pm-revise-happy")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Task to revise",
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "old-step",
+                        description = "Old approach",
+                    ),
+                ),
+            )
+            assertTrue(id.isNotBlank())
+
+            val result = manager.executeOperation(
+                DurableWorkOperationRequest(
+                    operation = DurableWorkOperation.REVISE_PLAN,
+                    workItemId = id,
+                    reason = "Better approach found",
+                    planSteps = listOf(
+                        DurableWorkPlanStepPayload(
+                            id = "new-step-1",
+                            description = "Search for data",
+                            produces = setOf("data"),
+                        ),
+                        DurableWorkPlanStepPayload(
+                            id = "new-step-2",
+                            description = "Deliver to user",
+                            requires = setOf("data"),
+                        ),
+                    ),
+                )
+            )
+
+            assertTrue(result.success, "Revise with valid plan should succeed: ${result.message}")
+            val state = manager.workItemStatus(id)
+            assertNotNull(state)
+            assertEquals(2, state!!.workItem.plan.steps.size, "Plan should have 2 new steps")
+            assertTrue(state.workItem.plan.steps.any { it.description == "Search for data" })
+            assertTrue(state.workItem.plan.steps.any { it.description == "Deliver to user" })
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `createWorkItem rejects plan with blank description`() {
+        val root = Files.createTempDirectory("psyke-pm-blank-desc")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(allowRuntimePlanFallback = false),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Blank step description",
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "step-1",
+                        description = "   ",
+                    ),
+                ),
+            )
+
+            assertEquals("", id, "Blank description should be rejected")
+            assertTrue(manager.allWorkItems().isEmpty())
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     private class StubAsyncOperationProvider : AsyncOperationProvider {
         override val providerType: String = "test_async"
         private val statusesByOperation = ConcurrentHashMap<String, ArrayDeque<AsyncOperationStatus>>()

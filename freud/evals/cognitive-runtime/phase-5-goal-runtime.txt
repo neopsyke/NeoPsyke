@@ -1,5 +1,0 @@
-Set up a small recurring goal for me:
-
-"Every weekday morning, remind me to review open blockers before starting implementation."
-
-Explain the goal in one short paragraph and include what should happen if the reminder has to wait and resume later.

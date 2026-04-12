@@ -2177,9 +2177,9 @@ class EgoAgentTest {
         val request = captured.first()
         assertTrue(request.availableActions.isNotEmpty(), "Refiner should receive non-empty available actions.")
         assertTrue(request.availableActions.any { it.actionType == "contact_user" })
-        assertTrue(request.runtimeFacts["date"].orEmpty().isNotBlank())
-        assertTrue(request.runtimeFacts["time"].orEmpty().isNotBlank())
-        assertTrue(request.runtimeFacts["timezone"].orEmpty().isNotBlank())
+        assertTrue(request.runtimeFacts.containsKey("date"), "Refiner should receive date runtime fact key.")
+        assertTrue(request.runtimeFacts.containsKey("time"), "Refiner should receive time runtime fact key.")
+        assertTrue(request.runtimeFacts.containsKey("timezone"), "Refiner should receive timezone runtime fact key.")
     }
 
     private fun runAgentWithInput(agent: Ego, stdinContent: String) {

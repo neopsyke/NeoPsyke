@@ -184,12 +184,19 @@ class LlmPlanRefiner(
             else -> PlanRefinementMode.LLM_REWRITTEN
         }
 
-        return PlanRefinementResult(
+        val result = PlanRefinementResult(
             steps = refinedSteps,
             droppedSteps = droppedSteps,
             refinementMode = mode,
             reason = parsed.reason?.trim().orEmpty(),
         )
+        logger.debug {
+            "Plan refinement completed: plan_kind=${request.planKind.name.lowercase()} " +
+                "mode=${mode.name.lowercase()} " +
+                "original_steps=${request.steps.size} refined_steps=${refinedSteps.size} " +
+                "dropped_steps=${droppedSteps.size} reason='${result.reason}'"
+        }
+        return result
     }
 
     private fun buildSystemPrompt(request: PlanRefinementRequest): String = buildString {

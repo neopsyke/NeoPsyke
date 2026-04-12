@@ -167,4 +167,71 @@ class ApprovalInterpreterTest {
         assertEquals(ApprovalClassificationKind.UNCLEAR, result.kind)
         assertTrue(result.usedModelAssistance)
     }
+
+    // ── Plan-edit classification tests ──
+
+    @Test
+    fun `plan edit reply classifies as deny_and_reissue via model`() {
+        val client = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"deny_and_reissue"}""")
+        }
+        val interpreter = DefaultApprovalInterpreter(AgentConfig(), client)
+
+        val result = interpreter.classify(
+            ApprovalInterpreterInput(
+                reply = "combine the first two steps",
+                canonicalSummary = "action: durable_work_operation",
+                approvalContextText = "Plan:\n1. Search weather data\n2. Format summary\n3. Send to user",
+                sessionId = "chat-1",
+                rootInputId = "root-1",
+            )
+        )
+
+        assertEquals(ApprovalClassificationKind.DENY_AND_REISSUE, result.kind)
+        assertTrue(result.usedModelAssistance)
+    }
+
+    @Test
+    fun `mixed approve-but-modify classifies as deny_and_reissue deterministically`() {
+        val interpreter = DefaultApprovalInterpreter(AgentConfig())
+
+        val result = interpreter.classify(
+            ApprovalInterpreterInput(
+                reply = "approve, but remove step 3",
+                canonicalSummary = "action: durable_work_operation",
+                approvalContextText = "Plan:\n1. Search data\n2. Summarize\n3. Archive",
+                sessionId = "chat-1",
+                rootInputId = "root-1",
+            )
+        )
+
+        assertEquals(ApprovalClassificationKind.DENY_AND_REISSUE, result.kind)
+        assertFalse(result.usedModelAssistance, "approve-but pattern is caught by deterministic conditional modifier check")
+    }
+
+    @Test
+    fun `approval context text is included in LLM prompt`() {
+        val client = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"approve"}""")
+        }
+        val interpreter = DefaultApprovalInterpreter(AgentConfig(), client)
+
+        val planContext = "Plan:\n1. Fetch weather\n2. Send summary"
+        interpreter.classify(
+            ApprovalInterpreterInput(
+                reply = "looks good, go ahead",
+                canonicalSummary = "action: durable_work_operation",
+                approvalContextText = planContext,
+                sessionId = "chat-1",
+                rootInputId = "root-1",
+            )
+        )
+
+        assertTrue(client.calls.isNotEmpty())
+        val userMessage = client.lastMessages.last().content
+        assertTrue(
+            userMessage.contains("Fetch weather"),
+            "Approval context should be included in the LLM user prompt",
+        )
+    }
 }

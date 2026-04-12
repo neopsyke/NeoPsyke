@@ -21,6 +21,9 @@ pipeline:
     cmd: "./gradlew test"
   - name: scenario_pack                 # built-in: runs scenario manifest
   - name: reasoning_eval_logic          # built-in: deterministic reasoning gate
+  - name: live_eval_pack
+    cmd: "./freud/scripts/run-live-evals.sh"
+    live_only: true
   - name: reasoning_eval_model          # built-in: live BBH smoke suite
     live_only: true
   - name: memory_live_smoke
