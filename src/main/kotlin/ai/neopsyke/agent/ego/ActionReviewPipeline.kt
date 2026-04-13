@@ -956,6 +956,12 @@ internal class ActionReviewPipeline(
         convCtx: ConversationContext,
     ) {
         if (resolvedAction.type == ActionType.CONTACT_USER) return
+        // Durable work step progression is owned by the DurableWorkRuntime via
+        // ActionLifecycleObserver, not by planner feedback cues. Suppress feedback
+        // emission for actions originating from durable work steps so the planner
+        // does not receive a redundant signal that duplicates what the runtime
+        // already processed and re-delivers content the user already received.
+        if (resolvedAction.rootInputId?.startsWith("work:") == true) return
         val cue = ActionFeedbackCue(
             rootInputId = resolvedAction.rootInputId ?: return,
             actionType = resolvedAction.type,
