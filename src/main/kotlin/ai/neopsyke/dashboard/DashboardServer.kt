@@ -877,7 +877,7 @@ class DashboardServer(
             "recorded" to result.recorded,
             "enqueued" to result.enqueued,
             "detail" to result.detail,
-            "message" to result.message?.let(store::chatMessagePayload),
+            "message" to result.message?.let { store.chatMessagePayload(it) },
         )
         respondText(exchange, 202, mapper.writeValueAsString(payload), "application/json; charset=utf-8")
     }
@@ -1567,7 +1567,7 @@ class DashboardServer(
 
     private fun maybeAppendDashboardApprovalMessage(result: ActionControlDecisionResult.Executed) {
         val sessionId = result.stagedAction.rootInputId
-            ?.let(store::resolveSessionForRootInput)
+            ?.let { store.resolveSessionForRootInput(it) }
             ?: result.stagedAction.conversationContext.sessionId
         if (sessionId.isBlank()) {
             return

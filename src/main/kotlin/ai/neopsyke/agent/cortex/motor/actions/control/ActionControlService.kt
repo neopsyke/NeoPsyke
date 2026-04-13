@@ -377,7 +377,7 @@ class DefaultActionControlService(
         // `threadSequence` ordering is enforced after the staged row exists. If staging later becomes
         // highly concurrent for the same root input across threads/processes, allocation should be
         // tightened into a transactional staging path rather than relying on pre-insert sequence reads.
-        val threadSequence = action.rootInputId?.let(store::nextThreadSequence)
+        val threadSequence = action.rootInputId?.let { store.nextThreadSequence(it) }
         val approvalContext = actionRegistry.pluginFor(action.type)
             ?.buildApprovalContext(action.payload)
             .orEmpty()
@@ -608,7 +608,7 @@ class DefaultActionControlService(
         val prepared = prepare(action, conversationContext)
         // Bypass executions still reserve thread order for inspectability. The same future caveat
         // applies here: concurrent same-root staging would need transactional sequence assignment.
-        val threadSequence = action.rootInputId?.let(store::nextThreadSequence)
+        val threadSequence = action.rootInputId?.let { store.nextThreadSequence(it) }
         val staged = store.saveStagedAction(
             StagedAction(
                 id = nextId(),

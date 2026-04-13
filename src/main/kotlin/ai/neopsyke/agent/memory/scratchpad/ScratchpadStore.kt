@@ -197,7 +197,7 @@ class ScratchpadStore(
         )
         if (observedEvidence) {
             if (outcome.resultArtifacts.isNotEmpty()) {
-                outcome.resultArtifacts.forEach(workspace::addEvidence)
+                outcome.resultArtifacts.forEach { workspace.addEvidence(it) }
             } else {
                 workspace.addEvidence(
                     TextSecurity.preview(outcome.plannerSignal.ifBlank { outcome.statusSummary }, config.maxEvidenceChars)

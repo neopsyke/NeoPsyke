@@ -366,7 +366,7 @@ class AttentionScheduler(
             selected = next
             break
         }
-        deferred.forEach(opportunities::add)
+        deferred.forEach { opportunities.add(it) }
         return selected
     }
 
@@ -447,8 +447,8 @@ class AttentionScheduler(
             selected = next
             break
         }
-        selected?.let(queue::add)
-        deferred.forEach(queue::add)
+        selected?.let { queue.add(it) }
+        deferred.forEach { queue.add(it) }
         return selected
     }
 
@@ -469,7 +469,7 @@ class AttentionScheduler(
             selected = next
             break
         }
-        deferred.forEach(queue::add)
+        deferred.forEach { queue.add(it) }
         return selected
     }
 

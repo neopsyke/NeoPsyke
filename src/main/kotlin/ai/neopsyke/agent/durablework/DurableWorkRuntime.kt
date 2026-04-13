@@ -904,13 +904,13 @@ class DurableWorkRuntime(
             if (node in visiting) return true
             if (node in visited) return false
             visiting.add(node)
-            val hasCycle = graph[node].orEmpty().any(::dfs)
+            val hasCycle = graph[node].orEmpty().any { dfs(it) }
             visiting.remove(node)
             visited.add(node)
             return hasCycle
         }
 
-        return graph.keys.any(::dfs)
+        return graph.keys.any { dfs(it) }
     }
 
     private fun emitInvalidPlan(workItemId: String, path: String, reason: String) {
@@ -1116,7 +1116,7 @@ class DurableWorkRuntime(
                 val condition = step.waitCondition ?: return@forEach
                 when (condition.type) {
                     WaitConditionType.TIMER -> {
-                        val wakeAt = condition.timeoutAt ?: condition.params["wake_at"]?.let(Instant::parse)
+                        val wakeAt = condition.timeoutAt ?: condition.params["wake_at"]?.let { Instant.parse(it) }
                         if (wakeAt != null) {
                             timerScheduler?.register(state.id, wakeAt)
                         }

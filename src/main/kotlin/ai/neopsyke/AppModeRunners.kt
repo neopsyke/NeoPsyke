@@ -2769,7 +2769,7 @@ internal object AppModeRunners {
             }
             val snapshot = resources.toList().asReversed()
             resources.clear()
-            snapshot.forEach(::closeQuietly)
+            snapshot.forEach { closeQuietly(it) }
         }
     }
 

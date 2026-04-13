@@ -42,7 +42,7 @@ internal object ProviderErrorDetailsExtractor {
         regex.find(raw)
             ?.groupValues
             ?.getOrNull(1)
-            ?.let(::decodeJsonString)
+            ?.let { decodeJsonString(it) }
             ?.trim()
             ?.ifBlank { null }
 
