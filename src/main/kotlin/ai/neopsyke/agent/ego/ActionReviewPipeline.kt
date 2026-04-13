@@ -346,7 +346,6 @@ internal class ActionReviewPipeline(
             latestActionOutcome = outcome.plannerSignal,
             sessionId = sessionId
         )
-        maybeDeliverAssistantOutput(resolvedAction, outcome, convCtx)
         if (shouldCleanupSatisfiedIdImpulse(resolvedAction, outcome)) {
             cleanupSatisfiedIdImpulse(resolvedAction)
             instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
@@ -673,10 +672,16 @@ internal class ActionReviewPipeline(
         sessionId: String,
         convCtx: ConversationContext,
     ) {
-        val assistantOutput = outcome.assistantOutput ?: return
+        // Only CONTACT_USER actions represent messages delivered to the user.
+        // The action payload IS the message text.
+        if (resolvedAction.type != ActionType.CONTACT_USER) return
+        if (!outcome.successful) return
+        val content = resolvedAction.payload.trim()
+        if (content.isBlank()) return
+
         val assistantTurn = DialogueTurn(
             role = DialogueRole.ASSISTANT,
-            content = assistantOutput,
+            content = content,
             sessionId = sessionId,
             interlocutor = convCtx.interlocutor,
             timestamp = java.time.Instant.now()
@@ -684,10 +689,7 @@ internal class ActionReviewPipeline(
         dialogueFor(sessionId).addLast(assistantTurn)
         memory.remember(assistantTurn)
         trimDialogue(sessionId)
-        if (resolvedAction.type == ActionType.CONTACT_USER &&
-            resolvedAction.origin.source != OriginSource.ID &&
-            outcome.successful
-        ) {
+        if (resolvedAction.origin.source != OriginSource.ID) {
             getId()?.onActivity("contact_delivered")
         }
 
@@ -946,37 +948,6 @@ internal class ActionReviewPipeline(
     }
 
     // ── Follow-up ──
-
-    private fun maybeDeliverAssistantOutput(
-        resolvedAction: PendingAction,
-        outcome: ActionOutcome,
-        convCtx: ConversationContext,
-    ) {
-        val assistantOutput = outcome.assistantOutput?.trim().orEmpty()
-        if (assistantOutput.isBlank()) return
-        if (resolvedAction.type == ActionType.CONTACT_USER) return
-        if (resolvedAction.origin.source != OriginSource.USER) return
-        if (resolvedAction.requiresFollowUpThought) return
-        val queued = scheduler.enqueueAction(
-            type = ActionType.CONTACT_USER,
-            payload = assistantOutput,
-            summary = "Deliver action result to user",
-            urgency = resolvedAction.urgency,
-            rootInputId = resolvedAction.rootInputId,
-            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
-            conversationContext = convCtx,
-            origin = resolvedAction.origin,
-            groundingMetadata = resolvedAction.groundingMetadata,
-        )
-        if (!queued) {
-            instrumentation.emit(AgentEvents.warning("Failed to enqueue user-visible action result."))
-            telemetry.recordQueueSaturation(
-                queueType = "action",
-                capacity = config.maxPendingActions,
-                reason = "enqueue_user_visible_action_result_failed_full"
-            )
-        }
-    }
 
     private fun maybeEmitActionFeedback(
         resolvedAction: PendingAction,

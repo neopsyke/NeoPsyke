@@ -924,7 +924,7 @@ class AgentScenarioPackTest {
             val instrumentation = RecordingInstrumentation()
             val outputs = mutableListOf<String>()
             val config = AgentConfig(
-                planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 3),
+                planner = PlannerConfig(maxLoopStepsPerInput = 10, maxContinuationPasses = 5),
                 durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, allowRuntimePlanFallback = true),
             )
             manager = DurableWorkRuntime(
@@ -941,7 +941,7 @@ class AgentScenarioPackTest {
             )
             val superEgoLlm = StubChatModelClient().apply {
                 // Enqueue enough superego approvals for all action reviews
-                repeat(6) { enqueueRawResponse("""{"allow":true}""") }
+                repeat(10) { enqueueRawResponse("""{"allow":true}""") }
             }
             // Use a policy that allows autonomous commit for recurring goals so the bad cron
             // reaches DurableWorkRuntime.executeOperation() and triggers the feedback loop.
@@ -976,11 +976,9 @@ class AgentScenarioPackTest {
 
             runAgentWithInput(agent, "Create a goal to remind me every Monday at 9am about our standup.\nexit\n")
 
-            // The bad cron should have caused at least one execution failure output
-            assertTrue(outputs.any { it.contains("valid 5-field cron_expression", ignoreCase = true) },
-                "Expected cron validation error in outputs; got $outputs")
-
-            // A feedback-triggered planner call should have occurred after bad cron execution failure
+            // A feedback-triggered planner call should have occurred after bad cron execution failure.
+            // The feedback planner decides what to tell the user — the raw validation error flows
+            // through statusSummary/plannerSignal, not through a bypass delivery path.
             val feedbackPlannerCalls = instrumentation.events.filter {
                 it.type == "planner_start" && it.data["trigger"] == "feedback"
             }

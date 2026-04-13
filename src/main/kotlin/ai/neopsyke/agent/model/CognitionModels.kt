@@ -202,7 +202,6 @@ enum class ActionExecutionStatus {
 
 data class ActionOutcome(
     val statusSummary: String,
-    val assistantOutput: String? = null,
     val plannerSignal: String = statusSummary,
     val executionStatus: ActionExecutionStatus = ActionExecutionStatus.SUCCESS,
     val effects: Set<ActionEffect> = emptySet(),

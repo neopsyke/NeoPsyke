@@ -132,11 +132,6 @@ class DurableWorkOperationActionPlugin(
         val result = this.context.durableWorkGateway.executeOperation(request)
         return ActionOutcome(
             statusSummary = result.message,
-            // Only surface failure messages as assistantOutput. Success confirmations
-            // are handled by the feedback planner; duplicating them here causes the
-            // user to see the same message twice (once from auto-delivery, once from
-            // the feedback-driven contact_user).
-            assistantOutput = if (!result.success) result.message else null,
             executionStatus = if (result.success) ActionExecutionStatus.SUCCESS else ActionExecutionStatus.FAILED,
         )
     }
