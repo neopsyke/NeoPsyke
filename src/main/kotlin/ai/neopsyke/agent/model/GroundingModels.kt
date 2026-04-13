@@ -25,7 +25,7 @@ enum class GroundingSource {
     INPUT_CLASSIFIER,
 
     /** Typed policy on a goal step / activation. */
-    GOAL_STEP_POLICY,
+    DURABLE_WORK_STEP_POLICY,
 
     /** Inherited from an upstream envelope (continuation, feedback, etc.). */
     INHERITED,

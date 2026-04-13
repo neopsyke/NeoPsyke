@@ -26,8 +26,9 @@ The inputs intentionally target the architectural seams under migration:
 - `phase-2-opportunity-shaping.txt`
 - `phase-3-intentions.txt`
 - `phase-4-feedback-reentry.txt`
-- `phase-5-goal-runtime.txt`
 - `phase-6-policy-control.txt`
 - `phase-7-convergence.txt`
+
+Goal-runtime eval coverage has moved to `freud/evals/plan-refinement/`.
 
 The security architecture is documented in `docs/security.md`.

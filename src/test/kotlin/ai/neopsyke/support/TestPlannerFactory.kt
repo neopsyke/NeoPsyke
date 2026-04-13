@@ -6,11 +6,12 @@ import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
-import ai.neopsyke.agent.ego.planner.input.GoalPlanner
+import ai.neopsyke.agent.ego.planner.input.WorkPlanBuilder
+import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
-import ai.neopsyke.agent.ego.planner.lane.GoalWorkPlanner
+import ai.neopsyke.agent.ego.planner.lane.DurableWorkLanePlanner
 import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
 import ai.neopsyke.agent.ego.planner.lane.InputPlanner
 import ai.neopsyke.agent.ego.planner.lane.ProgressionPlanner
@@ -42,7 +43,7 @@ fun buildTestHierarchicalPlanner(
     val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
     val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
     val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
-    val goalPlanner = GoalPlanner(runtime, config, instrumentation)
+    val goalPlanner = WorkPlanBuilder(runtime, config, instrumentation, NoopPlanRefiner())
 
     val inputPlanner = InputPlanner(
         runtime = runtime,
@@ -57,7 +58,7 @@ fun buildTestHierarchicalPlanner(
     )
 
     val progressionPlanner = ProgressionPlanner(runtime, config, instrumentation)
-    val goalWorkPlannerLane = GoalWorkPlanner(runtime, config, instrumentation)
+    val durableWorkLanePlannerLane = DurableWorkLanePlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
 
     return HierarchicalEgoPlanner(
@@ -65,7 +66,7 @@ fun buildTestHierarchicalPlanner(
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
         progressionPlanner = progressionPlanner,
-        goalWorkPlanner = goalWorkPlannerLane,
+        durableWorkLanePlanner = durableWorkLanePlannerLane,
         impulsePlanner = impulsePlannerLane,
     )
 }

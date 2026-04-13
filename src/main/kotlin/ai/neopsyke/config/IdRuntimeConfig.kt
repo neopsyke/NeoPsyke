@@ -103,7 +103,7 @@ object IdRuntimeConfigLoader {
                     defaultNeed.responseCurve
                 },
                 satisfactionEffectsAnyOf = yamlNeed.satisfactionEffectsAnyOf
-                    ?.mapNotNull(ActionEffect::fromRaw)
+                    ?.mapNotNull { ActionEffect.fromRaw(it) }
                     ?.toSet()
                     ?.takeIf { it.isNotEmpty() }
                     ?: defaultNeed.satisfactionEffectsAnyOf,

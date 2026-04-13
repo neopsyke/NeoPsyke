@@ -42,7 +42,7 @@ class CognitivePolicyShaperTest {
             disabledActions = emptySet(),
         )
 
-        assertFalse(shaped.availableActions.contains(ActionType.GOAL_OPERATION))
+        assertFalse(shaped.availableActions.contains(ActionType.DURABLE_WORK_OPERATION))
         assertTrue(shaped.availableActions.contains(ActionType.WEB_SEARCH))
         assertEquals(
             setOf(CommitMode.NOT_APPLICABLE, CommitMode.APPROVAL_BACKED),
@@ -93,8 +93,8 @@ class CognitivePolicyShaperTest {
             disabledActions = emptySet(),
         )
 
-        val goalOperation = shaped.actionDefinitions.first { it.actionType == ActionType.GOAL_OPERATION }
-        assertTrue(shaped.availableActions.contains(ActionType.GOAL_OPERATION))
+        val goalOperation = shaped.actionDefinitions.first { it.actionType == ActionType.DURABLE_WORK_OPERATION }
+        assertTrue(shaped.availableActions.contains(ActionType.DURABLE_WORK_OPERATION))
         assertTrue(goalOperation.directCommitAllowed)
         assertTrue(goalOperation.supportsAutonomousCommit)
         assertEquals(
@@ -168,11 +168,11 @@ class CognitivePolicyShaperTest {
                 ),
             ),
             plannerActionSurface = plannerSurface,
-            implementedAvailableActions = setOf(ActionType.GOAL_OPERATION),
-            implementedDispatchableActions = setOf(ActionType.GOAL_OPERATION),
+            implementedAvailableActions = setOf(ActionType.DURABLE_WORK_OPERATION),
+            implementedDispatchableActions = setOf(ActionType.DURABLE_WORK_OPERATION),
         )
 
-        assertEquals(setOf(ActionType.GOAL_OPERATION), shaped.dispatchableActions)
+        assertEquals(setOf(ActionType.DURABLE_WORK_OPERATION), shaped.dispatchableActions)
         assertTrue(IntentionKind.PREPARE in shaped.allowedIntentions)
         assertTrue(IntentionKind.STAGE in shaped.allowedIntentions)
         assertTrue(IntentionKind.COMMIT in shaped.allowedIntentions)
@@ -201,7 +201,7 @@ class CognitivePolicyShaperTest {
                 supportsAutonomousCommit = true,
             ),
             ActionDescriptor(
-                actionType = ActionType.GOAL_OPERATION,
+                actionType = ActionType.DURABLE_WORK_OPERATION,
                 plannerDescription = "mutate goals",
                 payloadGuidance = "goal operation payload",
                 effectClass = ActionEffectClass.CONTROL_PLANE,

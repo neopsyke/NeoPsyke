@@ -119,7 +119,7 @@ internal class EgoTelemetry(
                     "update_type" to updateType,
                     "version" to snapshot.head.version,
                     "updated_at_ms" to snapshot.head.updatedAtMs,
-                    "goal" to snapshot.head.goal,
+                    "workItem" to snapshot.head.goal,
                     "section_count" to snapshot.head.sectionCount,
                     "evidence_count" to snapshot.head.evidenceCount,
                     "scratchpad_confidence" to snapshot.head.workspaceConfidence,

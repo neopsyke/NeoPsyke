@@ -148,6 +148,10 @@ func FeatureLoop(opts FeatureLoopOpts) (*FeatureLoopResult, error) {
 	if opts.GoalsEnabled != nil {
 		os.Setenv("NEOPSYKE_GOALS_ENABLED", fmt.Sprintf("%v", *opts.GoalsEnabled))
 	}
+	// Export lane name for shell cmd steps that invoke `freud eval --lane`.
+	if cfg.Lane != "" {
+		os.Setenv("FREUD_LANE", cfg.Lane)
+	}
 
 	trail.Emit("run_start", "", "", fmt.Sprintf("feature=%s mode=%s", featureID, mode), "", "", "")
 

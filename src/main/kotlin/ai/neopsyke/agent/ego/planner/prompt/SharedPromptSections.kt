@@ -57,7 +57,7 @@ object SharedPromptSections {
                 val planInfo = continuation.planContext?.let { ctx ->
                     """
                     Active plan context:
-                    plan_goal=${ctx.planGoal}
+                    plan_workItem=${ctx.planGoal}
                     step=${ctx.stepIndex + 1}/${ctx.totalSteps}
                     step_description=${ctx.stepDescription}
                     Re-evaluate this step in light of current context. You may refine, skip, or act.
@@ -89,10 +89,14 @@ object SharedPromptSections {
                     .filter { it.isNotBlank() }
                 parts.joinToString("\n")
             }
-            is EgoTrigger.GoalWork -> {
+            is EgoTrigger.DurableWork -> {
                 val wu = trigger.workUnit
                 buildString {
                     append("GOAL_WORK(goal=, step=${wu.stepId}): ${wu.stepDescription}")
+                    if (wu.runtimeFacts.isNotEmpty()) {
+                        append("\nruntime_facts=")
+                        append(wu.runtimeFacts.entries.joinToString(", ") { "${it.key}: ${it.value}" })
+                    }
                     if (wu.wakeReason.isNotBlank()) {
                         append("\nwake_reason=")
                         append(wu.wakeReason)
@@ -323,13 +327,13 @@ object SharedPromptSections {
             )
         }
 
-    fun activeGoalsSection(context: PlannerContext): PromptBudgetAllocator.Section? =
+    fun activeWorkItemsSection(context: PlannerContext): PromptBudgetAllocator.Section? =
         context.goalWorkSummary.takeIf { it.isNotBlank() }?.let {
             PromptBudgetAllocator.Section(
                 key = "planner_active_goals",
                 role = ChatRole.USER,
                 band = PromptBudgetAllocator.Band.OPTIONAL,
-                content = "Persistent goals (resolve references into typed goal_reference / goal_id fields for goal_operation):\n$it"
+                content = "Persistent goals (resolve references into typed goal_reference / goal_id fields for durable_work_operation):\n$it"
             )
         }
 

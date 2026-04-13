@@ -49,7 +49,6 @@ class ResolutionDraftActionPlugin : AgentActionPlugin {
         val preview = TextSecurity.preview(action.payload, 180)
         return ActionOutcome(
             statusSummary = "Internal resolution draft chunk captured.",
-            assistantOutput = null,
             plannerSignal = "resolution_draft chunk captured: $preview",
             executionStatus = ActionExecutionStatus.SUCCESS,
             effects = setOf(ActionEffect.TASK_PROGRESS),

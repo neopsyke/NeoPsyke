@@ -208,7 +208,7 @@ class DashboardStateStore(
                         action.type == ActionType.CONTACT_USER &&
                         action.rootInputId != null
                     ) {
-                        val rootInputId = action.rootInputId ?: return
+                        val rootInputId = action.rootInputId
                         val sessionId = rootInputSessionMap[rootInputId]
                         if (sessionId != null) {
                             addChatMessageLocked(
@@ -359,10 +359,10 @@ class DashboardStateStore(
             }
         }
         if (eventForBroadcast != null) {
-            enqueueTransport(TransportMessage.InstrumentationEvent(eventForBroadcast!!))
+            enqueueTransport(TransportMessage.InstrumentationEvent(eventForBroadcast))
         }
         if (actionControlPayload != null) {
-            enqueueTransport(TransportMessage.ActionControlEvent(actionControlPayload!!))
+            enqueueTransport(TransportMessage.ActionControlEvent(actionControlPayload))
         }
     }
 
@@ -516,7 +516,7 @@ class DashboardStateStore(
                         "version" to snapshot.version,
                         "updated_at_ms" to snapshot.updatedAtMs,
                         "update_type" to snapshot.updateType,
-                        "goal_preview" to snapshot.goal.take(SCRATCHPAD_GOAL_PREVIEW_CHARS),
+                        "goal_preview" to snapshot.workItem.take(SCRATCHPAD_GOAL_PREVIEW_CHARS),
                         "section_count" to snapshot.sectionCount,
                         "evidence_count" to snapshot.evidenceCount,
                         "scratchpad_confidence" to snapshot.scratchpadConfidence,
@@ -561,7 +561,7 @@ class DashboardStateStore(
                 "version" to record.version,
                 "updated_at_ms" to record.updatedAtMs,
                 "update_type" to record.updateType,
-                "goal" to record.goal,
+                "workItem" to record.workItem,
                 "section_count" to record.sectionCount,
                 "evidence_count" to record.evidenceCount,
                 "scratchpad_confidence" to record.scratchpadConfidence,
@@ -596,7 +596,7 @@ class DashboardStateStore(
             }
         }
         if (healthEventForBroadcast != null) {
-            enqueueTransport(TransportMessage.InstrumentationEvent(healthEventForBroadcast!!))
+            enqueueTransport(TransportMessage.InstrumentationEvent(healthEventForBroadcast))
         }
     }
 
@@ -1144,7 +1144,7 @@ class DashboardStateStore(
             conversationContext = current.thread.conversationContext,
             securityContext = current.thread.securityContext,
             rootStimulusId = rootInputId,
-            goalId = current.thread.goalId,
+            workItemId = current.thread.workItemId,
             goalRunId = current.thread.goalRunId,
             allowedIntentions = data["allowed_intentions"].asIntentionKindSet(),
             allowedCommitModes = data["allowed_commit_modes"].asCommitModeSet(),
@@ -1178,7 +1178,7 @@ class DashboardStateStore(
             conversationContext = current.thread.conversationContext,
             commitMode = current.latestIntention?.commitMode ?: ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
             rootStimulusId = data["root_input_id"].asString() ?: current.thread.rootStimulusId,
-            goalId = current.thread.goalId,
+            workItemId = current.thread.workItemId,
             goalRunId = current.thread.goalRunId,
             metadata = current.thread.metadata,
         )
@@ -1206,7 +1206,7 @@ class DashboardStateStore(
                 ?: current.latestIntention?.commitMode
                 ?: ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
             rootStimulusId = current.thread.rootStimulusId,
-            goalId = current.thread.goalId,
+            workItemId = current.thread.workItemId,
             goalRunId = current.thread.goalRunId,
             metadata = current.thread.metadata,
         )
@@ -1260,7 +1260,7 @@ class DashboardStateStore(
             version = version,
             updatedAtMs = updatedAtMs,
             updateType = data["update_type"]?.toString().orEmpty(),
-            goal = data["goal"]?.toString().orEmpty(),
+            workItem = data["workItem"]?.toString().orEmpty(),
             sectionCount = data["section_count"].asInt(),
             evidenceCount = data["evidence_count"].asInt(),
             scratchpadConfidence = data["scratchpad_confidence"].asDouble(),
@@ -1303,7 +1303,7 @@ class DashboardStateStore(
                 version = version,
                 updatedAtMs = updatedAtMs,
                 updateType = data["update_type"]?.toString().orEmpty(),
-                goal = data["goal_preview"]?.toString().orEmpty(),
+                workItem = data["goal_preview"]?.toString().orEmpty(),
                 sectionCount = data["section_count"].asInt(),
                 evidenceCount = data["evidence_count"].asInt(),
                 scratchpadConfidence = data["scratchpad_confidence"].asDouble(),
@@ -1411,7 +1411,7 @@ class DashboardStateStore(
         val version: Long,
         val updatedAtMs: Long,
         val updateType: String,
-        val goal: String,
+        val workItem: String,
         val sectionCount: Int,
         val evidenceCount: Int,
         val scratchpadConfidence: Double,
@@ -1442,7 +1442,7 @@ class DashboardStateStore(
         const val DEFAULT_THREAD_SNAPSHOT_LIMIT: Int = 100
         const val MAX_LIVE_THREAD_SNAPSHOTS: Int = 256
         const val MAX_TERMINAL_THREAD_SNAPSHOTS: Int = 512
-        val PLANNER_CALL_SITES: Set<String> = setOf("input", "continuation", "feedback", "goal_work", "impulse")
+        val PLANNER_CALL_SITES: Set<String> = setOf("input", "continuation", "feedback", "durable_work", "impulse")
         val ACTION_CONTROL_STREAM_EVENT_TYPES: Set<String> = setOf(
             "action_staged",
             "action_executed",

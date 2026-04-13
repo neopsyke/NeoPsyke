@@ -482,6 +482,18 @@ pattern `config.<domain>.<field>` (e.g. `config.planner.llmRetryAttempts`).
 - Use existing abstractions (`SensoryCortex`, `MotorCortex`, `SuperegoGatekeeper`, instrumentation hooks) instead of duplicating logic.
 - Keep logging and metrics instrumentation consistent with existing patterns.
 
+### Inline Scope Functions: Lambdas, Not Method References
+When calling inline scope functions (`also`, `let`, `apply`, `run`, `with`),
+use lambdas instead of method references. Only lambdas get inlined at the
+call site; method references create a wrapper object that defeats inlining
+and can trigger Kotlin compiler OOM bugs.
+
+- Correct: `ByteArray(12).also { secureRandom.nextBytes(it) }`
+- Wrong: `ByteArray(12).also(secureRandom::nextBytes)`
+
+Method references are fine when passed as stored parameters (constructor args,
+fields) or to non-inline higher-order functions.
+
 ### Zero Compiler Warnings Policy
 The build must produce **zero** Kotlin compiler warnings. Before opening a PR,
 run `./gradlew compileKotlin compileTestKotlin` and verify no `w:` lines appear.

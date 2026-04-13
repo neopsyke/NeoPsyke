@@ -309,7 +309,7 @@ class ApprovalDashboardChannelTest {
             sessionId = "goal-session", interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
         // Dashboard requires live subscriber — it is deliverable but not live
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(dashboardRequiresLiveSubscriber = true))
         withRuntime(staged, config = config) { runtime, store, _, _ ->
@@ -334,7 +334,7 @@ class ApprovalDashboardChannelTest {
             sessionId = "goal-session", interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
         // Dashboard requires live subscriber; channel priority prefers dashboard
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(
             dashboardRequiresLiveSubscriber = true,

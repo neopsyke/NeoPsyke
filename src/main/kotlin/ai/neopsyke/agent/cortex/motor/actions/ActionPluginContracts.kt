@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.cortex.motor.actions
 
 import ai.neopsyke.agent.cortex.motor.actions.websearch.WebSearchActionHandler
+import ai.neopsyke.agent.model.ApprovalContextEntry
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionType
@@ -12,8 +13,8 @@ import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
-import ai.neopsyke.agent.goal.NoopGoalsGateway
-import ai.neopsyke.agent.goal.GoalsGateway
+import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
+import ai.neopsyke.agent.durablework.DurableWorkGateway
 import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 
 /**
@@ -147,7 +148,7 @@ data class ActionPluginFactoryContext(
     val connectorRuntime: ConnectorRuntimeBoundary = ConnectorRuntimeBoundary.firstPartyBuiltin(),
     val evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
-    val goalsGateway: GoalsGateway = NoopGoalsGateway,
+    val durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
 )
 
 interface AgentActionPlugin : AutoCloseable {
@@ -165,6 +166,8 @@ interface AgentActionPlugin : AutoCloseable {
     ): ActionDeterministicReview? = null
 
     fun repairPlannerPayload(raw: String): String = raw
+
+    fun buildApprovalContext(payload: String): List<ApprovalContextEntry> = emptyList()
 
     override fun close() {}
 }

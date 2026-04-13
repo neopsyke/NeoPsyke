@@ -11,7 +11,7 @@ High-level view of the six major subsystems and their interactions.
 
 ```mermaid
 flowchart LR
-    Input["Stimuli\n(User, Telegram, Goals, Id)"] --> SC["SensoryCortex"]
+    Input["Stimuli\n(User, Telegram, Durable Work, Id)"] --> SC["SensoryCortex"]
     SC --> Ego["Ego"]
     Ego --> Planner["HierarchicalEgoPlanner\n(Typed Lane Dispatch)"]
     Planner --> Ego
@@ -22,8 +22,8 @@ flowchart LR
     Id["Id\n(Autonomous Drives)"] -->|"Impulse"| SC
     Ego --> Mem["Memory System\n(MemoryStore/Hippocampus/Logbook/ScratchpadStore)"]
     Mem --> Ego
-    Ego --> Goals["GoalsGateway\n(Persistent Objectives)"]
-    Goals -->|"GoalRuntimeCue"| SC
+    Ego --> Goals["DurableWorkGateway\n(Persistent Work Items)"]
+    Goals -->|"DurableWorkCue"| SC
     MC --> Output["ConversationOutputGateway\n(Dashboard, Telegram)"]
 ```
 
@@ -90,12 +90,13 @@ flowchart LR
     MC -.->|"temporal intent -> episodic recall + vector cues"| LB
     E --> TWS["ScratchpadStore (Thread Workspace + Intention Drafts)"]
     E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
-    E --> PG["GoalsGateway (optional goal runtime boundary)"]
-    PG --> PM["GoalManager / Goal Runtime"]
-    PM --> PP["GoalPlanner"]
-    PM --> PV["GoalStepVerifier"]
+    E --> PR["PlanRefiner (LLM or Noop)"]
+    E --> PG["DurableWorkGateway (optional durable runtime boundary)"]
+    PG --> PM["DurableWorkRuntime"]
+    PM --> DWP["DeterministicWorkPlanBuilder (fallback only)"]
+    PM --> PV["WorkStepVerifier"]
     PM --> AOR["AsyncOperationRegistry"]
-    PM --> PS["GoalStateMachine + GoalStore"]
+    PM --> PS["WorkItemStateMachine + WorkItemStore"]
 
     AR --> AP["Action Plugins (self-described)"]
     CR --> AP
@@ -134,6 +135,31 @@ flowchart LR
     DS --> OT["Thread Inspection (/api/obs/threads*)"]
     DS --> OX["Action Control Page (/action-control)"]
     DS --> ACAPI["Action Control API + SSE (/api/action-control/*)"]
+```
+
+---
+
+## L1: Plan Refinement and Durable Work Plan Ownership
+
+```mermaid
+flowchart TD
+    subgraph "Inline Ego Plans"
+        P1["Planner lane returns\nEgoDecision.EnqueuePlan"] --> PR1["PlanRefiner.refine()"]
+        PR1 --> DD["DecisionDispatcher\n(hash/dedup/enqueue)"]
+    end
+    subgraph "Durable Work CREATE"
+        GP["Goal Planner generates\nDurableWorkCommand.Create\nwith planSteps"] --> PR2["PlanRefiner.refine()"]
+        PR2 --> FI["EgoDecision.FormIntention\n(CREATE payload with refined plan)"]
+        FI --> AC["ActionControlService\n(stage with approvalContext)"]
+        AC --> AR["ApprovalRuntime\n(shows plan in prompt)"]
+        AR -->|"APPROVE"| DWR["DurableWorkRuntime\n(uses pre-built plan)"]
+        AR -->|"DENY_AND_REISSUE"| RI["Reissue to Ego\n(re-plan with feedback)"]
+    end
+    subgraph "Durable Work REVISE_PLAN"
+        REV["Ego builds revised plan\nfrom work-item context"] --> PR3["PlanRefiner.refine()"]
+        PR3 --> FI2["EgoDecision.FormIntention\n(REVISE_PLAN with plan)"]
+        FI2 --> DWR2["DurableWorkRuntime\n(applies supplied plan)"]
+    end
 ```
 
 ---
@@ -236,10 +262,10 @@ sequenceDiagram
             Planner-->>Ego: intend/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
-        else Task = goal work opportunity
-            Ego->>PG: finalizeGoalCycle(rootInputId) after queues drain for that goal root
-    Note over Ego,PG: Goal runtime now resumes from a stable per-step thread root, creates scratchpad state only when work is actually processed, and may re-emit a goal runtime cue for resumable steps
-    Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, goal-work, or wake-only ingress before scheduler work begins
+        else Task = durable work opportunity
+            Ego->>PG: finalizeDurableWorkCycle(rootInputId) after queues drain for that work root
+    Note over Ego,PG: Durable runtime resumes from stable per-step roots, records activation boundaries in an activation journal, and may re-emit durable-work cues for resumable steps
+    Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, durable-work, or wake-only ingress before scheduler work begins
         else Task = input or feedback opportunity
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
@@ -253,8 +279,8 @@ sequenceDiagram
             Note over Ego,Planner: Planner prompt includes conversation security summary, thread trust state, percept summary/family, opportunity summary/kind, allowed intentions/commit modes, and trigger provenance summary untrusted external content is framed as data, not instruction
             Note over Ego,Planner: HierarchicalEgoPlanner dispatches to typed L1 lanes based on trigger type (no text inspection)
             Note over Ego,Planner: InputPlanner uses InputIntentRouter (LLM classifier) then dispatches to typed L2 sub-planner
-            Note over Ego,Planner: Goal creation and management use typed GoalCommand with LLM-resolved references (no regex heuristics)
-            Note over Ego,Planner: Goal-operation payload boundary is canonical SerializedGoalCommand (command + typed goal_reference), consumed directly by GoalOperationActionPlugin
+            Note over Ego,Planner: Durable-work creation and management use typed DurableWorkCommand with LLM-resolved references (no regex heuristics)
+            Note over Ego,Planner: Durable-work-operation payload boundary is canonical SerializedDurableWorkCommand (command + typed work_item_reference), consumed directly by DurableWorkOperationActionPlugin
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride (FINALIZE_NOW directly enqueues forced terminal; REQUEST_TOOL_THEN_FINALIZE produces soft hint)
@@ -394,24 +420,27 @@ sequenceDiagram
 
 ---
 
-## L1: Goals Boundary
+## L1: Durable Work Boundary
 
 ```mermaid
 flowchart LR
-    TS["TimerScheduler"] --> PM["GoalManager"]
+    TS["TimerScheduler"] --> PM["DurableWorkRuntime"]
     WM["WaitConditionMonitor (timeouts + async poll/event restore)"] --> PM
     AOR["AsyncOperationRegistry / Provider Adapters"] --> WM
-    PM --> PSM["GoalStateMachine"]
-    PM --> PP["GoalPlanner"]
-    PM --> PV["GoalStepVerifier"]
-    PSM --> PCS["GoalCommand stream"]
-    PCS -->|persist| Store["GoalStore / goal-events.jsonl + goal.json + goal-snapshot.json"]
-    PCS -->|work ready| Sig["GoalRuntimeCue"]
-    TS -->|"cron tick after completed/failed recurring goal"| PSM
+    PM --> PSM["WorkItemStateMachine"]
+    PM --> PP["WorkPlanBuilder"]
+    PM --> PV["WorkStepVerifier"]
+    PM --> AJ["ActivationJournal"]
+    PM --> EL["WorkEffectLedger"]
+    PSM --> PCS["WorkItemCommand stream"]
+    PCS -->|persist| Store["WorkItemStore / goal-events.jsonl + goal.json + goal-snapshot.json"]
+    PCS -->|work ready| Sig["DurableWorkCue"]
+    TS -->|"cron tick after completed/failed recurring work item"| PSM
     PSM -->|"reset plan steps + clear produced keys"| PCS
     Sig --> Ego["Ego"]
     Ego -->|nextWorkFromCue| PM
-    Ego -->|goal-origin action outcomes| PM
+    Ego -->|durable-work-origin action outcomes| PM
+    Ego -->|beforeActionExecution gate| EL
 ```
 
 ---

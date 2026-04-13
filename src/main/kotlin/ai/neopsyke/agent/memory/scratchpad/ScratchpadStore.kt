@@ -5,7 +5,7 @@ import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.support.TextSecurity
 import kotlin.math.max
@@ -105,7 +105,7 @@ class ScratchpadStore(
     }
 
     @Synchronized
-    fun ensureForGoalWork(work: GoalRunActivation): Boolean {
+    fun ensureForGoalWork(work: DurableWorkActivation): Boolean {
         if (!config.enabled) return false
         val rootId = work.rootInputId
         if (workspaces.containsKey(rootId)) return false
@@ -197,7 +197,7 @@ class ScratchpadStore(
         )
         if (observedEvidence) {
             if (outcome.resultArtifacts.isNotEmpty()) {
-                outcome.resultArtifacts.forEach(workspace::addEvidence)
+                outcome.resultArtifacts.forEach { workspace.addEvidence(it) }
             } else {
                 workspace.addEvidence(
                     TextSecurity.preview(outcome.plannerSignal.ifBlank { outcome.statusSummary }, config.maxEvidenceChars)
@@ -250,7 +250,7 @@ class ScratchpadStore(
         if (sections.isEmpty() && evidence.isEmpty() && drafts.isEmpty()) return ""
         val compiled = buildString {
             append("Scratchpad final compilation:\n")
-            append("goal: ")
+            append("work: ")
             append(workspace.goal.ifBlank { "none" })
             append('\n')
             if (sections.isNotEmpty()) {
@@ -351,7 +351,7 @@ class ScratchpadStore(
         val summary = buildString {
             append("Prior workspace digests (session history, most recent last):\n")
             buffer.forEachIndexed { index, entry ->
-                append("[${index + 1}] goal=${entry.goal}")
+                append("[${index + 1}] workItem=${entry.goal}")
                 if (entry.sectionIndex.isNotEmpty()) {
                     append(" | sections=[${entry.sectionIndex.joinToString(", ")}]")
                 }
@@ -630,7 +630,7 @@ class ScratchpadStore(
             }
             return buildString {
                 append("Thread scratchpad (persists for this cognitive thread across resume/wait):\n")
-                append("goal: ")
+                append("work: ")
                 append(goal.ifBlank { "none" })
                 append('\n')
                 append("index:\n")

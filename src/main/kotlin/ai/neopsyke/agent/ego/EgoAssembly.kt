@@ -20,8 +20,10 @@ import ai.neopsyke.agent.memory.longterm.Logbook
 import ai.neopsyke.agent.memory.longterm.LogbookSummarizer
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.goal.NoopGoalsGateway
-import ai.neopsyke.agent.goal.GoalsGateway
+import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
+import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
+import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 import ai.neopsyke.instrumentation.AgentInstrumentation
@@ -60,9 +62,14 @@ object EgoAssembler {
             runId = runId,
         )
 
+    data class PlannerBuildResult(
+        val planner: Ego.Planner,
+        val planRefiner: PlanRefiner = NoopPlanRefiner(),
+    )
+
     fun assemble(
         config: AgentConfig,
-        plannerFactory: (MotorCortex) -> Ego.Planner,
+        plannerFactory: (MotorCortex) -> PlannerBuildResult,
         superegoFactory: (ActionRegistry) -> Superego,
         sensoryCortex: SensoryCortex = SensoryCortex.stdin(config),
         instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
@@ -76,7 +83,7 @@ object EgoAssembler {
         runId: String? = null,
         webSearchActionHandler: WebSearchActionHandler? = null,
         fetchTool: FetchTool? = null,
-        goalsGateway: GoalsGateway = NoopGoalsGateway,
+        durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
         actionControlServiceFactory: (MotorCortex) -> ActionControlService = { NoopActionControlService },
         output: (String) -> Unit = {},
         conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
@@ -100,13 +107,14 @@ object EgoAssembler {
                 conversationOutput = conversationOutput,
                 evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = memory,
-                goalsGateway = goalsGateway,
+                durableWorkGateway = durableWorkGateway,
             )
         )
         val motorCortex = MotorCortex(actionRegistry = actionRegistry)
         val actionControlService = actionControlServiceFactory(motorCortex)
+        val plannerBuild = plannerFactory(motorCortex)
         val ego = Ego(
-            planner = plannerFactory(motorCortex),
+            planner = plannerBuild.planner,
             superego = superegoFactory(actionRegistry),
             motorCortex = motorCortex,
             config = config,
@@ -117,9 +125,10 @@ object EgoAssembler {
             scratchpadFinalizer = scratchpadFinalizer,
             instrumentation = instrumentation,
             actionControlService = actionControlService,
-            goalRegistry = goalsGateway,
-            goalsGateway = goalsGateway,
+            goalRegistry = durableWorkGateway,
+            durableWorkGateway = durableWorkGateway,
             evidenceArtifactStore = evidenceArtifactStore,
+            planRefiner = plannerBuild.planRefiner,
         )
         return EgoAssembly(
             ego = ego,

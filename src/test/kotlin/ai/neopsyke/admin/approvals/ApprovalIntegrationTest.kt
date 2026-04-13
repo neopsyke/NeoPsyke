@@ -528,7 +528,7 @@ class ApprovalIntegrationTest {
         )
         val staged = testStagedAction(
             conversationContext = nonOwnerCtx,
-            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL),
+            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK),
         )
         val telegramConfig = TelegramChannelConfig(
             enabled = true,
@@ -562,7 +562,7 @@ class ApprovalIntegrationTest {
         )
         val staged = testStagedAction(
             conversationContext = nonOwnerCtx,
-            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL),
+            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK),
         )
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(
             dashboardRequiresLiveSubscriber = true,
@@ -615,12 +615,12 @@ class ApprovalIntegrationTest {
             assertNotNull(request)
             assertEquals(true, request.lastPromptDelivered)
             assertNotNull(request.lastPromptDeliveryDetail)
-            assertTrue(request.lastPromptDeliveryDetail!!.contains("telegram-delivered"))
+            assertTrue(request.lastPromptDeliveryDetail.contains("telegram-delivered"))
         }
     }
 
     @Test
-    fun `13 prompt instance binding is enforced`() = runBlocking {
+    fun `13 approval succeeds after explanation without requiring references`() = runBlocking {
         val staged = testStagedAction()
         withHarness(staged) { h ->
             stageAndRoute(h, staged)
@@ -630,10 +630,11 @@ class ApprovalIntegrationTest {
             assertNotNull(refreshed)
             assertTrue(refreshed.promptVersion > 1)
 
-            val staleResult = h.runtime.routeOwnerMessage(ownerEnvelope("ref:invalidref yes"))
-            assertTrue(staleResult is OwnerIngressResult.Consumed)
-            assertTrue((staleResult as OwnerIngressResult.Consumed).detail.contains("stale"))
-            assertEquals(0, h.actionControl.authorizeCalls)
+            // After explanation, a plain "yes" should be accepted without any approval ref
+            val approveResult = h.runtime.routeOwnerMessage(ownerEnvelope("yes"))
+            assertTrue(approveResult is OwnerIngressResult.Consumed)
+            assertEquals(1, h.actionControl.authorizeCalls)
+            assertEquals(ApprovalRequestStatus.APPROVED, h.store.requestByStagedActionId(staged.id)?.status)
         }
     }
 

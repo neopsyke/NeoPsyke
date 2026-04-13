@@ -2,7 +2,9 @@ package ai.neopsyke.agent.model
 
 import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
+import ai.neopsyke.agent.durablework.StepStatus
+import ai.neopsyke.agent.durablework.WorkItemStatus
 import java.util.UUID
 
 /**
@@ -18,7 +20,7 @@ data class IdStateSnapshot(
 )
 
 data class AmbientContext(
-    val activeGoals: List<String> = emptyList(),
+    val activeWorkItems: List<String> = emptyList(),
     val recentScratchpadThemes: List<String> = emptyList(),
     val recentUsefulActionsOrUpdates: List<String> = emptyList(),
     val unresolvedOpenLoops: List<String> = emptyList(),
@@ -33,7 +35,7 @@ data class AmbientContext(
      * cross-thread coordination.
      */
     fun isEmpty(): Boolean =
-        activeGoals.isEmpty() &&
+        activeWorkItems.isEmpty() &&
             recentScratchpadThemes.isEmpty() &&
             recentUsefulActionsOrUpdates.isEmpty() &&
             unresolvedOpenLoops.isEmpty() &&
@@ -43,7 +45,7 @@ data class AmbientContext(
         if (isEmpty()) return ""
         return buildString {
             append("Optional relevance signals:\n")
-            appendSection("active_goals", activeGoals)
+            appendSection("active_goals", activeWorkItems)
             appendSection("recent_scratchpad_themes", recentScratchpadThemes)
             appendSection("recent_useful_actions_updates", recentUsefulActionsOrUpdates)
             appendSection("unresolved_open_loops", unresolvedOpenLoops)
@@ -62,6 +64,29 @@ data class AmbientContext(
         }
     }
 }
+
+data class DurableWorkPlanStepSnapshot(
+    val id: String,
+    val description: String,
+    val status: StepStatus,
+    val acceptanceCriteria: String,
+    val requires: Set<String> = emptySet(),
+    val produces: Set<String> = emptySet(),
+    val attempts: Int = 0,
+    val maxAttempts: Int = 3,
+)
+
+data class DurableWorkItemSnapshot(
+    val workItemId: String,
+    val title: String,
+    val instruction: String,
+    val completionCriteria: String,
+    val status: WorkItemStatus,
+    val planRevision: Int,
+    val failureCountInWindow: Int = 0,
+    val latestArtifactSummary: String? = null,
+    val planSteps: List<DurableWorkPlanStepSnapshot> = emptyList(),
+)
 
 data class PlannerContext(
     val recentDialogue: List<DialogueTurn>,
@@ -97,6 +122,7 @@ data class PlannerContext(
     val idState: IdStateSnapshot? = null,
     val goalWorkSummary: String = "",
     val goalIndex: Map<Int, String> = emptyMap(),
+    val goalSnapshots: Map<String, DurableWorkItemSnapshot> = emptyMap(),
     val groundingMetadata: GroundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
 )
 
@@ -128,7 +154,7 @@ sealed interface EgoTrigger {
     data class Continuation(val continuation: QueuedContinuation) : EgoTrigger
     data class ActionFeedback(val feedback: PendingFeedback) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
-    data class GoalWork(val workUnit: GoalRunActivation) : EgoTrigger
+    data class DurableWork(val workUnit: DurableWorkActivation) : EgoTrigger
 }
 
 sealed interface EgoDecision {
@@ -176,7 +202,6 @@ enum class ActionExecutionStatus {
 
 data class ActionOutcome(
     val statusSummary: String,
-    val assistantOutput: String? = null,
     val plannerSignal: String = statusSummary,
     val executionStatus: ActionExecutionStatus = ActionExecutionStatus.SUCCESS,
     val effects: Set<ActionEffect> = emptySet(),

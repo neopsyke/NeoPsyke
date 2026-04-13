@@ -39,7 +39,7 @@ class InputIntentRouter(
             rootInputId = rootInputId,
         )
 
-        val goalsAvailable = ActionType.GOAL_OPERATION in context.dispatchableActions
+        val goalsAvailable = ActionType.DURABLE_WORK_OPERATION in context.dispatchableActions
         val routeOptions = buildRouteOptions(goalsAvailable)
         val actionSummary = context.availableActions.map { it.id }.sorted().joinToString(", ")
 
@@ -118,9 +118,9 @@ class InputIntentRouter(
             "direct_response" -> InputRoute.DirectResponse(reasoning)
             "general_action" -> InputRoute.GeneralAction(reasoning)
             "multi_step_task" -> InputRoute.MultiStepTask(reasoning)
-            "goal", "goal_creation", "goal_management" ->
-                if (goalsAvailable) InputRoute.Goal(reasoning)
-                else InputRoute.GeneralAction("Goals unavailable; routing as general action.")
+            "durable_work", "goal", "goal_creation", "goal_management" ->
+                if (goalsAvailable) InputRoute.DurableWork(reasoning)
+                else InputRoute.GeneralAction("Durable work unavailable; routing as general action.")
             "clarification" -> InputRoute.ClarificationNeeded(reasoning.ifBlank { "Could you clarify what you'd like me to do?" })
             "noop" -> InputRoute.Noop(reasoning.ifBlank { "No actionable intent." })
             else -> InputRoute.GeneralAction(reasoning.ifBlank { "Unrecognized route; fallback to general action." })
@@ -132,7 +132,7 @@ class InputIntentRouter(
             "direct_response", "general_action", "multi_step_task"
         )
         if (goalsAvailable) {
-            routes.add("goal")
+            routes.add("durable_work")
         }
         routes.add("clarification")
         routes.add("noop")

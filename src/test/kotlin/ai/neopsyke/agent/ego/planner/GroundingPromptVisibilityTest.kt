@@ -19,7 +19,7 @@ import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.PendingFeedback
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import ai.neopsyke.agent.model.Percept
 import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.support.RecordingInstrumentation
@@ -280,17 +280,17 @@ class GroundingPromptVisibilityTest {
             )
         )
 
-    private fun goalWorkTrigger(): EgoTrigger.GoalWork =
-        EgoTrigger.GoalWork(
-            workUnit = GoalRunActivation(
-                goalId = "g1",
+    private fun goalWorkTrigger(): EgoTrigger.DurableWork =
+        EgoTrigger.DurableWork(
+            workUnit = DurableWorkActivation(
+                workItemId = "g1",
                 stepId = "s1",
                 rootInputId = "r1",
                 stepDescription = "Check weather",
                 acceptanceCriteria = "Fresh data",
                 workingContext = "",
                 conversationContext = ConversationContext.default(),
-            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.GOAL_STEP_POLICY),
+            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.DURABLE_WORK_STEP_POLICY),
             )
         )
 }

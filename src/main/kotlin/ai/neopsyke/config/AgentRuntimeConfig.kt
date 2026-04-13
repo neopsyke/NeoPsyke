@@ -24,7 +24,7 @@ import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.ego.planner.LaneConfig
 import ai.neopsyke.agent.ego.planner.StructuredOutputMode
-import ai.neopsyke.agent.goal.GoalConfig
+import ai.neopsyke.agent.durablework.DurableWorkConfig
 import ai.neopsyke.agent.config.SuperegoConfig
 import ai.neopsyke.agent.config.ScratchpadConfig
 import java.nio.file.Path
@@ -67,7 +67,7 @@ private data class AgentRuntimeYamlAgent(
     val builtinTools: AgentRuntimeYamlBuiltinTools? = null,
     val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = null,
     val innerVoice: AgentRuntimeYamlInnerVoice? = null,
-    val goals: AgentRuntimeYamlGoals? = null,
+    val durableWork: AgentRuntimeYamlDurableWork? = null,
     val runtime: AgentRuntimeYamlRuntime? = null,
 )
 
@@ -203,7 +203,7 @@ private data class AgentRuntimeYamlActionControl(
     val contactUserPerRootInput: Int? = null,
     val reflectionFamilyPerRootInput: Int? = null,
     val reflectEvidencePerRootInput: Int? = null,
-    val goalOperationPerRootInput: Int? = null,
+    val durableWorkOperationPerRootInput: Int? = null,
     val commitPrivatePerTypePerRootInput: Int? = null,
     val commitStatefulPerTypePerRootInput: Int? = null,
     val commitPublicPerTypePerRootInput: Int? = null,
@@ -296,17 +296,18 @@ private data class AgentRuntimeYamlInnerVoice(
     val maxEventsPerSession: Int? = null,
 )
 
-private data class AgentRuntimeYamlGoals(
+private data class AgentRuntimeYamlDurableWork(
     val enabled: Boolean? = null,
     val workspaceRoot: String? = null,
-    val maxActiveGoals: Int? = null,
+    val maxActiveWorkItems: Int? = null,
     val maxStepsPerPlan: Int? = null,
     val actionsPerCycle: Int? = null,
     val snapshotEveryNEvents: Int? = null,
     val timerResolutionMs: Long? = null,
     val conditionCheckIntervalMs: Long? = null,
-    val completedGoalRetentionDays: Int? = null,
+    val completedWorkItemRetentionDays: Int? = null,
     val maxWorkspaceBytes: Long? = null,
+    val allowRuntimePlanFallback: Boolean? = null,
 )
 
 private data class AgentRuntimeYamlRuntime(
@@ -356,7 +357,7 @@ object AgentRuntimeSettingsLoader {
         val telegramYaml = nativeIntegrationsYaml.telegram!!
         val googleWorkspaceYaml = nativeIntegrationsYaml.googleWorkspace!!
         val innerVoiceYaml = agentYaml.innerVoice!!
-        val goalsYaml = agentYaml.goals!!
+        val durableWorkYaml = agentYaml.durableWork!!
         val runtimeYaml = agentYaml.runtime!!
 
         val policyScope = ai.neopsyke.agent.model.PolicyScope.fromId(
@@ -869,10 +870,10 @@ object AgentRuntimeSettingsLoader {
                     actionControlYaml.reflectEvidencePerRootInput,
                     defaults.actionControl.reflectEvidencePerRootInput
                 ),
-                goalOperationPerRootInput = readPositiveInt(
-                    env["NEOPSYKE_ACTION_CONTROL_GOAL_OPERATION_PER_ROOT_INPUT"],
-                    actionControlYaml.goalOperationPerRootInput,
-                    defaults.actionControl.goalOperationPerRootInput
+                durableWorkOperationPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_DURABLE_WORK_OPERATION_PER_ROOT_INPUT"],
+                    actionControlYaml.durableWorkOperationPerRootInput,
+                    defaults.actionControl.durableWorkOperationPerRootInput
                 ),
                 commitPrivatePerTypePerRootInput = readPositiveInt(
                     env["NEOPSYKE_ACTION_CONTROL_COMMIT_PRIVATE_PER_TYPE_PER_ROOT_INPUT"],
@@ -1185,56 +1186,61 @@ object AgentRuntimeSettingsLoader {
                     defaults.innerVoice.maxEventsPerSession
                 ),
             ),
-            goals = GoalConfig(
+            durableWork = DurableWorkConfig(
                 enabled = readBoolean(
                     env["NEOPSYKE_GOALS_ENABLED"],
-                    yaml = goalsYaml.enabled,
-                    fallback = defaults.goals.enabled
+                    yaml = durableWorkYaml.enabled,
+                    fallback = defaults.durableWork.enabled
                 ),
                 workspaceRoot = readPath(
                     env["NEOPSYKE_GOALS_WORKSPACE_ROOT"],
-                    yaml = goalsYaml.workspaceRoot,
-                    fallback = defaults.goals.workspaceRoot
+                    yaml = durableWorkYaml.workspaceRoot,
+                    fallback = defaults.durableWork.workspaceRoot
                 ),
-                maxActiveGoals = readPositiveInt(
+                maxActiveWorkItems = readPositiveInt(
                     env["NEOPSYKE_GOALS_MAX_ACTIVE_GOALS"],
-                    yaml = goalsYaml.maxActiveGoals,
-                    fallback = defaults.goals.maxActiveGoals
+                    yaml = durableWorkYaml.maxActiveWorkItems,
+                    fallback = defaults.durableWork.maxActiveWorkItems
                 ),
                 maxStepsPerPlan = readPositiveInt(
                     env["NEOPSYKE_GOALS_MAX_STEPS_PER_PLAN"],
-                    yaml = goalsYaml.maxStepsPerPlan,
-                    fallback = defaults.goals.maxStepsPerPlan
+                    yaml = durableWorkYaml.maxStepsPerPlan,
+                    fallback = defaults.durableWork.maxStepsPerPlan
                 ),
                 actionsPerCycle = readPositiveInt(
                     env["NEOPSYKE_GOALS_ACTIONS_PER_CYCLE"],
-                    yaml = goalsYaml.actionsPerCycle,
-                    fallback = defaults.goals.actionsPerCycle
+                    yaml = durableWorkYaml.actionsPerCycle,
+                    fallback = defaults.durableWork.actionsPerCycle
                 ),
                 snapshotEveryNEvents = readPositiveInt(
                     env["NEOPSYKE_GOALS_SNAPSHOT_EVERY_N_EVENTS"],
-                    yaml = goalsYaml.snapshotEveryNEvents,
-                    fallback = defaults.goals.snapshotEveryNEvents
+                    yaml = durableWorkYaml.snapshotEveryNEvents,
+                    fallback = defaults.durableWork.snapshotEveryNEvents
                 ),
                 timerResolutionMs = readPositiveLong(
                     env["NEOPSYKE_GOALS_TIMER_RESOLUTION_MS"],
-                    yaml = goalsYaml.timerResolutionMs,
-                    fallback = defaults.goals.timerResolutionMs
+                    yaml = durableWorkYaml.timerResolutionMs,
+                    fallback = defaults.durableWork.timerResolutionMs
                 ),
                 conditionCheckIntervalMs = readPositiveLong(
                     env["NEOPSYKE_GOALS_CONDITION_CHECK_INTERVAL_MS"],
-                    yaml = goalsYaml.conditionCheckIntervalMs,
-                    fallback = defaults.goals.conditionCheckIntervalMs
+                    yaml = durableWorkYaml.conditionCheckIntervalMs,
+                    fallback = defaults.durableWork.conditionCheckIntervalMs
                 ),
-                completedGoalRetentionDays = readPositiveInt(
+                completedWorkItemRetentionDays = readPositiveInt(
                     env["NEOPSYKE_GOALS_COMPLETED_RETENTION_DAYS"],
-                    yaml = goalsYaml.completedGoalRetentionDays,
-                    fallback = defaults.goals.completedGoalRetentionDays
+                    yaml = durableWorkYaml.completedWorkItemRetentionDays,
+                    fallback = defaults.durableWork.completedWorkItemRetentionDays
                 ),
                 maxWorkspaceBytes = readPositiveLong(
                     env["NEOPSYKE_GOALS_MAX_WORKSPACE_BYTES"],
-                    yaml = goalsYaml.maxWorkspaceBytes,
-                    fallback = defaults.goals.maxWorkspaceBytes
+                    yaml = durableWorkYaml.maxWorkspaceBytes,
+                    fallback = defaults.durableWork.maxWorkspaceBytes
+                ),
+                allowRuntimePlanFallback = readBoolean(
+                    env["NEOPSYKE_GOALS_ALLOW_RUNTIME_PLAN_FALLBACK"],
+                    yaml = durableWorkYaml.allowRuntimePlanFallback,
+                    fallback = defaults.durableWork.allowRuntimePlanFallback,
                 ),
             ),
             loopDelayMs = readNonNegativeInt(
@@ -1325,7 +1331,7 @@ object AgentRuntimeSettingsLoader {
         requireSection(nativeIntegrations.telegram, "agent.native_integrations.telegram")
         requireSection(nativeIntegrations.googleWorkspace, "agent.native_integrations.google_workspace")
         requireSection(agent.innerVoice, "agent.inner_voice")
-        requireSection(agent.goals, "agent.goals")
+        requireSection(agent.durableWork, "agent.durable_work")
         requireSection(agent.runtime, "agent.runtime")
     }
 

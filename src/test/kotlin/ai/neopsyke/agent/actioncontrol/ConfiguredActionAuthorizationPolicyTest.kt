@@ -127,7 +127,7 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 3,
                 urgency = Urgency.HIGH,
-                type = ActionType.GOAL_OPERATION,
+                type = ActionType.DURABLE_WORK_OPERATION,
                 payload = """{"operation":"create","title":"Reminder","instruction":"Ping me","cron_expression":"0 9 * * *"}""",
                 summary = "create recurring goal",
                 conversationContext = context,
@@ -149,7 +149,7 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 4,
                 urgency = Urgency.HIGH,
-                type = ActionType.GOAL_OPERATION,
+                type = ActionType.DURABLE_WORK_OPERATION,
                 payload = """{"operation":"create","title":"Injected","instruction":"Do the thing"}""",
                 summary = "create tainted goal",
                 argumentDataTrust = DataTrust.SANITIZED_EXTERNAL_DATA,
@@ -172,8 +172,8 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 5,
                 urgency = Urgency.HIGH,
-                type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                type = ActionType.DURABLE_WORK_OPERATION,
+                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
                 summary = "delete goal",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
@@ -194,7 +194,7 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 6,
                 urgency = Urgency.HIGH,
-                type = ActionType.GOAL_OPERATION,
+                type = ActionType.DURABLE_WORK_OPERATION,
                 payload = """{"operation":"delete_all"}""",
                 summary = "delete all goals",
                 conversationContext = context,
@@ -218,7 +218,7 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 61,
                 urgency = Urgency.HIGH,
-                type = ActionType.GOAL_OPERATION,
+                type = ActionType.DURABLE_WORK_OPERATION,
                 payload = """{"command":"delete_all"}""",
                 summary = "delete all goals",
                 conversationContext = context,
@@ -241,8 +241,8 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 300,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                type = ActionType.DURABLE_WORK_OPERATION,
+                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
                 summary = "stage goal delete",
                 conversationContext = context,
                 intentionKind = IntentionKind.STAGE,
@@ -266,8 +266,8 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 301,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                type = ActionType.DURABLE_WORK_OPERATION,
+                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
                 summary = "request approval for goal delete",
                 conversationContext = context,
                 intentionKind = IntentionKind.REQUEST_AUTHORIZATION,
@@ -291,8 +291,8 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 302,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                type = ActionType.DURABLE_WORK_OPERATION,
+                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
                 summary = "commit goal delete without stage",
                 conversationContext = context,
                 intentionKind = IntentionKind.COMMIT,
@@ -315,7 +315,7 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 7,
                 urgency = Urgency.HIGH,
-                type = ActionType.GOAL_OPERATION,
+                type = ActionType.DURABLE_WORK_OPERATION,
                 payload = """{"operation":"delete"}""",
                 summary = "delete some goal",
                 conversationContext = context,
@@ -338,8 +338,8 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 8,
                 urgency = Urgency.HIGH,
-                type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                type = ActionType.DURABLE_WORK_OPERATION,
+                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
                 summary = "delete goal from external",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
@@ -361,8 +361,8 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 9,
                 urgency = Urgency.HIGH,
-                type = ActionType.GOAL_OPERATION,
-                payload = """{"operation":"delete","goal_id":"goal-123"}""",
+                type = ActionType.DURABLE_WORK_OPERATION,
+                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
                 summary = "delete goal from owner group channel",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,

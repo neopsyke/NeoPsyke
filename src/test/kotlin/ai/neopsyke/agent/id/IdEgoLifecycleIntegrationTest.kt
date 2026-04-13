@@ -55,7 +55,7 @@ class IdEgoLifecycleIntegrationTest {
                         }
                         EgoDecision.Noop("search completed")
                     }
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.DurableWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.Continuation -> decisionForThought(trigger.continuation)
                 }
 
@@ -175,7 +175,7 @@ class IdEgoLifecycleIntegrationTest {
                         }
                         EgoDecision.Noop("done")
                     }
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.DurableWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.Continuation -> {
                         EgoDecision.Noop("done")
                     }
@@ -259,7 +259,7 @@ class IdEgoLifecycleIntegrationTest {
                         steps = listOf("collect insight")
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.DurableWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.Continuation -> {
                         if (trigger.continuation.planContext != null) {
                             planStepHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
@@ -362,7 +362,7 @@ class IdEgoLifecycleIntegrationTest {
                         steps = listOf("Record a trusted lesson", "Run redundant leftover step")
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.DurableWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.Continuation ->
                         when (trigger.continuation.planContext?.stepIndex) {
                             0 -> EgoDecision.FormIntention(
@@ -469,7 +469,7 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user test input")
                     is EgoTrigger.IncomingImpulse -> EgoDecision.Noop("no useful action available")
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.DurableWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.Continuation -> EgoDecision.Noop("done")
                 }
         }
@@ -540,7 +540,7 @@ class IdEgoLifecycleIntegrationTest {
                         summary = "persist insight"
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.DurableWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.Continuation -> EgoDecision.Noop("done")
                 }
         }
@@ -619,7 +619,7 @@ class IdEgoLifecycleIntegrationTest {
                         summary = "gather evidence"
                     )
                     is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback in test")
-                    is EgoTrigger.GoalWork -> EgoDecision.Noop("ignore goal work in test")
+                    is EgoTrigger.DurableWork -> EgoDecision.Noop("ignore goal work in test")
                     is EgoTrigger.Continuation -> EgoDecision.Noop("done")
                 }
         }

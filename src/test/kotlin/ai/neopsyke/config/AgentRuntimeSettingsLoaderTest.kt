@@ -34,8 +34,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(TelegramIngressMode.POLLING, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals("/api/channels/telegram/webhook", settings.agentConfig.nativeIntegrations.telegram.webhookPath)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
-        assertEquals(true, settings.agentConfig.goals.enabled)
-        assertEquals(Paths.get(".neopsyke/goals"), settings.agentConfig.goals.workspaceRoot)
+        assertEquals(true, settings.agentConfig.durableWork.enabled)
+        assertEquals(Paths.get(".neopsyke/work-items"), settings.agentConfig.durableWork.workspaceRoot)
+        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
         assertTrue(settings.dashboardEnabled)
         assertEquals(8787, settings.dashboardPort)
         assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
@@ -109,9 +110,10 @@ class AgentRuntimeSettingsLoaderTest {
                 episodic_recall_max_chars: 333
                 episodic_recall_max_results: 11
                 use_llm_summarizer: true
-              goals:
+              durable_work:
                 enabled: true
                 workspace_root: /tmp/neopsyke-goals
+                allow_runtime_plan_fallback: true
               action_control:
                 enabled: true
                 db_path: /tmp/neopsyke-action-control.db
@@ -125,7 +127,7 @@ class AgentRuntimeSettingsLoaderTest {
                 contact_user_per_root_input: 6
                 reflection_family_per_root_input: 4
                 reflect_evidence_per_root_input: 2
-                goal_operation_per_root_input: 5
+                durable_work_operation_per_root_input: 5
                 commit_private_per_type_per_root_input: 7
                 commit_stateful_per_type_per_root_input: 3
                 commit_public_per_type_per_root_input: 2
@@ -262,8 +264,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(333, settings.agentConfig.logbook.episodicRecallMaxChars)
         assertEquals(11, settings.agentConfig.logbook.episodicRecallMaxResults)
         assertEquals(true, settings.agentConfig.logbook.useLlmSummarizer)
-        assertEquals(true, settings.agentConfig.goals.enabled)
-        assertEquals(Paths.get("/tmp/neopsyke-goals"), settings.agentConfig.goals.workspaceRoot)
+        assertEquals(true, settings.agentConfig.durableWork.enabled)
+        assertEquals(Paths.get("/tmp/neopsyke-goals"), settings.agentConfig.durableWork.workspaceRoot)
+        assertEquals(true, settings.agentConfig.durableWork.allowRuntimePlanFallback)
         assertEquals(true, settings.agentConfig.actionControl.enabled)
         assertEquals("/tmp/neopsyke-action-control.db", settings.agentConfig.actionControl.dbPath)
         assertEquals("/tmp/neopsyke-action-security.yaml", settings.agentConfig.actionControl.policyPath)
@@ -276,7 +279,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(6, settings.agentConfig.actionControl.contactUserPerRootInput)
         assertEquals(4, settings.agentConfig.actionControl.reflectionFamilyPerRootInput)
         assertEquals(2, settings.agentConfig.actionControl.reflectEvidencePerRootInput)
-        assertEquals(5, settings.agentConfig.actionControl.goalOperationPerRootInput)
+        assertEquals(5, settings.agentConfig.actionControl.durableWorkOperationPerRootInput)
         assertEquals(7, settings.agentConfig.actionControl.commitPrivatePerTypePerRootInput)
         assertEquals(3, settings.agentConfig.actionControl.commitStatefulPerTypePerRootInput)
         assertEquals(2, settings.agentConfig.actionControl.commitPublicPerTypePerRootInput)
@@ -377,7 +380,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(false, settings.agentConfig.connectors.enabled)
         assertEquals(TelegramIngressMode.WEBHOOK, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
-        assertEquals(true, settings.agentConfig.goals.enabled)
+        assertEquals(true, settings.agentConfig.durableWork.enabled)
+        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
     }
 
     @Test
@@ -573,8 +577,9 @@ class AgentRuntimeSettingsLoaderTest {
             ),
             settings.agentConfig.nativeIntegrations.googleWorkspace.scopes,
         )
-        assertEquals(true, settings.agentConfig.goals.enabled)
-        assertEquals(Paths.get("/env/goals"), settings.agentConfig.goals.workspaceRoot)
+        assertEquals(true, settings.agentConfig.durableWork.enabled)
+        assertEquals(Paths.get("/env/goals"), settings.agentConfig.durableWork.workspaceRoot)
+        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)
@@ -644,7 +649,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertTrue(settings.dashboardEnabled)
-        assertEquals(false, settings.agentConfig.goals.enabled)
+        assertEquals(false, settings.agentConfig.durableWork.enabled)
         assertEquals(false, settings.agentConfig.actionControl.autonomousWorkerEnabled)
         assertEquals(false, settings.agentConfig.nativeIntegrations.telegram.enabled)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)

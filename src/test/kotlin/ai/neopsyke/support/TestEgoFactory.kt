@@ -10,6 +10,8 @@ import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.MetaReasoner
 import ai.neopsyke.agent.ego.NoopMetaReasoner
 import ai.neopsyke.agent.ego.NoopScratchpadFinalizer
+import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
+import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.ego.ScratchpadFinalizer
 import ai.neopsyke.agent.memory.episodic.DeterministicLogbookSummarizer
 import ai.neopsyke.agent.memory.episodic.Logbook
@@ -18,8 +20,8 @@ import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
-import ai.neopsyke.agent.goal.NoopGoalsGateway
-import ai.neopsyke.agent.goal.GoalsGateway
+import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
+import ai.neopsyke.agent.durablework.DurableWorkGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
@@ -38,8 +40,9 @@ fun buildTestEgo(
     logbook: Logbook? = null,
     logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
     runId: String? = null,
-    goalsGateway: GoalsGateway = NoopGoalsGateway,
+    durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
     actionControlService: ActionControlService? = null,
+    planRefiner: PlanRefiner = NoopPlanRefiner(),
 ): Ego {
     val memory = EgoAssembler.buildMemorySystem(
         config = config,
@@ -64,7 +67,8 @@ fun buildTestEgo(
             ?: LegacyCompatibleActionControlService { action, authorization ->
                 motorCortex.execute(action, config.searchResultCount, authorization)
             },
-        goalRegistry = goalsGateway,
-        goalsGateway = goalsGateway,
+        goalRegistry = durableWorkGateway,
+        durableWorkGateway = durableWorkGateway,
+        planRefiner = planRefiner,
     )
 }

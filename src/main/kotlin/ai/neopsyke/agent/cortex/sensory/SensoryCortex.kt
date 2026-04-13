@@ -69,8 +69,8 @@ sealed interface RuntimeControlSignal : Signal {
     data class ConfigReloaded(val key: String) : RuntimeControlSignal
 }
 
-data class GoalRuntimeCue(
-    val goalId: String,
+data class DurableWorkCue(
+    val workItemId: String,
     val stepId: String,
     val reason: String,
 ) {
@@ -79,7 +79,7 @@ data class GoalRuntimeCue(
             id = RootInputIds.next(),
             family = StimulusFamily.CUE,
             source = SOURCE,
-            content = "goal_runtime_work_ready",
+            content = "durable_work_runtime_work_ready",
             receivedAt = Instant.now(),
             conversationContext = ConversationContext(
                 sessionId = ConversationContext.DEFAULT_SESSION_ID,
@@ -89,26 +89,26 @@ data class GoalRuntimeCue(
                     channelId = ConversationContext.DEFAULT_SESSION_ID,
                 ),
             ),
-            provenance = Provenances.trustedSystemSignal(provider = SOURCE, sourceRef = goalId),
+            provenance = Provenances.trustedSystemSignal(provider = SOURCE, sourceRef = workItemId),
             trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
             metadata = mapOf(
                 METADATA_CUE_TYPE to CUE_TYPE_WORK_READY,
-                METADATA_GOAL_ID to goalId,
+                METADATA_WORK_ITEM_ID to workItemId,
                 METADATA_STEP_ID to stepId,
                 METADATA_REASON to reason,
             ),
         )
 
     companion object {
-        private const val SOURCE: String = "goal-runtime"
+        private const val SOURCE: String = "durable-work-runtime"
 
-        fun fromStimulus(stimulus: StimulusEnvelope): GoalRuntimeCue? {
+        fun fromStimulus(stimulus: StimulusEnvelope): DurableWorkCue? {
             if (stimulus.family != StimulusFamily.CUE) return null
             if (stimulus.metadata[METADATA_CUE_TYPE] != CUE_TYPE_WORK_READY) return null
-            val goalId = stimulus.metadata[METADATA_GOAL_ID] ?: return null
+            val workItemId = stimulus.metadata[METADATA_WORK_ITEM_ID] ?: return null
             val stepId = stimulus.metadata[METADATA_STEP_ID] ?: return null
             val reason = stimulus.metadata[METADATA_REASON].orEmpty()
-            return GoalRuntimeCue(goalId = goalId, stepId = stepId, reason = reason)
+            return DurableWorkCue(workItemId = workItemId, stepId = stepId, reason = reason)
         }
     }
 }
@@ -236,7 +236,7 @@ data class ActionFeedbackCue(
 
 object CognitiveCueMetadata {
     const val METADATA_CUE_TYPE: String = "cue_type"
-    const val METADATA_GOAL_ID: String = "goal_id"
+    const val METADATA_WORK_ITEM_ID: String = "goal_id"
     const val METADATA_STEP_ID: String = "step_id"
     const val METADATA_REASON: String = "reason"
     const val METADATA_ROOT_IMPULSE_ID: String = "root_impulse_id"
@@ -260,12 +260,12 @@ object CognitiveCueMetadata {
     const val METADATA_GROUNDING_SOURCE: String = "grounding_source"
 
     const val CUE_TYPE_ID_IMPULSE_READY: String = "id_impulse_ready"
-    const val CUE_TYPE_WORK_READY: String = "goal_runtime_work_ready"
+    const val CUE_TYPE_WORK_READY: String = "durable_work_runtime_work_ready"
     const val CUE_TYPE_ACTION_FEEDBACK: String = "action_feedback"
 }
 
 private const val METADATA_CUE_TYPE: String = CognitiveCueMetadata.METADATA_CUE_TYPE
-private const val METADATA_GOAL_ID: String = CognitiveCueMetadata.METADATA_GOAL_ID
+private const val METADATA_WORK_ITEM_ID: String = CognitiveCueMetadata.METADATA_WORK_ITEM_ID
 private const val METADATA_STEP_ID: String = CognitiveCueMetadata.METADATA_STEP_ID
 private const val METADATA_REASON: String = CognitiveCueMetadata.METADATA_REASON
 private const val METADATA_ROOT_IMPULSE_ID: String = CognitiveCueMetadata.METADATA_ROOT_IMPULSE_ID
@@ -512,7 +512,7 @@ class SensoryCortex(
     fun offerActionFeedback(cue: ActionFeedbackCue): Boolean =
         offerSyntheticSignal(CognitiveSignal.FeedbackReceived(cue))
 
-    fun offerGoalRuntimeCue(cue: GoalRuntimeCue): Boolean =
+    fun offerDurableWorkCue(cue: DurableWorkCue): Boolean =
         offerSyntheticSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
 
     fun hasPendingSyntheticSignals(): Boolean = syntheticSignalCount.get() > 0

@@ -19,11 +19,13 @@ import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.SensoryCortex
 import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.id.EmptyGoalRegistry
-import ai.neopsyke.agent.id.GoalRegistry
-import ai.neopsyke.agent.goal.NoopGoalsGateway
-import ai.neopsyke.agent.goal.GoalRunActivation
-import ai.neopsyke.agent.goal.GoalsGateway
+import ai.neopsyke.agent.id.EmptyWorkItemRegistry
+import ai.neopsyke.agent.id.WorkItemRegistry
+import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
+import ai.neopsyke.agent.durablework.DurableWorkActivation
+import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
+import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.support.PromptInjectionDefense
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.agent.superego.Superego
@@ -49,9 +51,10 @@ class Ego(
     private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
         motorCortex.execute(action, config.searchResultCount, authorization)
     },
-    private val goalRegistry: GoalRegistry = EmptyGoalRegistry,
-    private val goalsGateway: GoalsGateway = NoopGoalsGateway,
+    private val goalRegistry: WorkItemRegistry = EmptyWorkItemRegistry,
+    private val durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
     private val evidenceArtifactStore: EvidenceArtifactStore = InMemoryEvidenceArtifactStore(),
+    private val planRefiner: PlanRefiner = NoopPlanRefiner(),
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
     @Volatile private var approvalStagingHook: ApprovalStagingHook? = null
@@ -131,7 +134,7 @@ class Ego(
     )
     private val dispatcher = DecisionDispatcher(
         scheduler, config, instrumentation, deliberation, memory, motorCortex,
-        scratchpadStore, telemetry, fallbackHandler,
+        scratchpadStore, telemetry, fallbackHandler, planRefiner,
         dialogueFor = ::dialogueFor,
         resolveSessionId = ::resolveSessionId,
         inputScope = ::inputScope,
@@ -163,14 +166,14 @@ class Ego(
             )
         },
         actionControlService = actionControlService,
-        actionLifecycleObserver = goalsGateway,
+        actionLifecycleObserver = durableWorkGateway,
         emitActionFeedback = sensoryCortex::offerActionFeedback,
     )
     private val stimulusIngress = StimulusIngressCoordinator(
         config = config,
         scheduler = scheduler,
         cognitiveThreads = cognitiveThreads,
-        goalsGateway = goalsGateway,
+        durableWorkGateway = durableWorkGateway,
         instrumentation = instrumentation,
         telemetry = telemetry,
         shapeOpportunityContract = ::shapeOpportunityContract,
@@ -320,7 +323,7 @@ class Ego(
             origin = cue.origin,
             groundingMetadata = cue.groundingMetadata,
         )
-        cue.groundingMetadata?.let { metadata ->
+        cue.groundingMetadata.let { metadata ->
             instrumentation.emit(
                 AgentEvents.groundingMetadataPropagated(
                     rootInputId = cue.rootInputId,
@@ -456,7 +459,7 @@ class Ego(
         feedbackAction: PendingAction,
         resumedFromWait: Boolean,
     ): Boolean {
-        if (!goalsGateway.allowFollowUp(feedbackAction)) return false
+        if (!durableWorkGateway.allowFollowUp(feedbackAction)) return false
         if (cue.executionStatus == ActionExecutionStatus.WAITING) return false
         return resumedFromWait || cue.requiresFollowUpThought || cue.executionStatus != ActionExecutionStatus.SUCCESS
     }
@@ -601,21 +604,17 @@ class Ego(
 
         // Incorporate resolved grounding metadata from InputPlanner classification.
         val resolvedInput = planner.lastResolvedInput ?: input
-        val resolvedGrounding = resolvedInput.groundingMetadata ?: planner.lastResolvedGrounding
-        val groundedContext = if (resolvedGrounding != null) {
-            instrumentation.emit(
-                AgentEvents.groundingMetadataPropagated(
-                    rootInputId = resolvedInput.rootInputId,
-                    fromEnvelopeType = "pending_input",
-                    toEnvelopeType = "planner_context",
-                    groundingRequired = resolvedGrounding.requirement == GroundingRequirement.REQUIRED,
-                    source = resolvedGrounding.source.name.lowercase(),
-                )
+        val resolvedGrounding = resolvedInput.groundingMetadata
+        instrumentation.emit(
+            AgentEvents.groundingMetadataPropagated(
+                rootInputId = resolvedInput.rootInputId,
+                fromEnvelopeType = "pending_input",
+                toEnvelopeType = "planner_context",
+                groundingRequired = resolvedGrounding.requirement == GroundingRequirement.REQUIRED,
+                source = resolvedGrounding.source.name.lowercase(),
             )
-            context.copy(groundingMetadata = resolvedGrounding)
-        } else {
-            context
-        }
+        )
+        val groundedContext = context.copy(groundingMetadata = resolvedGrounding)
 
         timing.startPhase("apply_decision")
         dispatcher.dispatch(
@@ -636,7 +635,7 @@ class Ego(
             is OpportunityTrigger.Input -> processInput(trigger.input, opportunity.opportunity)
             is OpportunityTrigger.Impulse -> processImpulse(trigger.impulse, opportunity.opportunity)
             is OpportunityTrigger.Feedback -> processActionFeedback(trigger.feedback, opportunity.opportunity)
-            is OpportunityTrigger.GoalWork -> processGoalWork(trigger.work, opportunity.opportunity)
+            is OpportunityTrigger.DurableWork -> processGoalWork(trigger.work, opportunity.opportunity)
         }
     }
 
@@ -735,8 +734,8 @@ class Ego(
                     "summary" to intention.intention.summary,
                     "action_type" to intention.proposedActionType?.id,
                     "root_input_id" to intention.rootInputId,
-                    "grounding_required" to intention.groundingMetadata?.requirement?.name?.lowercase(),
-                    "grounding_source" to intention.groundingMetadata?.source?.name?.lowercase(),
+                    "grounding_required" to intention.groundingMetadata.requirement.name.lowercase(),
+                    "grounding_source" to intention.groundingMetadata.source.name.lowercase(),
                 )
             )
         )
@@ -761,7 +760,7 @@ class Ego(
             requestedCommitMode = intention.intention.commitMode,
             groundingMetadata = intention.groundingMetadata,
         )
-        intention.groundingMetadata?.let { metadata ->
+        intention.groundingMetadata.let { metadata ->
             instrumentation.emit(
                 AgentEvents.groundingMetadataPropagated(
                     rootInputId = intention.rootInputId,
@@ -822,7 +821,7 @@ class Ego(
             needId = impulse.needId,
             triggeringTension = impulse.tension,
         )
-        val projectSummary = goalsGateway.pendingWorkSummary()
+        val projectSummary = durableWorkGateway.pendingWorkSummary()
         val context = idConstrainedContext.copy(
             shortTermContextSummary = "",
             goalWorkSummary = projectSummary,
@@ -867,10 +866,10 @@ class Ego(
     }
 
     private suspend fun processGoalWork(
-        work: GoalRunActivation,
+        work: DurableWorkActivation,
         opportunity: Opportunity? = null,
     ) {
-        val timing = PhaseTimingCollector("goal_work", "goal:${work.goalId}")
+        val timing = PhaseTimingCollector("durable_work", "work:${work.workItemId}")
         val convCtx = work.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
@@ -882,7 +881,7 @@ class Ego(
             AgentEvent(
                 type = "goal_work_processing",
                 data = mapOf(
-                    "goal_id" to work.goalId,
+                    "goal_id" to work.workItemId,
                     "step_id" to work.stepId,
                     "step_description" to work.stepDescription,
                 ),
@@ -890,7 +889,7 @@ class Ego(
         )
 
         timing.startPhase("planner_context")
-        val trigger = EgoTrigger.GoalWork(work)
+        val trigger = EgoTrigger.DurableWork(work)
         val context = plannerContext(
             trigger = trigger,
             rootInputId = work.rootInputId,
@@ -920,7 +919,10 @@ class Ego(
         journalPlannerDecision(finalDecision)
 
         timing.startPhase("apply_decision")
-        val origin = ActionOrigin(OriginSource.GOAL)
+        val origin = ActionOrigin(OriginSource.DURABLE_WORK)
+        if (finalDecision is EgoDecision.Noop) {
+            durableWorkGateway.notifyStepPlannerNoop(work.rootInputId, finalDecision.reason)
+        }
         dispatcher.dispatch(
             decision = finalDecision,
             nextPassCount = 0,
@@ -964,7 +966,7 @@ class Ego(
         )
     }
 
-    private fun maybeCreateGoalScratchpad(work: GoalRunActivation) {
+    private fun maybeCreateGoalScratchpad(work: DurableWorkActivation) {
         val created = scratchpadStore.ensureForGoalWork(work)
         if (!created) return
         instrumentation.emit(
@@ -1097,6 +1099,7 @@ class Ego(
             conversationContext = conversationContext,
             goalWorkSummary = goalSummaryResult.text,
             goalIndex = goalSummaryResult.index,
+            goalSnapshots = goalSummaryResult.snapshots,
             groundingMetadata = groundingMetadataForTrigger(trigger),
         )
     }
@@ -1131,7 +1134,7 @@ class Ego(
                     sourceRef = trigger.impulse.rootImpulseId,
                 ).renderSummary()
 
-            is EgoTrigger.GoalWork ->
+            is EgoTrigger.DurableWork ->
                 Provenances.trustedSystemSignal(
                     provider = "goal-runtime",
                     sourceRef = trigger.workUnit.rootInputId,
@@ -1144,41 +1147,92 @@ class Ego(
             is EgoTrigger.Continuation -> trigger.continuation.groundingMetadata
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.groundingMetadata
             is EgoTrigger.IncomingImpulse -> GroundingMetadata.NOT_REQUIRED_PREFILTER
-            is EgoTrigger.GoalWork -> trigger.workUnit.groundingMetadata
+            is EgoTrigger.DurableWork -> trigger.workUnit.groundingMetadata
         }
 
     private data class GoalSummaryResult(
         val text: String,
         val index: Map<Int, String>,
+        val snapshots: Map<String, DurableWorkItemSnapshot>,
     )
 
     private fun buildNumberedGoalSummary(): GoalSummaryResult {
-        val goals = goalsGateway.allGoals()
-        if (goals.isEmpty()) return GoalSummaryResult("", emptyMap())
+        val goals = durableWorkGateway.allWorkItems()
+        if (goals.isEmpty()) return GoalSummaryResult("", emptyMap(), emptyMap())
         val index = mutableMapOf<Int, String>()
+        val snapshots = mutableMapOf<String, DurableWorkItemSnapshot>()
         val text = buildString {
             append("Active goals:")
             goals.forEachIndexed { i, g ->
                 val position = i + 1
-                index[position] = g.goalId
-                append("\n$position. \"${g.title}\" (${g.status}")
+                index[position] = g.workItemId
+                val state = durableWorkGateway.workItemStatus(g.workItemId)
+                val projection = durableWorkGateway.workItemProjection(g.workItemId)
+                state?.let { workState ->
+                    snapshots[g.workItemId] = DurableWorkItemSnapshot(
+                        workItemId = workState.id,
+                        title = workState.workItem.title,
+                        instruction = workState.workItem.instruction,
+                        completionCriteria = workState.workItem.completionCriteria,
+                        status = workState.workItem.status,
+                        planRevision = workState.workItem.planRevision,
+                        failureCountInWindow = workState.workItem.failureWindow.failureCount,
+                        latestArtifactSummary = projection?.latestArtifactSummary ?: workState.durableState.artifacts.lastSummary,
+                        planSteps = workState.workItem.plan.steps.map { step ->
+                            DurableWorkPlanStepSnapshot(
+                                id = step.id,
+                                description = step.description,
+                                status = step.status,
+                                acceptanceCriteria = step.acceptanceCriteria,
+                                requires = step.requires,
+                                produces = step.produces,
+                                attempts = step.attempts,
+                                maxAttempts = step.maxAttempts,
+                            )
+                        },
+                    )
+                }
+                val snapshot = snapshots[g.workItemId]
+                append("\n$position. \"${g.title}\" (${snapshot?.status ?: g.status}")
                 if (!g.cronExpression.isNullOrBlank()) append(", cron=${g.cronExpression}")
+                snapshot?.let {
+                    val doneCount = it.planSteps.count { step -> step.status == ai.neopsyke.agent.durablework.StepStatus.DONE }
+                    append(", rev=${it.planRevision}, steps=$doneCount/${it.planSteps.size}")
+                }
                 append(")")
+                val currentStep = snapshot?.planSteps?.firstOrNull { step ->
+                    step.status in setOf(
+                        ai.neopsyke.agent.durablework.StepStatus.IN_PROGRESS,
+                        ai.neopsyke.agent.durablework.StepStatus.READY,
+                        ai.neopsyke.agent.durablework.StepStatus.BLOCKED,
+                    )
+                }
+                if (currentStep != null) {
+                    append("\n   current_step: ${currentStep.id} (${currentStep.status.name.lowercase()}) ${currentStep.description}")
+                }
+                snapshot?.latestArtifactSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+                    append("\n   latest_artifact: ${TextSecurity.preview(summary, GOAL_ARTIFACT_SUMMARY_PREVIEW_CHARS)}")
+                }
+                snapshot?.let {
+                    if (it.failureCountInWindow > 0) {
+                        append("\n   failure_count_in_window: ${it.failureCountInWindow}")
+                    }
+                }
             }
         }
-        return GoalSummaryResult(text, index)
+        return GoalSummaryResult(text, index, snapshots)
     }
 
     private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {
         if (!shouldAttachAmbientContext(trigger)) {
             return AmbientContext()
         }
-        val activeGoals = goalRegistry.activeGoals()
-            .map { goal -> TextSecurity.preview(goal.instruction, AMBIENT_PROJECT_PREVIEW_CHARS) }
+        val activeWorkItems = goalRegistry.activeWorkItems()
+            .map { item -> TextSecurity.preview(item.instruction, AMBIENT_PROJECT_PREVIEW_CHARS) }
             .filter { it.isNotBlank() }
             .take(MAX_AMBIENT_PROJECTS)
         return AmbientContext(
-            activeGoals = activeGoals,
+            activeWorkItems = activeWorkItems,
             recentScratchpadThemes = scratchpadStore.recentResolvedGoalSignals(MAX_AMBIENT_SCRATCHPAD_SIGNALS),
             recentUsefulActionsOrUpdates = memory.recentUsefulActionsOrUpdates(),
             unresolvedOpenLoops = scratchpadStore.activeGoalSignals(MAX_AMBIENT_OPEN_LOOPS),
@@ -1191,7 +1245,7 @@ class Ego(
             is EgoTrigger.IncomingInput -> false
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.origin.source == OriginSource.ID
             is EgoTrigger.IncomingImpulse -> true
-            is EgoTrigger.GoalWork -> true
+            is EgoTrigger.DurableWork -> true
             is EgoTrigger.Continuation -> trigger.continuation.origin.source == OriginSource.ID
         }
 
@@ -1220,7 +1274,7 @@ class Ego(
             is EgoTrigger.Continuation -> trigger.continuation.rootInputId
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
-            is EgoTrigger.GoalWork -> trigger.workUnit.rootInputId
+            is EgoTrigger.DurableWork -> trigger.workUnit.rootInputId
         }
 
     private fun triggerLabel(trigger: EgoTrigger): String =
@@ -1229,13 +1283,13 @@ class Ego(
             is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
-            is EgoTrigger.GoalWork -> "goal-work"
+            is EgoTrigger.DurableWork -> "durable-work"
         }
 
     private fun resolveFeedbackThreadKind(feedback: PendingFeedback): CognitiveThreadKind =
         cognitiveThreads.thread(feedback.cue.rootInputId, feedback.cue.conversationContext)?.kind
             ?: when (feedback.cue.origin.source) {
-                OriginSource.GOAL -> CognitiveThreadKind.GOAL_DIRECTED
+                OriginSource.DURABLE_WORK -> CognitiveThreadKind.DURABLE_WORK_DIRECTED
                 OriginSource.ID -> CognitiveThreadKind.DRIVE
                 OriginSource.SYSTEM,
                 OriginSource.USER,
@@ -1435,26 +1489,26 @@ class Ego(
     private fun cleanupAfterProjectAdvance(rootInputId: String, conversationContext: ConversationContext) {
         val sessionId = resolveSessionId(conversationContext)
         val thread = cognitiveThreads.thread(rootInputId, conversationContext)
-        val goalId = thread?.goalId
+        val workItemId = thread?.workItemId
         val stepId = thread?.metadata?.get("goal_step_id")
         planner.resetForInput(rootInputId)
-        goalsGateway.finalizeGoalCycle(rootInputId)
-        val goalState = goalId?.let { goalsGateway.goalStatus(it) }
-        val stepStatus = stepId?.let { id -> goalState?.goal?.plan?.steps?.firstOrNull { it.id == id }?.status }
+        durableWorkGateway.finalizeDurableWorkCycle(rootInputId)
+        val goalState = workItemId?.let { durableWorkGateway.workItemStatus(it) }
+        val stepStatus = stepId?.let { id -> goalState?.workItem?.plan?.steps?.firstOrNull { it.id == id }?.status }
         val retainContinuity = when {
             goalState == null -> false
-            goalState.goal.status == ai.neopsyke.agent.goal.GoalStatus.COMPLETED -> false
-            goalState.goal.status == ai.neopsyke.agent.goal.GoalStatus.FAILED -> false
-            stepStatus == ai.neopsyke.agent.goal.StepStatus.DONE -> false
-            stepStatus == ai.neopsyke.agent.goal.StepStatus.FAILED -> false
+            goalState.workItem.status == ai.neopsyke.agent.durablework.WorkItemStatus.COMPLETED -> false
+            goalState.workItem.status == ai.neopsyke.agent.durablework.WorkItemStatus.FAILED -> false
+            stepStatus == ai.neopsyke.agent.durablework.StepStatus.DONE -> false
+            stepStatus == ai.neopsyke.agent.durablework.StepStatus.FAILED -> false
             else -> true
         }
         if (retainContinuity) {
             when {
-                stepStatus == ai.neopsyke.agent.goal.StepStatus.BLOCKED ||
-                    goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.BLOCKED ->
+                stepStatus == ai.neopsyke.agent.durablework.StepStatus.BLOCKED ||
+                    goalState?.workItem?.status == ai.neopsyke.agent.durablework.WorkItemStatus.BLOCKED ->
                     cognitiveThreads.markBlocked(rootInputId, conversationContext, reason = "goal_blocked")
-                goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.SUSPENDED ->
+                goalState?.workItem?.status == ai.neopsyke.agent.durablework.WorkItemStatus.SUSPENDED ->
                     cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_suspended")
                 else ->
                     cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_waiting_resume")
@@ -1463,7 +1517,7 @@ class Ego(
                 ?.let { updated -> emitThreadUpdate(updated, rootInputId, "goal_cycle_retained") }
             deliberation.clearForInput(rootInputId, sessionId, retainThreadContinuity = true)
         } else {
-            if (goalState?.goal?.status == ai.neopsyke.agent.goal.GoalStatus.FAILED || stepStatus == ai.neopsyke.agent.goal.StepStatus.FAILED) {
+            if (goalState?.workItem?.status == ai.neopsyke.agent.durablework.WorkItemStatus.FAILED || stepStatus == ai.neopsyke.agent.durablework.StepStatus.FAILED) {
                 cognitiveThreads.markFailed(rootInputId, conversationContext, reason = "goal_failed")
             } else {
                 cognitiveThreads.markResolved(rootInputId, conversationContext)
@@ -1514,7 +1568,7 @@ class Ego(
                 data = mapOf(
                     "goal_root_id" to rootInputId,
                     "retain_thread_continuity" to retainContinuity,
-                    "goal_status" to goalState?.goal?.status?.name?.lowercase(),
+                    "goal_status" to goalState?.workItem?.status?.name?.lowercase(),
                     "step_status" to stepStatus?.name?.lowercase(),
                 )
             )
@@ -1527,7 +1581,7 @@ class Ego(
                 is OpportunityTrigger.Input -> "input"
                 is OpportunityTrigger.Impulse -> "impulse"
                 is OpportunityTrigger.Feedback -> "feedback"
-                is OpportunityTrigger.GoalWork -> "goal_work"
+                is OpportunityTrigger.DurableWork -> "durable_work"
             }
             is LoopTask.ProcessContinuation -> "continuation"
             is LoopTask.ProcessIntention -> "intention"
@@ -1589,6 +1643,7 @@ class Ego(
     }
 
     private companion object {
+        const val GOAL_ARTIFACT_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_AMBIENT_PROJECTS: Int = 4
         const val AMBIENT_PROJECT_PREVIEW_CHARS: Int = 180
         const val MAX_AMBIENT_SCRATCHPAD_SIGNALS: Int = 6
@@ -1614,7 +1669,7 @@ class Ego(
                     "thread_kind" to thread.kind.name.lowercase(),
                     "thread_status" to thread.status.name.lowercase(),
                     "root_input_id" to rootInputId,
-                    "goal_id" to thread.goalId,
+                    "goal_id" to thread.workItemId,
                     "policy_scope_id" to thread.securityContext.policyScope.id,
                     "reason" to reason,
                     "thread_snapshot" to snapshot,
@@ -1709,7 +1764,7 @@ class Ego(
             conversationContext = conversationContext,
             commitMode = commitMode,
             rootStimulusId = rootInputId,
-            goalId = thread.goalId,
+            workItemId = thread.workItemId,
             goalRunId = thread.goalRunId,
             metadata = metadata,
         )

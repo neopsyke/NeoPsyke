@@ -108,7 +108,7 @@ class Id(
 
     // ── Pulse loop ───────────────────────────────────────────────────
 
-    internal fun pulse() = synchronized(stateLock) {
+    internal fun pulse(): Unit = synchronized(stateLock) {
         pulseCount++
 
         // 1. Grow all needs and decrement cooldowns.

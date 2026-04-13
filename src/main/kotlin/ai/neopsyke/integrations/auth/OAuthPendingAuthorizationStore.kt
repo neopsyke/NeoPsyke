@@ -81,7 +81,7 @@ class OAuthPendingAuthorizationStore(
     }
 
     private fun encrypt(payload: ByteArray): String {
-        val iv = ByteArray(IV_BYTES).also(secureRandom::nextBytes)
+        val iv = ByteArray(IV_BYTES).also { secureRandom.nextBytes(it) }
         val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, encryptionKey, GCMParameterSpec(GCM_TAG_BITS, iv))
         val ciphertext = cipher.doFinal(payload)

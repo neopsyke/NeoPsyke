@@ -131,7 +131,7 @@ class GeneralActionPlanner(
             SharedPromptSections.scratchpadSection(context),
             SharedPromptSections.sessionDigestSection(context),
             SharedPromptSections.ambientContextSection(context),
-            SharedPromptSections.activeGoalsSection(context),
+            SharedPromptSections.activeWorkItemsSection(context),
             SharedPromptSections.evidenceHintsSection(context),
             SharedPromptSections.deliberationPressureSection(context),
             SharedPromptSections.metaGuidanceSection(context),

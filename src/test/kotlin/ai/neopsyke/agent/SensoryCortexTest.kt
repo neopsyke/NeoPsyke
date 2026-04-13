@@ -3,6 +3,7 @@ package ai.neopsyke.agent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import ai.neopsyke.agent.cortex.sensory.DurableWorkCue
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
 import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
@@ -252,8 +253,8 @@ class SensoryCortexTest {
             trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
             metadata = mapOf(CognitiveCueMetadata.METADATA_CUE_TYPE to CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY),
         )
-        val goalCue = GoalRuntimeCue(
-            goalId = "goal-1",
+        val goalCue = DurableWorkCue(
+            workItemId = "goal-1",
             stepId = "step-1",
             reason = "resume",
         ).toStimulus()

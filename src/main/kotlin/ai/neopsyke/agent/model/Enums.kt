@@ -41,7 +41,7 @@ data class ActionType(
         val WEBSITE_FETCH: ActionType = ActionType("website_fetch")
         val REFLECT_INTERNAL: ActionType = ActionType("reflect_internal")
         val REFLECT_EVIDENCE: ActionType = ActionType("reflect_evidence")
-        val GOAL_OPERATION: ActionType = ActionType("goal_operation")
+        val DURABLE_WORK_OPERATION: ActionType = ActionType("durable_work_operation")
 
         /** Built-in action set for compatibility with existing loops/tests. */
         val entries: Set<ActionType> = setOf(
@@ -51,7 +51,7 @@ data class ActionType(
             WEBSITE_FETCH,
             REFLECT_INTERNAL,
             REFLECT_EVIDENCE,
-            GOAL_OPERATION,
+            DURABLE_WORK_OPERATION,
         )
 
         fun fromRaw(value: String?): ActionType? =

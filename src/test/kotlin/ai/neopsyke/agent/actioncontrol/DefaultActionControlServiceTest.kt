@@ -105,8 +105,8 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 11,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.GOAL_OPERATION,
-                        payload = """{"operation":"revise","goal_id":"goal-1","step":"first"}""",
+                        type = ActionType.DURABLE_WORK_OPERATION,
+                        payload = """{"operation":"revise","work_item_id":"goal-1","step":"first"}""",
                         summary = "first action",
                         rootInputId = rootInputId,
                         conversationContext = context,
@@ -125,8 +125,8 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 12,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.GOAL_OPERATION,
-                        payload = """{"operation":"revise","goal_id":"goal-2","step":"second"}""",
+                        type = ActionType.DURABLE_WORK_OPERATION,
+                        payload = """{"operation":"revise","work_item_id":"goal-2","step":"second"}""",
                         summary = "second action",
                         rootInputId = rootInputId,
                         conversationContext = context,
@@ -148,7 +148,7 @@ class DefaultActionControlServiceTest {
             }
             assertEquals(1, firstBatch.size)
             assertEquals("first action", firstBatch.single().stagedAction.summary)
-            assertContentEquals(listOf("""{"operation":"revise","goal_id":"goal-1","step":"first"}"""), executedPayloads)
+            assertContentEquals(listOf("""{"operation":"revise","work_item_id":"goal-1","step":"first"}"""), executedPayloads)
 
             val secondBatch = runBlocking {
                 service.processAutonomousStagedActions(limit = 10)
@@ -157,8 +157,8 @@ class DefaultActionControlServiceTest {
             assertEquals("second action", secondBatch.single().stagedAction.summary)
             assertContentEquals(
                 listOf(
-                    """{"operation":"revise","goal_id":"goal-1","step":"first"}""",
-                    """{"operation":"revise","goal_id":"goal-2","step":"second"}""",
+                    """{"operation":"revise","work_item_id":"goal-1","step":"first"}""",
+                    """{"operation":"revise","work_item_id":"goal-2","step":"second"}""",
                 ),
                 executedPayloads,
             )
@@ -377,7 +377,7 @@ class DefaultActionControlServiceTest {
             val service = DefaultActionControlService(
                 config = ActionControlConfig(
                     dbPath = dbPath,
-                    goalOperationPerRootInput = 1,
+                    durableWorkOperationPerRootInput = 1,
                 ),
                 store = store,
             ) { action, _ ->
@@ -394,7 +394,7 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 201,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.GOAL_OPERATION,
+                        type = ActionType.DURABLE_WORK_OPERATION,
                         payload = """{"operation":"list"}""",
                         summary = "list goals",
                         rootInputId = rootInputId,
@@ -418,7 +418,7 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 202,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.GOAL_OPERATION,
+                        type = ActionType.DURABLE_WORK_OPERATION,
                         payload = """{"operation":"create","title":"Goal","instruction":"Do it"}""",
                         summary = "create goal",
                         rootInputId = rootInputId,
@@ -442,7 +442,7 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 203,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.GOAL_OPERATION,
+                        type = ActionType.DURABLE_WORK_OPERATION,
                         payload = """{"operation":"create","title":"Goal 2","instruction":"Do it again"}""",
                         summary = "create goal 2",
                         rootInputId = rootInputId,

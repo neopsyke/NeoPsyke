@@ -179,11 +179,11 @@ class ApprovalUnitGapsTest {
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
 
         val decision = resolver.resolve(staged)
         assertNotNull(decision.target)
-        assertEquals("telegram", decision.target!!.provider)
+        assertEquals("telegram", decision.target.provider)
         assertEquals("resolved_eligible", decision.routingScope)
 
         dashboardStore.close()
@@ -210,11 +210,11 @@ class ApprovalUnitGapsTest {
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
 
         val decision = resolver.resolve(staged)
         assertNotNull(decision.target)
-        assertEquals("webapp", decision.target!!.provider)
+        assertEquals("webapp", decision.target.provider)
         assertEquals("resolved_default_deliverable", decision.routingScope)
 
         dashboardStore.close()
@@ -240,7 +240,7 @@ class ApprovalUnitGapsTest {
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
 
         val decision = resolver.resolve(staged)
         assertEquals(null, decision.target)

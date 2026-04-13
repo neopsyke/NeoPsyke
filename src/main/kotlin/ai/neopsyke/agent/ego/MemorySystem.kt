@@ -270,8 +270,8 @@ class MemorySystem(
                     data = mapOf(
                         "trigger" to trigger,
                         "step_index" to stepIndex,
-                        "intent_pattern" to explicitIntent?.patternLabel,
-                        "latest_user_message_preview" to explicitIntent?.latestUserMessagePreview
+                        "intent_pattern" to explicitIntent.patternLabel,
+                        "latest_user_message_preview" to explicitIntent.latestUserMessagePreview
                     )
                 )
             )
@@ -1007,13 +1007,13 @@ class MemorySystem(
             is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
-            is EgoTrigger.GoalWork -> "goal-work"
+            is EgoTrigger.DurableWork -> "durable-work"
         }
         var recallIntent = RecallIntent.GENERAL
         val cue = when (trigger) {
             is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
             is EgoTrigger.ActionFeedback -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
-            is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription.trim()
+            is EgoTrigger.DurableWork -> trigger.workUnit.stepDescription.trim()
             is EgoTrigger.IncomingImpulse -> {
                 val baseCue = trigger.impulse.prompt.trim()
                 buildImpulseRecallCue(baseCue, trigger.impulse.needId, ambientContext)
@@ -1074,7 +1074,7 @@ class MemorySystem(
                 is EgoTrigger.Continuation -> trigger.continuation.rootInputId
                 is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
                 is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
-                is EgoTrigger.GoalWork -> trigger.workUnit.goalId
+                is EgoTrigger.DurableWork -> trigger.workUnit.workItemId
             }
             instrumentation.emit(
                 AgentEvents.memoryRecallResult(
@@ -1124,7 +1124,7 @@ class MemorySystem(
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent.trim()
             is EgoTrigger.Continuation -> ""
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt.trim()
-            is EgoTrigger.GoalWork -> trigger.workUnit.stepDescription.trim()
+            is EgoTrigger.DurableWork -> trigger.workUnit.stepDescription.trim()
         }
         val recentUserTurn = recentDialogue
             .asReversed()
@@ -1233,7 +1233,7 @@ class MemorySystem(
             is EgoTrigger.IncomingInput -> null
             is EgoTrigger.ActionFeedback -> null
             is EgoTrigger.IncomingImpulse -> null
-            is EgoTrigger.GoalWork -> null
+            is EgoTrigger.DurableWork -> null
             is EgoTrigger.Continuation -> {
                 val continuation = trigger.continuation
                 if (continuation.deniedActionType == null && continuation.denialReasonCode.isNullOrBlank()) {

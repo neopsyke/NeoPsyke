@@ -46,7 +46,7 @@ data class ActionSecurityPolicyConfig(
                         directCommitEnabled = true,
                         autonomousCommitEnabled = true,
                     ),
-                    ActionType.GOAL_OPERATION.id to ActionSecurityActionRule(
+                    ActionType.DURABLE_WORK_OPERATION.id to ActionSecurityActionRule(
                         directCommitEnabled = true,
                         autonomousCommitEnabled = true,
                         recurringRequiresApproval = true,
@@ -145,9 +145,9 @@ class ConfiguredActionAuthorizationPolicy(
             )
         }
 
-        classifyGoalDeleteIntent(action, actionRegistry)?.let { deleteIntent ->
+        classifyWorkItemDeleteIntent(action, actionRegistry)?.let { deleteIntent ->
             when (deleteIntent) {
-                GoalDeleteIntent.DELETE_ALL -> {
+                WorkItemDeleteIntent.DELETE_ALL -> {
                     return stage(
                         commitMode = CommitMode.APPROVAL_BACKED,
                         reason = "Deleting all goals always requires explicit owner reapproval.",
@@ -155,7 +155,7 @@ class ConfiguredActionAuthorizationPolicy(
                     )
                 }
 
-                GoalDeleteIntent.DELETE_AMBIGUOUS -> {
+                WorkItemDeleteIntent.DELETE_AMBIGUOUS -> {
                     return stage(
                         commitMode = CommitMode.APPROVAL_BACKED,
                         reason = "Ambiguous goal deletion requests require staged owner approval.",
@@ -163,7 +163,7 @@ class ConfiguredActionAuthorizationPolicy(
                     )
                 }
 
-                GoalDeleteIntent.DELETE_EXACT -> {
+                WorkItemDeleteIntent.DELETE_EXACT -> {
                     if (!isOwnerVerifiedDirectChannel(conversationContext)) {
                         return stage(
                             commitMode = CommitMode.APPROVAL_BACKED,
@@ -331,10 +331,10 @@ class ConfiguredActionAuthorizationPolicy(
     }
 
     private fun isRecurringGoalMutation(action: PendingAction): Boolean {
-        if (action.type != ActionType.GOAL_OPERATION) {
+        if (action.type != ActionType.DURABLE_WORK_OPERATION) {
             return false
         }
-        val node = goalOperationNode(action, ActionRegistry.empty()) ?: return false
+        val node = durableWorkOperationNode(action, ActionRegistry.empty()) ?: return false
         val operation = optionalText(node, "command").ifBlank {
             optionalText(node, "operation")
         }
@@ -342,32 +342,32 @@ class ConfiguredActionAuthorizationPolicy(
         return cronExpression.isNotBlank() && operation in setOf("create", "revise_plan")
     }
 
-    private fun classifyGoalDeleteIntent(
+    private fun classifyWorkItemDeleteIntent(
         action: PendingAction,
         actionRegistry: ActionRegistry,
-    ): GoalDeleteIntent? {
-        if (action.type != ActionType.GOAL_OPERATION) {
+    ): WorkItemDeleteIntent? {
+        if (action.type != ActionType.DURABLE_WORK_OPERATION) {
             return null
         }
-        val node = goalOperationNode(action, actionRegistry) ?: return null
+        val node = durableWorkOperationNode(action, actionRegistry) ?: return null
         val operation = optionalText(node, "command").ifBlank {
             optionalText(node, "operation")
         }
-        val goalId = optionalText(node, "goal_id", "goalId").ifBlank {
-            optionalText(node.path("goal_reference"), "id")
+        val workItemId = optionalText(node, "work_item_id", "workItemId").ifBlank {
+            optionalText(node.path("work_item_reference"), "id")
         }
         return when (operation) {
-            "delete_all" -> GoalDeleteIntent.DELETE_ALL
-            "delete" -> if (goalId.isNotBlank()) GoalDeleteIntent.DELETE_EXACT else GoalDeleteIntent.DELETE_AMBIGUOUS
+            "delete_all" -> WorkItemDeleteIntent.DELETE_ALL
+            "delete" -> if (workItemId.isNotBlank()) WorkItemDeleteIntent.DELETE_EXACT else WorkItemDeleteIntent.DELETE_AMBIGUOUS
             else -> null
         }
     }
 
-    private fun goalOperationNode(
+    private fun durableWorkOperationNode(
         action: PendingAction,
         actionRegistry: ActionRegistry,
     ) = runCatching {
-        mapper.readTree(actionRegistry.repairPlannerPayload(ActionType.GOAL_OPERATION, action.payload))
+        mapper.readTree(actionRegistry.repairPlannerPayload(ActionType.DURABLE_WORK_OPERATION, action.payload))
     }.getOrNull()
 
     private fun optionalText(
@@ -428,7 +428,7 @@ class ConfiguredActionAuthorizationPolicy(
             reasonCode = reasonCode,
         )
 
-    private enum class GoalDeleteIntent {
+    private enum class WorkItemDeleteIntent {
         DELETE_EXACT,
         DELETE_AMBIGUOUS,
         DELETE_ALL,

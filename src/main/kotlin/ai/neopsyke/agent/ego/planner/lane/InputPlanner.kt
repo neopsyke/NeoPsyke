@@ -5,7 +5,7 @@ import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.PlannerLane
 import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
-import ai.neopsyke.agent.ego.planner.input.GoalPlanner
+import ai.neopsyke.agent.ego.planner.input.WorkPlanBuilder
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
@@ -44,7 +44,7 @@ class InputPlanner(
     private val directResponsePlanner: DirectResponsePlanner,
     private val generalActionPlanner: GeneralActionPlanner,
     private val taskDecompositionPlanner: TaskDecompositionPlanner,
-    private val goalPlanner: GoalPlanner,
+    private val goalPlanner: WorkPlanBuilder,
 ) : PlannerLane {
 
     override val laneId: LaneId = LaneId.INPUT_INTENT_ROUTER
@@ -97,7 +97,7 @@ class InputPlanner(
             is InputRoute.DirectResponse -> directResponsePlanner.plan(groundedTrigger, groundedContext)
             is InputRoute.GeneralAction -> generalActionPlanner.plan(groundedTrigger, groundedContext)
             is InputRoute.MultiStepTask -> taskDecompositionPlanner.plan(groundedTrigger, groundedContext)
-            is InputRoute.Goal -> {
+            is InputRoute.DurableWork -> {
                 val decision = goalPlanner.plan(groundedTrigger, groundedContext)
                 if (decision is EgoDecision.Noop) {
                     instrumentation.emit(

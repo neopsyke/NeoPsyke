@@ -183,7 +183,7 @@ class GoogleWorkspaceOAuthBridge(
         URLEncoder.encode(value, StandardCharsets.UTF_8)
 
     private fun randomToken(bytes: Int): String =
-        ByteArray(bytes).also(secureRandom::nextBytes)
+        ByteArray(bytes).also { secureRandom.nextBytes(it) }
             .let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
 
     companion object {

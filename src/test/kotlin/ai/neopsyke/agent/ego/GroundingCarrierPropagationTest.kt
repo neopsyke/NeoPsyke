@@ -38,7 +38,7 @@ class GroundingCarrierPropagationTest {
 
         val resolvedInput = planner.lastResolvedInput
         assertNotNull(resolvedInput, "Expected InputPlanner to expose the grounded root input")
-        assertEquals(GroundingRequirement.REQUIRED, resolvedInput.groundingMetadata?.requirement)
+        assertEquals(GroundingRequirement.REQUIRED, resolvedInput.groundingMetadata.requirement)
 
         val trigger = OpportunityTrigger.Input(resolvedInput)
         val scheduledOpportunity = ScheduledOpportunity(
@@ -55,8 +55,8 @@ class GroundingCarrierPropagationTest {
             trigger = trigger,
         )
 
-        assertEquals(GroundingRequirement.REQUIRED, trigger.groundingMetadata?.requirement)
-        assertEquals(GroundingRequirement.REQUIRED, scheduledOpportunity.trigger.groundingMetadata?.requirement)
+        assertEquals(GroundingRequirement.REQUIRED, trigger.groundingMetadata.requirement)
+        assertEquals(GroundingRequirement.REQUIRED, scheduledOpportunity.trigger.groundingMetadata.requirement)
         assertEquals(
             resolvedInput.groundingMetadata,
             (scheduledOpportunity.trigger as OpportunityTrigger.Input).input.groundingMetadata,

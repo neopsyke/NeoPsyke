@@ -42,7 +42,6 @@ class MotorCortexTest {
         )
 
         assertEquals("Message delivered to interlocutor.", outcome.statusSummary)
-        assertEquals("Hello there", outcome.assistantOutput)
         assertEquals(listOf("ego> Hello there"), captured)
     }
 
@@ -82,7 +81,6 @@ class MotorCortexTest {
         assertTrue(outcome.statusSummary.contains("Found docs"))
         assertTrue(outcome.statusSummary.contains("snippet one | snippet two"))
         assertTrue(outcome.statusSummary.contains("sources: [1] Kotlin Docs - https://kotlinlang.org/docs/home.html"))
-        assertNull(outcome.assistantOutput)
     }
 
     @Test
@@ -121,7 +119,6 @@ class MotorCortexTest {
 
         assertEquals("Fetch completed for https://example.com.", outcome.statusSummary)
         assertEquals("none", outcome.fetchErrorCategory)
-        assertNull(outcome.assistantOutput)
     }
 
     @Test

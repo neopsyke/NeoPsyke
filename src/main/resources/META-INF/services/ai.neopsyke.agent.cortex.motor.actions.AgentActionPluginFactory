@@ -4,7 +4,7 @@ ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.WebSearchActionPluginFacto
 ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.WebsiteFetchActionPluginFactory
 ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectInternalActionPluginFactory
 ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.ReflectEvidenceActionPluginFactory
-ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.GoalOperationActionPluginFactory
+ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.DurableWorkOperationActionPluginFactory
 ai.neopsyke.agent.cortex.motor.actions.plugin.email.MicrosoftGraphEmailActionPluginFactory
 ai.neopsyke.agent.cortex.motor.actions.plugin.google.GmailObserveSearchActionPluginFactory
 ai.neopsyke.agent.cortex.motor.actions.plugin.google.GmailObserveMessageActionPluginFactory

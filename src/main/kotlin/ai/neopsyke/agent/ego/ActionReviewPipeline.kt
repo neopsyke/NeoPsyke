@@ -346,7 +346,6 @@ internal class ActionReviewPipeline(
             latestActionOutcome = outcome.plannerSignal,
             sessionId = sessionId
         )
-        maybeDeliverAssistantOutput(resolvedAction, outcome, convCtx)
         if (shouldCleanupSatisfiedIdImpulse(resolvedAction, outcome)) {
             cleanupSatisfiedIdImpulse(resolvedAction)
             instrumentation.emit(AgentEvents.phaseTimings(timing.build()))
@@ -581,6 +580,21 @@ internal class ActionReviewPipeline(
     }
 
     private suspend fun executeActionSafely(action: PendingAction): ActionOutcome {
+        val gate = actionLifecycleObserver.beforeActionExecution(action)
+        if (!gate.allow) {
+            val blockedReason = gate.reason.ifBlank { "Action blocked by lifecycle observer." }
+            actionLifecycleObserver.onActionBlocked(
+                action = action,
+                reason = blockedReason,
+                reasonCode = gate.reasonCode,
+                source = gate.source,
+            )
+            return ActionOutcome(
+                statusSummary = blockedReason,
+                executionStatus = ActionExecutionStatus.FAILED,
+                observedEvidence = false,
+            )
+        }
         return try {
             motorCortex.execute(action, config.searchResultCount)
         } catch (ex: Exception) {
@@ -658,10 +672,16 @@ internal class ActionReviewPipeline(
         sessionId: String,
         convCtx: ConversationContext,
     ) {
-        val assistantOutput = outcome.assistantOutput ?: return
+        // Only CONTACT_USER actions represent messages delivered to the user.
+        // The action payload IS the message text.
+        if (resolvedAction.type != ActionType.CONTACT_USER) return
+        if (!outcome.successful) return
+        val content = resolvedAction.payload.trim()
+        if (content.isBlank()) return
+
         val assistantTurn = DialogueTurn(
             role = DialogueRole.ASSISTANT,
-            content = assistantOutput,
+            content = content,
             sessionId = sessionId,
             interlocutor = convCtx.interlocutor,
             timestamp = java.time.Instant.now()
@@ -669,10 +689,7 @@ internal class ActionReviewPipeline(
         dialogueFor(sessionId).addLast(assistantTurn)
         memory.remember(assistantTurn)
         trimDialogue(sessionId)
-        if (resolvedAction.type == ActionType.CONTACT_USER &&
-            resolvedAction.origin.source != OriginSource.ID &&
-            outcome.successful
-        ) {
+        if (resolvedAction.origin.source != OriginSource.ID) {
             getId()?.onActivity("contact_delivered")
         }
 
@@ -932,37 +949,6 @@ internal class ActionReviewPipeline(
 
     // ── Follow-up ──
 
-    private fun maybeDeliverAssistantOutput(
-        resolvedAction: PendingAction,
-        outcome: ActionOutcome,
-        convCtx: ConversationContext,
-    ) {
-        val assistantOutput = outcome.assistantOutput?.trim().orEmpty()
-        if (assistantOutput.isBlank()) return
-        if (resolvedAction.type == ActionType.CONTACT_USER) return
-        if (resolvedAction.origin.source != OriginSource.USER) return
-        if (resolvedAction.requiresFollowUpThought) return
-        val queued = scheduler.enqueueAction(
-            type = ActionType.CONTACT_USER,
-            payload = assistantOutput,
-            summary = "Deliver action result to user",
-            urgency = resolvedAction.urgency,
-            rootInputId = resolvedAction.rootInputId,
-            rootInputReceivedAtMs = resolvedAction.rootInputReceivedAtMs,
-            conversationContext = convCtx,
-            origin = resolvedAction.origin,
-            groundingMetadata = resolvedAction.groundingMetadata,
-        )
-        if (!queued) {
-            instrumentation.emit(AgentEvents.warning("Failed to enqueue user-visible action result."))
-            telemetry.recordQueueSaturation(
-                queueType = "action",
-                capacity = config.maxPendingActions,
-                reason = "enqueue_user_visible_action_result_failed_full"
-            )
-        }
-    }
-
     private fun maybeEmitActionFeedback(
         resolvedAction: PendingAction,
         outcome: ActionOutcome,
@@ -970,6 +956,12 @@ internal class ActionReviewPipeline(
         convCtx: ConversationContext,
     ) {
         if (resolvedAction.type == ActionType.CONTACT_USER) return
+        // Durable work step progression is owned by the DurableWorkRuntime via
+        // ActionLifecycleObserver, not by planner feedback cues. Suppress feedback
+        // emission for actions originating from durable work steps so the planner
+        // does not receive a redundant signal that duplicates what the runtime
+        // already processed and re-delivers content the user already received.
+        if (resolvedAction.rootInputId?.startsWith("work:") == true) return
         val cue = ActionFeedbackCue(
             rootInputId = resolvedAction.rootInputId ?: return,
             actionType = resolvedAction.type,
@@ -990,7 +982,7 @@ internal class ActionReviewPipeline(
             origin = resolvedAction.origin,
             groundingMetadata = resolvedAction.groundingMetadata,
         )
-        resolvedAction.groundingMetadata?.let { metadata ->
+        resolvedAction.groundingMetadata.let { metadata ->
             instrumentation.emit(
                 AgentEvents.groundingMetadataPropagated(
                     rootInputId = resolvedAction.rootInputId,
@@ -1018,8 +1010,8 @@ internal class ActionReviewPipeline(
                     "action_type" to resolvedAction.type.id,
                     "root_input_id" to resolvedAction.rootInputId,
                     "execution_status" to outcome.executionStatus.name.lowercase(),
-                    "grounding_required" to resolvedAction.groundingMetadata?.requirement?.name?.lowercase(),
-                    "grounding_source" to resolvedAction.groundingMetadata?.source?.name?.lowercase(),
+                    "grounding_required" to resolvedAction.groundingMetadata.requirement.name.lowercase(),
+                    "grounding_source" to resolvedAction.groundingMetadata.source.name.lowercase(),
                 )
             )
         )

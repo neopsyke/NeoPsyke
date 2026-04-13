@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
-import ai.neopsyke.agent.goal.GoalRunActivation
+import ai.neopsyke.agent.durablework.DurableWorkActivation
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.ActionType
@@ -84,12 +84,12 @@ class GroundingPropagationTest {
         assertEquals(notRequiredMetadata, intention.groundingMetadata)
     }
 
-    // --- GoalRunActivation -> OpportunityTrigger.GoalWork ---
+    // --- DurableWorkActivation -> OpportunityTrigger.DurableWork ---
 
     @Test
-    fun `OpportunityTrigger GoalWork exposes GoalRunActivation grounding metadata`() {
-        val activation = GoalRunActivation(
-            goalId = "g1",
+    fun `OpportunityTrigger GoalWork exposes DurableWorkActivation grounding metadata`() {
+        val activation = DurableWorkActivation(
+            workItemId = "g1",
             stepId = "s1",
             rootInputId = "r1",
             stepDescription = "Check weather",
@@ -98,7 +98,7 @@ class GroundingPropagationTest {
             conversationContext = ConversationContext.default(),
             groundingMetadata = requiredMetadata,
         )
-        val trigger = OpportunityTrigger.GoalWork(activation)
+        val trigger = OpportunityTrigger.DurableWork(activation)
         assertEquals(requiredMetadata, trigger.groundingMetadata)
     }
 

@@ -475,8 +475,8 @@ object LlmRuntimeConfigLoader {
             baseUrl = baseUrl,
             apiKeyEnvVar = apiKeyEnvVar,
             apiKey = env[apiKeyEnvVar]?.trim().orEmpty(),
-            defaultModel = firstNonBlank(providerYaml?.defaultModel),
-            defaultWebSearchModel = firstNonBlank(providerYaml?.defaultWebSearchModel, providerYaml?.defaultModel),
+            defaultModel = firstNonBlank(providerYaml.defaultModel),
+            defaultWebSearchModel = firstNonBlank(providerYaml.defaultWebSearchModel, providerYaml.defaultModel),
         )
     }
 

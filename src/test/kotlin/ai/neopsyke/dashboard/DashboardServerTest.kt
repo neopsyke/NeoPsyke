@@ -259,7 +259,7 @@ class DashboardServerTest {
                     AgentEvent(
                         id = 1,
                         type = "goal_started",
-                        data = mapOf("goal_id" to "goal-1")
+                        data = mapOf("work_item_id" to "goal-1")
                     )
                 )
                 val agentEvent = readNextEventNamed(stream, "agent", timeoutMs = 2_000)
@@ -309,14 +309,14 @@ class DashboardServerTest {
                         data = mapOf("message" to "not-a-goal-event")
                     )
                 )
-                val nonGoalEvent = readNextEvent(goals, timeoutMs = 600)
-                assertNull(nonGoalEvent)
+                val nonWorkItemEvent = readNextEvent(goals, timeoutMs = 600)
+                assertNull(nonWorkItemEvent)
 
                 started.store.onEvent(
                     AgentEvent(
                         id = 2,
                         type = "goal_started",
-                        data = mapOf("goal_id" to "goal-1")
+                        data = mapOf("work_item_id" to "goal-1")
                     )
                 )
                 val goalEvent = readNextEvent(goals, timeoutMs = 2_000)

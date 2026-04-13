@@ -624,7 +624,7 @@ class EgoPlannerTest {
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
                 ambientContext = ai.neopsyke.agent.model.AmbientContext(
-                    activeGoals = listOf("Improve the memory subsystem"),
+                    activeWorkItems = listOf("Improve the memory subsystem"),
                     unresolvedOpenLoops = listOf("Tidy the planner retries"),
                 )
             )

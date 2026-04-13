@@ -70,7 +70,6 @@ class ContactUserActionPlugin(
         }
         return ActionOutcome(
             statusSummary = "Message delivered to interlocutor.",
-            assistantOutput = action.payload,
             executionStatus = ActionExecutionStatus.SUCCESS,
             effects = setOf(ActionEffect.TASK_PROGRESS, ActionEffect.USER_MESSAGE_DELIVERED),
         )

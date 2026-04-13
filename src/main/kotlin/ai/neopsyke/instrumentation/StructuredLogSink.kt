@@ -144,12 +144,12 @@ class StructuredLogSink : InstrumentationSink {
 
             "plan_created" -> {
                 logger.trace {
-                    "plan.created id=${event.data["plan_id"]} goal=${event.data["goal"]} steps=${event.data["step_count"]} urgency=${event.data["urgency"]}"
+                    "plan.created id=${event.data["plan_id"]} workItem=${event.data["goal"]} steps=${event.data["step_count"]} urgency=${event.data["urgency"]}"
                 }
                 val steps = event.data["steps"]
                 if (steps is List<*> && steps.isNotEmpty()) {
                     val planText = steps.mapIndexed { i, s -> "  ${i + 1}. $s" }.joinToString("\n")
-                    logger.debug { "plan.created.steps id=${event.data["plan_id"]} goal=${event.data["goal"]}\n$planText" }
+                    logger.debug { "plan.created.steps id=${event.data["plan_id"]} workItem=${event.data["goal"]}\n$planText" }
                 }
             }
 
@@ -281,7 +281,7 @@ class StructuredLogSink : InstrumentationSink {
 
             "scratchpad_created" -> {
                 logger.trace {
-                    "scratchpad.created root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} active=${event.data["active_tasks"]} goal=${event.data["goal_preview"]}"
+                    "scratchpad.created root_id=${event.data["root_input_id"]} root_received_at_ms=${event.data["root_input_received_at_ms"]} active=${event.data["active_tasks"]} workItem=${event.data["work_item_preview"]}"
                 }
             }
 
@@ -329,7 +329,7 @@ class StructuredLogSink : InstrumentationSink {
 
             "scratchpad_digest_captured" -> {
                 logger.trace {
-                    "scratchpad.digest_captured root_id=${event.data["root_input_id"]} session=${event.data["session_id"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]} goal=${event.data["goal_preview"]}"
+                    "scratchpad.digest_captured root_id=${event.data["root_input_id"]} session=${event.data["session_id"]} sections=${event.data["section_count"]} evidence=${event.data["evidence_count"]} workItem=${event.data["work_item_preview"]}"
                 }
             }
 
@@ -623,7 +623,7 @@ class StructuredLogSink : InstrumentationSink {
             "input",
             "continuation",
             "feedback",
-            "goal_work",
+            "durable_work",
             "impulse",
         )
     }

@@ -23,7 +23,7 @@ internal data class AppCliOptions(
     val clearMemoryVector: Boolean = false,
     val clearMemoryEpisodic: Boolean = false,
     val clearMemoryLessons: Boolean = false,
-    val clearGoals: Boolean = false,
+    val clearDurableWork: Boolean = false,
     val freudLive: Boolean = false,
     val freudLiveTimeoutSeconds: Int = 120,
     val unknownArgs: List<String>,
@@ -32,7 +32,7 @@ internal data class AppCliOptions(
     val hasClearMemoryRequest: Boolean
         get() = clearMemoryAll || clearMemoryVector || clearMemoryEpisodic || clearMemoryLessons
     val hasClearRequest: Boolean
-        get() = hasClearMemoryRequest || clearGoals
+        get() = hasClearMemoryRequest || clearDurableWork
 }
 
 fun main(args: Array<String>) {
@@ -134,7 +134,7 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
     var clearMemoryVector = false
     var clearMemoryEpisodic = false
     var clearMemoryLessons = false
-    var clearGoals = false
+    var clearDurableWork = false
     var freudLive = false
     var freudLiveTimeoutSeconds = 120
     val unknownArgs = mutableListOf<String>()
@@ -310,7 +310,7 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
                 index += 1
             }
             arg == "--clear-goals" -> {
-                clearGoals = true
+                clearDurableWork = true
                 index += 1
             }
             else -> {
@@ -339,7 +339,7 @@ private fun parseCliOptions(args: Array<String>): AppCliOptions {
         clearMemoryVector = clearMemoryVector,
         clearMemoryEpisodic = clearMemoryEpisodic,
         clearMemoryLessons = clearMemoryLessons,
-        clearGoals = clearGoals,
+        clearDurableWork = clearDurableWork,
         freudLive = freudLive,
         freudLiveTimeoutSeconds = freudLiveTimeoutSeconds,
         unknownArgs = unknownArgs,

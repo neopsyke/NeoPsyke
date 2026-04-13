@@ -1,6 +1,13 @@
 package ai.neopsyke.agent.ego
 
 import ai.neopsyke.agent.config.*
+import ai.neopsyke.agent.ego.planner.ActionSummary
+import ai.neopsyke.agent.ego.planner.PlanKind
+import ai.neopsyke.agent.ego.planner.PlanRefiner
+import ai.neopsyke.agent.ego.planner.PlanRefinementMode
+import ai.neopsyke.agent.ego.planner.PlanRefinementRequest
+import ai.neopsyke.agent.ego.planner.PlanStepCandidate
+import ai.neopsyke.agent.ego.planner.TerminalPolicy
 import ai.neopsyke.agent.model.*
 import ai.neopsyke.agent.cortex.motor.MotorCortex
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
@@ -26,6 +33,7 @@ internal class DecisionDispatcher(
     private val scratchpadStore: ScratchpadStore,
     private val telemetry: EgoTelemetry,
     private val fallbackHandler: FallbackHandler,
+    private val planRefiner: PlanRefiner,
     private val dialogueFor: (String) -> ArrayDeque<DialogueTurn>,
     private val resolveSessionId: (ConversationContext) -> String,
     private val inputScope: (String?, ConversationContext) -> InputScope,
@@ -70,7 +78,7 @@ internal class DecisionDispatcher(
             groundingMetadata = groundingMetadata,
         )
         if (queued != null) {
-            groundingMetadata?.let { metadata ->
+            groundingMetadata.let { metadata ->
                 instrumentation.emit(
                     AgentEvents.groundingMetadataPropagated(
                         rootInputId = rootInputId,
@@ -127,8 +135,8 @@ internal class DecisionDispatcher(
                             "urgency" to decision.urgency.name.lowercase(),
                             "content" to decision.continuation.content,
                             "continuation_type" to decision.continuation.javaClass.simpleName,
-                            "grounding_required" to (resolvedGrounding?.requirement?.name?.lowercase()),
-                            "grounding_source" to (resolvedGrounding?.source?.name?.lowercase()),
+                            "grounding_required" to resolvedGrounding.requirement.name.lowercase(),
+                            "grounding_source" to resolvedGrounding.source.name.lowercase(),
                         )
                     )
                 )
@@ -218,7 +226,7 @@ internal class DecisionDispatcher(
                     memory.maybeRecordLesson(
                         trigger = "repeated_denied_action",
                         actionType = decision.actionType,
-                        reasonCode = originContinuation!!.denialReasonCode,
+                        reasonCode = originContinuation.denialReasonCode,
                         reason = originContinuation.denialReason,
                         deniedPayload = decision.payload,
                         recentDialogue = dialogueFor(resolveSessionId(conversationContext)).takeLast(12),
@@ -328,6 +336,10 @@ internal class DecisionDispatcher(
 
             is EgoDecision.EnqueuePlan -> {
                 scratchpadStore.resetDraftSequence(rootInputId)
+
+                // ── Plan refinement ──
+                val refinedDecision = refineInlinePlan(decision, plannerContext)
+
                 val scope = inputScope(rootInputId, conversationContext)
                 // ── Gate 1: plan budget per input ──
                 val currentPlanCount = planCountByInput.getOrDefault(scope, 0)
@@ -359,8 +371,8 @@ internal class DecisionDispatcher(
                     return
                 }
 
-                // ── Gate 2: exact plan hash dedup ──
-                val planHash = normalizePlanHash(decision.goal, decision.steps)
+                // ── Gate 2: exact plan hash dedup (uses refined plan) ──
+                val planHash = normalizePlanHash(refinedDecision.goal, refinedDecision.steps)
                 val inputHashes = emittedPlanHashes.getOrPut(scope) { mutableSetOf() }
                 if (!inputHashes.add(planHash)) {
                     instrumentation.emit(
@@ -377,7 +389,7 @@ internal class DecisionDispatcher(
                     )
                     recoverFromSuppressedPlan(
                         suppressionReason = "hash_dedup",
-                        decision = decision,
+                        decision = refinedDecision,
                         nextPassCount = nextPassCount,
                         originContinuation = originContinuation,
                         rootInputId = rootInputId,
@@ -393,8 +405,8 @@ internal class DecisionDispatcher(
                 planCountByInput[scope] = currentPlanCount + 1
                 val scratchpadActivated = scratchpadStore.recordPlan(
                     rootInputId = rootInputId,
-                    goal = decision.goal,
-                    steps = decision.steps
+                    goal = refinedDecision.goal,
+                    steps = refinedDecision.steps
                 )
                 if (scratchpadActivated) {
                     instrumentation.emit(
@@ -403,10 +415,10 @@ internal class DecisionDispatcher(
                             data = mapOf(
                                 "root_input_id" to rootInputId,
                                 "root_input_received_at_ms" to rootInputReceivedAtMs,
-                                "goal_preview" to TextSecurity.preview(decision.goal, 140),
+                                "goal_preview" to TextSecurity.preview(refinedDecision.goal, 140),
                                 "active_tasks" to scratchpadStore.activeTaskCount(),
                                 "activation_trigger" to "plan_complexity",
-                                "plan_step_count" to decision.steps.size
+                                "plan_step_count" to refinedDecision.steps.size
                             )
                         )
                     )
@@ -423,8 +435,8 @@ internal class DecisionDispatcher(
                             "root_input_id" to rootInputId,
                             "root_input_received_at_ms" to rootInputReceivedAtMs,
                             "update_type" to "plan_recorded",
-                            "goal_preview" to TextSecurity.preview(decision.goal, 140),
-                            "step_count" to decision.steps.size,
+                            "goal_preview" to TextSecurity.preview(refinedDecision.goal, 140),
+                            "step_count" to refinedDecision.steps.size,
                             "active_tasks" to scratchpadStore.activeTaskCount()
                         )
                     )
@@ -439,25 +451,25 @@ internal class DecisionDispatcher(
                 instrumentation.emit(
                     AgentEvents.planCreated(
                         planId = planId,
-                        goal = decision.goal,
-                        stepCount = decision.steps.size,
-                        urgency = decision.urgency.name.lowercase(),
-                        steps = decision.steps,
+                        goal = refinedDecision.goal,
+                        stepCount = refinedDecision.steps.size,
+                        urgency = refinedDecision.urgency.name.lowercase(),
+                        steps = refinedDecision.steps,
                         rootInputId = rootInputId,
                     )
                 )
                 var allQueued = true
-                decision.steps.forEachIndexed { index, stepDescription ->
+                refinedDecision.steps.forEachIndexed { index, stepDescription ->
                     val stepContinuation = Continuation.PlanStepContinuation(
                         content = TextSecurity.clamp(
-                            "Plan step ${index + 1}/${decision.steps.size}: $stepDescription",
+                            "Plan step ${index + 1}/${refinedDecision.steps.size}: $stepDescription",
                             config.planner.maxThoughtChars
                         ),
                         planContext = PlanContext(
                             planId = planId,
-                            planGoal = decision.goal,
+                            planGoal = refinedDecision.goal,
                             stepIndex = index,
-                            totalSteps = decision.steps.size,
+                            totalSteps = refinedDecision.steps.size,
                             stepDescription = stepDescription,
                         ),
                         allowFallbackExplanation = originContinuation?.allowFallbackExplanation == true || origin.source != OriginSource.ID,
@@ -466,7 +478,7 @@ internal class DecisionDispatcher(
                     )
                     val queued = enqueueContinuation(
                         continuation = stepContinuation,
-                        urgency = decision.urgency,
+                        urgency = refinedDecision.urgency,
                         nextPassCount = nextPassCount,
                         rootInputId = rootInputId,
                         rootInputReceivedAtMs = rootInputReceivedAtMs,
@@ -477,7 +489,7 @@ internal class DecisionDispatcher(
                     if (!queued) {
                         allQueued = false
                         instrumentation.emit(
-                            AgentEvents.warning("Failed to enqueue plan step ${index + 1}/${decision.steps.size}.")
+                            AgentEvents.warning("Failed to enqueue plan step ${index + 1}/${refinedDecision.steps.size}.")
                         )
                         telemetry.recordQueueSaturation(
                             queueType = "continuation",
@@ -490,10 +502,10 @@ internal class DecisionDispatcher(
                 instrumentation.emit(
                     AgentEvents.planStepsEnqueued(
                         planId = planId,
-                        totalSteps = decision.steps.size,
+                        totalSteps = refinedDecision.steps.size,
                         allQueued = allQueued,
-                        groundingRequired = planGrounding?.requirement?.name?.lowercase(),
-                        groundingSource = planGrounding?.source?.name?.lowercase(),
+                        groundingRequired = planGrounding.requirement.name.lowercase(),
+                        groundingSource = planGrounding.source.name.lowercase(),
                     )
                 )
                 telemetry.emitQueueSnapshot("decision_plan")
@@ -704,6 +716,92 @@ internal class DecisionDispatcher(
         val reasonCode: String,
         val reason: String,
     )
+
+    private fun refineInlinePlan(
+        decision: EgoDecision.EnqueuePlan,
+        plannerContext: PlannerContext?,
+    ): EgoDecision.EnqueuePlan {
+        if (!config.planner.planRefinementEnabled) return decision
+
+        val candidates = decision.steps.mapIndexed { i, desc ->
+            PlanStepCandidate(
+                id = "step-${i + 1}",
+                description = desc,
+            )
+        }
+        val request = PlanRefinementRequest(
+            planKind = PlanKind.INLINE_EGO,
+            terminalPolicy = TerminalPolicy.MAY_END_WITH_USER_DELIVERY,
+            goal = decision.goal,
+            instruction = decision.goal,
+            steps = candidates,
+            availableActions = buildInlineRefinementActions(plannerContext),
+            runtimeFacts = buildInlineRuntimeFacts(plannerContext),
+            recentDialogue = plannerContext?.recentDialogue?.map { "${it.role.name.lowercase()}: ${it.content}" }.orEmpty(),
+            shortTermContextSummary = plannerContext?.shortTermContextSummary.orEmpty(),
+            longTermMemoryRecall = plannerContext?.longTermMemoryRecall.orEmpty(),
+            episodicRecall = plannerContext?.episodicRecall.orEmpty(),
+            evidenceHints = plannerContext?.evidenceHints.orEmpty(),
+        )
+
+        val result = planRefiner.refine(request)
+        instrumentation.emit(
+            AgentEvent(
+                type = "plan_refinement_completed",
+                data = mapOf(
+                    "plan_kind" to "inline_ego",
+                    "refinement_mode" to result.refinementMode.name.lowercase(),
+                    "original_step_count" to decision.steps.size,
+                    "refined_step_count" to result.steps.size,
+                    "dropped_step_count" to result.droppedSteps.size,
+                )
+            )
+        )
+
+        if (result.refinementMode == PlanRefinementMode.UNCHANGED) return decision
+
+        val refinedSteps = result.steps.map { it.description }
+        return decision.copy(steps = refinedSteps)
+    }
+
+    private fun buildInlineRefinementActions(plannerContext: PlannerContext?): List<ActionSummary> {
+        val definitions = plannerContext?.actionDefinitions.orEmpty()
+        if (definitions.isNotEmpty()) {
+            return definitions
+                .map { def ->
+                    ActionSummary(
+                        actionType = def.actionType.id,
+                        description = def.description,
+                    )
+                }
+                .sortedBy { it.actionType }
+        }
+        return plannerContext?.dispatchableActions
+            .orEmpty()
+            .map { actionType ->
+                ActionSummary(
+                    actionType = actionType.id,
+                    description = actionType.id,
+                )
+            }
+            .sortedBy { it.actionType }
+    }
+
+    private fun buildInlineRuntimeFacts(plannerContext: PlannerContext?): Map<String, String> {
+        // Runtime fact keys tell the refiner which facts the executor already has,
+        // so it can prune redundant steps. The actual values are volatile (date/time)
+        // and irrelevant for plan structure validation.
+        val facts = linkedMapOf(
+            "date" to "available at execution time",
+            "time" to "available at execution time",
+            "timezone" to "available at execution time",
+        )
+        plannerContext?.opportunityKind?.let { facts["opportunity_kind"] = it.name.lowercase() }
+        plannerContext?.conversationContext?.sessionId
+            ?.takeIf { it.isNotBlank() }
+            ?.let { facts["session_id"] = it }
+        return facts
+    }
 
     private companion object {
         const val PLAN_ID_LENGTH: Int = 8

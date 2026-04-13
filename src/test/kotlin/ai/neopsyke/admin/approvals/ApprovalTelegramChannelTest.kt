@@ -305,7 +305,7 @@ class ApprovalTelegramChannelTest {
             sessionId = "goal-session", interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.GOAL))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
         val config = AgentConfig(
             approvals = ApprovalRuntimeConfig(
                 telegramStartupAckEnabled = true,
@@ -351,7 +351,7 @@ class ApprovalTelegramChannelTest {
             assertNotNull(request)
             assertEquals(true, request.lastPromptDelivered)
             assertNotNull(request.lastPromptDeliveryDetail)
-            assertTrue(request.lastPromptDeliveryDetail!!.contains("telegram-delivered"))
+            assertTrue(request.lastPromptDeliveryDetail.contains("telegram-delivered"))
         }
     }
 

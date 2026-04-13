@@ -248,8 +248,16 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 **Decision types** (sealed `EgoDecision`):
 - `FormIntention(urgency, intentionKind, commitModePreference, actionType, payload, summary)` — Execute an action.
 - `EnqueueContinuation(urgency, continuation)` — Queue typed resumable work for later processing.
-- `EnqueuePlan(urgency, goal, steps)` — Multi-step plan decomposed into typed continuations.
+- `EnqueuePlan(urgency, goal, steps)` — Multi-step plan decomposed into typed continuations. Steps pass through `PlanRefiner` before hash/dedup/enqueue.
 - `Noop(reason, parseFailureShortCircuit?, deniedActionType?, deniedActionPayload?, denialReasonCode?)` — No action.
+
+**Plan refinement** (`PlanRefiner`):
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/planner/PlanRefiner.kt`
+- All plans (inline Ego plans and durable-work plans) pass through a single bounded refinement step before commit.
+- `LlmPlanRefiner` makes one LLM call to repair/validate plans. Follows standard retry/validation/fallback.
+- `NoopPlanRefiner` for tests and when `config.planner.planRefinementEnabled=false`.
+- On failure: accepts original plan when meaning is preserved and mechanical boundary checks pass.
+- Refinement is semantic; mechanical boundary checks (step-id normalization, uniqueness, grounding enum validation) are separate.
 
 ### L0: HierarchicalEgoPlanner (Entry Point)
 - Single entry point behind `Ego.Planner` (replaced the deleted `LlmEgoPlanner`).
@@ -399,6 +407,10 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Creates durable approval request artifact.
 - Resolves owner-facing delivery channel (same-channel for conversation-origin, highest-priority live channel otherwise, fail-closed if no eligible channel).
 - Sends approval prompt through dashboard chat or Telegram.
+- **Approval context**: `StagedAction` carries generic `approvalContext: List<ApprovalContextEntry>` (labeled text blocks). Action plugins build context via `buildApprovalContext(payload)`. For durable-work CREATE, this renders the plan steps. Context is display-only (never parsed back into runtime state).
+- Approval prompt renders context entries after summary/reason block (e.g., plan steps for durable-work creation).
+- Approval interpreter receives approval context as additional classification input for plan-edit replies.
+- `DENY_AND_REISSUE` handles plan-edit feedback: "combine steps", "use web search instead", "approve but change X" → classify as DENY_AND_REISSUE, forward as new input for replanning through Ego.
 - Keeps issuing root blocked until terminal state.
 - Approval/denial hash-bound to staged action; hash drift → superseded + replacement prompt.
 - Expiry and clarification exhaustion → deny staged action → unblock root.
@@ -529,21 +541,27 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 
 ---
 
-## L1: Goals Runtime
+## L1: Durable Work Runtime
 
-- Files: `src/main/kotlin/ai/neopsyke/agent/goal/GoalsGateway.kt`, `GoalManager.kt`, `GoalStateMachine.kt`, `GoalPlanner.kt`, `GoalStepVerifier.kt`
-- Feature flag: `config.goals.enabled=false` → `NoopGoalsGateway`.
+- Files: `src/main/kotlin/ai/neopsyke/agent/durablework/DurableWorkGateway.kt`, `DurableWorkRuntime.kt`, `WorkItemStateMachine.kt`, `WorkPlanBuilder.kt`, `WorkStepVerifier.kt`
+- Feature flag: `config.durableWork.enabled=false` → `NoopDurableWorkGateway`.
+
+**Plan ownership** — Plan generation for durable work is fully Ego-owned:
+- `CREATE`: Ego planner generates plan steps as part of the CREATE decision payload. Steps pass through `PlanRefiner`. `DurableWorkRuntime` uses the pre-built plan; it does not generate its own.
+- `REVISE_PLAN`: Ego produces revised plan steps with current work-item context. Runtime applies the supplied plan.
+- `LlmWorkPlanBuilder` has been deleted. `DeterministicWorkPlanBuilder` remains as an explicit recovery/migration fallback only.
+- Missing-plan payloads emit `durable_work_missing_plan` telemetry and use the deterministic fallback.
 
 **Boundary** — Ego uses gateway only for:
 - `pendingWorkSummary()` during Id-driven impulses.
-- `nextWorkFromCue(GoalRuntimeCue)` when goal work is ready.
-- Goal-origin action lifecycle callbacks + `finalizeGoalCycle(rootInputId)`.
+- `nextWorkFromCue(DurableWorkCue)` when durable work is ready.
+- Durable-work-origin action lifecycle callbacks + `finalizeDurableWorkCycle(rootInputId)`.
 
-**Event-sourced state machine** (`GoalStateMachine`):
+**Event-sourced state machine** (`WorkItemStateMachine`):
 - Pure function: `transition(state, event) → (newState, commands)`.
-- `GoalStatus`: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`.
-- Events: Created, PlanGenerated, PlanRevised, StepStarted, StepActionExecuted, StepAcceptancePassed/Failed, StepBlocked/Unblocked, WaitConditionSatisfied/TimedOut, Suspended, Resumed, CronCycleStarted, Completed, Failed, PriorityChanged, Updated.
-- Commands (side effects): EmitWorkReady, ScheduleWakeTimer, CancelWakeTimer, RegisterWaitCondition, ClearWaitCondition, PersistGoal, NotifyUser.
+- `WorkItemStatus`: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`, `STALLED`, `NEEDS_ATTENTION`.
+- Events: Created, PlanGenerated, PlanRevised, StepStarted, StepActionExecuted, StepAcceptancePassed/Failed, StepBlocked/Unblocked, WaitConditionSatisfied/TimedOut, Suspended, Resumed, CronCycleStarted, Completed, Failed, PriorityChanged, Updated, lease/activation lifecycle events, effect-intent lifecycle events.
+- Commands (side effects): EmitWorkReady, ScheduleWakeTimer, CancelWakeTimer, RegisterWaitCondition, ClearWaitCondition, PersistWorkItem, NotifyUser.
 
 **PlanStep**:
 - `StepStatus`: PENDING → READY → IN_PROGRESS → DONE/BLOCKED/SKIPPED/FAILED.
@@ -552,14 +570,16 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 
 **Scheduling**:
 - `TimerScheduler`: registers cron expressions or absolute timestamps.
-- Cron-backed goals do not emit initial work-ready on creation; first execution waits for cron wake.
+- Cron-backed work items do not emit initial work-ready on creation; first execution waits for cron wake.
 - Cron cycle restart: when tick arrives after COMPLETED/FAILED, resets plan-step state + clears produced keys.
 - `WaitConditionMonitor`: polls async operations, fires satisfaction events.
-- Goal step roots stable per `goal:<goalId>:<stepId>` for thread/scratchpad continuity across wait/resume.
+- Work step roots stable per `work:<workItemId>:<stepId>` for thread/scratchpad continuity across wait/resume.
 
-**Goal work activations** use trusted internal automation `ConversationContext`.
+**Durable work activations** use trusted internal automation `ConversationContext`.
 - Scratchpads created when work is actually processed, not when cue ingested.
-- Goal-origin `WAITING` without async handles → contract violation.
+- Durable-work-origin `WAITING` without async handles → contract violation.
+- Activation journal records `STARTED`, `STEP_SELECTED`, `CONTEXT_MATERIALIZED`, `NEXT_WAKE_SCHEDULED`, `FINISHED`, `RECOVERED`.
+- Mutating durable-work actions are guarded by `WorkEffectLedger` (`effectIntentId = workItemId + planRevision + stepId + logicalEffectKey`) and duplicate confirmed effects are blocked before dispatch.
 - Persist: `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, workspace artifacts.
 
 ---
@@ -577,7 +597,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `website_fetch` — Fetch URL content. Effect: OBSERVE. Capability: GATHERS_EVIDENCE.
 - `reflect_internal` — Internal durable-memory action. Effect: OBSERVE. Direct+autonomous commit.
 - `reflect_evidence` — Evidence-bound reflection. Effect: OBSERVE.
-- `goal_operation` — Goal lifecycle (create/status/list/pause/resume/delete). Effect: COMMIT_INTERNAL. Create supports optional `cron_expression`.
+- `durable_work_operation` — Durable work lifecycle (create/status/list/pause/resume/delete/revise/reprioritize). Effect: CONTROL_PLANE. Create supports optional `cron_expression`.
 - `email_send` — Microsoft Graph adapter. Disabled unless env config present.
 - `gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events` — Native Google read-only.
 
