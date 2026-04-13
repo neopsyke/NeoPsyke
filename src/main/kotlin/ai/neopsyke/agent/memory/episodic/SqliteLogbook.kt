@@ -152,7 +152,7 @@ class SqliteLogbook(
             val useFts = !query.keywordSearch.isNullOrBlank()
             val fromClause = if (useFts) {
                 conditions.add("entries_fts MATCH ?")
-                params.add(query.keywordSearch!!)
+                params.add(query.keywordSearch)
                 "entries e JOIN entries_fts f ON e.id = f.rowid"
             } else {
                 "entries e"

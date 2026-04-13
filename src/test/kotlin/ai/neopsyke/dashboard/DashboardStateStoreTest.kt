@@ -687,7 +687,7 @@ class DashboardStateStoreTest {
         )
         val snapshot: DashboardSnapshot = mapper.readValue(store.snapshotJson())
         assertNotNull(snapshot.heapMetrics)
-        assertEquals(700_000L, (snapshot.heapMetrics!!["jvm_used_bytes"] as Number).toLong())
+        assertEquals(700_000L, (snapshot.heapMetrics["jvm_used_bytes"] as Number).toLong())
     }
 
     @Test

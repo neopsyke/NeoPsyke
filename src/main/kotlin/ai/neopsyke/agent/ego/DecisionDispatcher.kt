@@ -78,7 +78,7 @@ internal class DecisionDispatcher(
             groundingMetadata = groundingMetadata,
         )
         if (queued != null) {
-            groundingMetadata?.let { metadata ->
+            groundingMetadata.let { metadata ->
                 instrumentation.emit(
                     AgentEvents.groundingMetadataPropagated(
                         rootInputId = rootInputId,
@@ -135,8 +135,8 @@ internal class DecisionDispatcher(
                             "urgency" to decision.urgency.name.lowercase(),
                             "content" to decision.continuation.content,
                             "continuation_type" to decision.continuation.javaClass.simpleName,
-                            "grounding_required" to (resolvedGrounding?.requirement?.name?.lowercase()),
-                            "grounding_source" to (resolvedGrounding?.source?.name?.lowercase()),
+                            "grounding_required" to resolvedGrounding.requirement.name.lowercase(),
+                            "grounding_source" to resolvedGrounding.source.name.lowercase(),
                         )
                     )
                 )
@@ -226,7 +226,7 @@ internal class DecisionDispatcher(
                     memory.maybeRecordLesson(
                         trigger = "repeated_denied_action",
                         actionType = decision.actionType,
-                        reasonCode = originContinuation!!.denialReasonCode,
+                        reasonCode = originContinuation.denialReasonCode,
                         reason = originContinuation.denialReason,
                         deniedPayload = decision.payload,
                         recentDialogue = dialogueFor(resolveSessionId(conversationContext)).takeLast(12),
@@ -504,8 +504,8 @@ internal class DecisionDispatcher(
                         planId = planId,
                         totalSteps = refinedDecision.steps.size,
                         allQueued = allQueued,
-                        groundingRequired = planGrounding?.requirement?.name?.lowercase(),
-                        groundingSource = planGrounding?.source?.name?.lowercase(),
+                        groundingRequired = planGrounding.requirement.name.lowercase(),
+                        groundingSource = planGrounding.source.name.lowercase(),
                     )
                 )
                 telemetry.emitQueueSnapshot("decision_plan")

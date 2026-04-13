@@ -270,8 +270,8 @@ class MemorySystem(
                     data = mapOf(
                         "trigger" to trigger,
                         "step_index" to stepIndex,
-                        "intent_pattern" to explicitIntent?.patternLabel,
-                        "latest_user_message_preview" to explicitIntent?.latestUserMessagePreview
+                        "intent_pattern" to explicitIntent.patternLabel,
+                        "latest_user_message_preview" to explicitIntent.latestUserMessagePreview
                     )
                 )
             )

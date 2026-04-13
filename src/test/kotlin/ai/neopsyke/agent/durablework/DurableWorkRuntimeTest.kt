@@ -73,7 +73,7 @@ class DurableWorkRuntimeTest {
             assertEquals(id, workReady.workItemId)
             val state = manager.workItemStatus(id)
             assertNotNull(state)
-            assertEquals(WorkItemStatus.ACTIVE, state!!.workItem.status)
+            assertEquals(WorkItemStatus.ACTIVE, state.workItem.status)
             assertTrue(Files.exists(root.resolve(id).resolve(WorkItemStore.GOAL_FILE)))
 
             manager.stop()
@@ -267,7 +267,7 @@ class DurableWorkRuntimeTest {
 
             val state = manager.workItemStatus(id)
             assertNotNull(state)
-            assertEquals(WorkItemStatus.COMPLETED, state!!.workItem.status)
+            assertEquals(WorkItemStatus.COMPLETED, state.workItem.status)
 
             manager.stop()
         } finally {
@@ -309,14 +309,15 @@ class DurableWorkRuntimeTest {
 
             waitUntil {
                 val state = manager.workItemStatus(workItemId)
-                state!!.workItem?.status == WorkItemStatus.ACTIVE &&
-                    state!!.workItem.plan.steps.firstOrNull()?.status == StepStatus.READY &&
+                state != null &&
+                    state.workItem.status == WorkItemStatus.ACTIVE &&
+                    state.workItem.plan.steps.firstOrNull()?.status == StepStatus.READY &&
                     signals.any { it.workItemId == workItemId }
             }
 
             val state = manager.workItemStatus(workItemId)
             assertNotNull(state)
-            assertTrue(state!!.workItem.plan.steps.first().notes.contains("async_status=succeeded"))
+            assertTrue(state.workItem.plan.steps.first().notes.contains("async_status=succeeded"))
             assertTrue(signals.any { it.workItemId == workItemId })
 
             manager.stop()
@@ -355,10 +356,10 @@ class DurableWorkRuntimeTest {
 
             val state = manager.workItemStatus(workItemId)
             assertNotNull(state)
-            assertEquals(WorkItemStatus.ACTIVE, state!!.workItem.status)
-            assertEquals(StepStatus.READY, state!!.workItem.plan.steps.first().status)
-            assertNull(state!!.workItem.plan.steps.first().waitCondition)
-            assertEquals(1, state!!.workItem.plan.steps.first().attempts)
+            assertEquals(WorkItemStatus.ACTIVE, state.workItem.status)
+            assertEquals(StepStatus.READY, state.workItem.plan.steps.first().status)
+            assertNull(state.workItem.plan.steps.first().waitCondition)
+            assertEquals(1, state.workItem.plan.steps.first().attempts)
             assertTrue(
                 signals.any {
                                             it.workItemId == workItemId &&
@@ -433,8 +434,9 @@ class DurableWorkRuntimeTest {
             manager1.finalizeDurableWorkCycle(work.rootInputId)
             waitUntil {
                 val state = manager1.workItemStatus(workItemId)
-                state!!.workItem?.status == WorkItemStatus.BLOCKED &&
-                    state!!.workItem.plan.steps.firstOrNull()?.status == StepStatus.BLOCKED
+                state != null &&
+                    state.workItem.status == WorkItemStatus.BLOCKED &&
+                    state.workItem.plan.steps.firstOrNull()?.status == StepStatus.BLOCKED
             }
             manager1.stop()
 
@@ -450,8 +452,9 @@ class DurableWorkRuntimeTest {
 
             waitUntil {
                 val state = manager2.workItemStatus(workItemId)
-                state!!.workItem?.status == WorkItemStatus.ACTIVE &&
-                    state!!.workItem.plan.steps.firstOrNull()?.status == StepStatus.READY &&
+                state != null &&
+                    state.workItem.status == WorkItemStatus.ACTIVE &&
+                    state.workItem.plan.steps.firstOrNull()?.status == StepStatus.READY &&
                     signals.any { it.workItemId == workItemId }
             }
 
@@ -543,14 +546,15 @@ class DurableWorkRuntimeTest {
             assertEquals(1, matched)
             waitUntil {
                 val state = manager2.workItemStatus(workItemId)
-                state!!.workItem?.status == WorkItemStatus.ACTIVE &&
-                    state!!.workItem.plan.steps.firstOrNull()?.status == StepStatus.READY &&
+                state != null &&
+                    state.workItem.status == WorkItemStatus.ACTIVE &&
+                    state.workItem.plan.steps.firstOrNull()?.status == StepStatus.READY &&
                     signals.any { it.workItemId == workItemId }
             }
 
             val state = manager2.workItemStatus(workItemId)
             assertNotNull(state)
-            assertTrue(state!!.workItem.plan.steps.first().notes.contains("event completed"))
+            assertTrue(state.workItem.plan.steps.first().notes.contains("event completed"))
             assertTrue(signals.any { it.workItemId == workItemId })
 
             manager2.stop()
@@ -1032,9 +1036,9 @@ class DurableWorkRuntimeTest {
             assertTrue(signals.none { it.workItemId == id })
             val state = manager.workItemStatus(id)
             assertNotNull(state)
-            assertEquals(WorkItemStatus.ACTIVE, state!!.workItem.status)
-            assertEquals(cronExpression, state!!.workItem.cronExpression)
-            assertEquals(StepStatus.READY, state!!.workItem.plan.steps.first().status)
+            assertEquals(WorkItemStatus.ACTIVE, state.workItem.status)
+            assertEquals(cronExpression, state.workItem.cronExpression)
+            assertEquals(StepStatus.READY, state.workItem.plan.steps.first().status)
 
             manager.stop()
         } finally {
@@ -1066,8 +1070,8 @@ class DurableWorkRuntimeTest {
             assertTrue(id.isNotBlank())
             val state = manager.workItemStatus(id)
             assertNotNull(state)
-            assertEquals(WorkItemStatus.ACTIVE, state!!.workItem.status)
-            assertEquals(StepStatus.READY, state!!.workItem.plan.steps.first().status)
+            assertEquals(WorkItemStatus.ACTIVE, state.workItem.status)
+            assertEquals(StepStatus.READY, state.workItem.plan.steps.first().status)
 
             // No work-ready cue should have been emitted at creation for a cron goal
             assertTrue(signals.none { it.workItemId == id })
@@ -1083,7 +1087,7 @@ class DurableWorkRuntimeTest {
             val cue = signals.firstOrNull { it.workItemId == id }
             assertNotNull(cue, "Expected work-ready cue after cron timer wake on ACTIVE goal")
             assertEquals("cron_wake_active", cue.reason)
-            assertEquals(state!!.workItem.plan.steps.first().id, cue.stepId)
+            assertEquals(state.workItem.plan.steps.first().id, cue.stepId)
 
             manager.stop()
         } finally {
@@ -1188,7 +1192,7 @@ class DurableWorkRuntimeTest {
 
             val state = manager2.workItemStatus(workItemId)
             assertNotNull(state)
-            assertEquals(WorkItemHealth.NEEDS_ATTENTION, state!!.workItem.health)
+            assertEquals(WorkItemHealth.NEEDS_ATTENTION, state.workItem.health)
 
             manager2.stop()
         } finally {
@@ -1281,7 +1285,7 @@ class DurableWorkRuntimeTest {
             WorkItemEvent.Created(
                 workItemId = workItemId,
                 title = workItemId,
-                instruction = state!!.workItem.instruction,
+                instruction = state.workItem.instruction,
                 priority = WorkItemPriority.MEDIUM,
                 completionCriteria = "done",
                 timestamp = createdAt,
@@ -1400,7 +1404,7 @@ class DurableWorkRuntimeTest {
             assertTrue(id.isNotBlank(), "Plan with coercible maxAttempts should be accepted")
             val state = manager.workItemStatus(id)
             assertNotNull(state)
-            val steps = state!!.workItem.plan.steps
+            val steps = state.workItem.plan.steps
             assertEquals(1, steps[0].maxAttempts, "maxAttempts=0 should be coerced to 1")
             assertEquals(10, steps[1].maxAttempts, "maxAttempts=999 should be coerced to MAX_STEP_ATTEMPTS(10)")
             manager.stop()
@@ -1439,7 +1443,7 @@ class DurableWorkRuntimeTest {
             assertTrue(id.isNotBlank(), "Duplicate step ids should be normalized, not rejected")
             val state = manager.workItemStatus(id)
             assertNotNull(state)
-            val ids = state!!.workItem.plan.steps.map { it.id }
+            val ids = state.workItem.plan.steps.map { it.id }
             assertEquals(2, ids.toSet().size, "Normalized step ids must be unique: $ids")
             manager.stop()
         } finally {
@@ -1492,7 +1496,7 @@ class DurableWorkRuntimeTest {
             assertTrue(result.success, "Revise with valid plan should succeed: ${result.message}")
             val state = manager.workItemStatus(id)
             assertNotNull(state)
-            assertEquals(2, state!!.workItem.plan.steps.size, "Plan should have 2 new steps")
+            assertEquals(2, state.workItem.plan.steps.size, "Plan should have 2 new steps")
             assertTrue(state.workItem.plan.steps.any { it.description == "Search for data" })
             assertTrue(state.workItem.plan.steps.any { it.description == "Deliver to user" })
             manager.stop()

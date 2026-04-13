@@ -31,8 +31,8 @@ class GoalWorkGroundingTest {
         )
 
         assertNotNull(activation.groundingMetadata)
-        assertEquals(GroundingRequirement.REQUIRED, activation.groundingMetadata!!.requirement)
-        assertEquals(GroundingSource.DURABLE_WORK_STEP_POLICY, activation.groundingMetadata!!.source)
+        assertEquals(GroundingRequirement.REQUIRED, activation.groundingMetadata.requirement)
+        assertEquals(GroundingSource.DURABLE_WORK_STEP_POLICY, activation.groundingMetadata.source)
     }
 
     @Test
@@ -44,8 +44,8 @@ class GoalWorkGroundingTest {
             )
         )
 
-        assertEquals(GroundingRequirement.REQUIRED, trigger.groundingMetadata?.requirement)
-        assertEquals(GroundingSource.DURABLE_WORK_STEP_POLICY, trigger.groundingMetadata?.source)
+        assertEquals(GroundingRequirement.REQUIRED, trigger.groundingMetadata.requirement)
+        assertEquals(GroundingSource.DURABLE_WORK_STEP_POLICY, trigger.groundingMetadata.source)
     }
 
     @Test
@@ -102,7 +102,7 @@ class GoalWorkGroundingTest {
             PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
-                groundingMetadata = activation.groundingMetadata ?: GroundingMetadata.NOT_REQUIRED_PREFILTER,
+                groundingMetadata = activation.groundingMetadata,
             )
         )
 

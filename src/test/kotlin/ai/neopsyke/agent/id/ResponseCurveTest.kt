@@ -192,14 +192,14 @@ class ResponseCurveTest {
     fun `fromConfig creates power curve with custom exponent`() {
         val curve = ResponseCurve.fromConfig(ResponseCurveConfig(type = "power", exponent = 4.0))
         assertTrue(curve is ResponseCurve.Power)
-        assertEquals(4.0, (curve as ResponseCurve.Power).exponent, epsilon)
+        assertEquals(4.0, curve.exponent, epsilon)
     }
 
     @Test
     fun `fromConfig creates power curve with default exponent when not specified`() {
         val curve = ResponseCurve.fromConfig(ResponseCurveConfig(type = "power"))
         assertTrue(curve is ResponseCurve.Power)
-        assertEquals(2.0, (curve as ResponseCurve.Power).exponent, epsilon)
+        assertEquals(2.0, curve.exponent, epsilon)
     }
 
     @Test
@@ -208,7 +208,7 @@ class ResponseCurveTest {
             ResponseCurveConfig(type = "sigmoid", steepness = 8.0, midpoint = 0.6)
         )
         assertTrue(curve is ResponseCurve.Sigmoid)
-        assertEquals(8.0, (curve as ResponseCurve.Sigmoid).steepness, epsilon)
+        assertEquals(8.0, curve.steepness, epsilon)
         assertEquals(0.6, curve.midpoint, epsilon)
     }
 
@@ -216,7 +216,7 @@ class ResponseCurveTest {
     fun `fromConfig creates logarithmic curve`() {
         val curve = ResponseCurve.fromConfig(ResponseCurveConfig(type = "logarithmic", scale = 5.0))
         assertTrue(curve is ResponseCurve.Logarithmic)
-        assertEquals(5.0, (curve as ResponseCurve.Logarithmic).scale, epsilon)
+        assertEquals(5.0, curve.scale, epsilon)
     }
 
     @Test

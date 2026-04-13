@@ -1552,8 +1552,8 @@ class EgoAgentTest {
         assertTrue(hippocampus.imprints.none { it.source == "ego_long_term_memory_assessment" })
         val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
         assertTrue(skipEvent != null)
-        assertEquals("recall_echo_suppression", skipEvent?.data?.get("reason_code"))
-        assertTrue((skipEvent?.data?.get("reason_detail") as? String)?.contains("min_summary_chars=") == true)
+        assertEquals("recall_echo_suppression", skipEvent.data["reason_code"])
+        assertTrue((skipEvent.data["reason_detail"] as? String)?.contains("min_summary_chars=") == true)
     }
 
     @Test
@@ -1666,8 +1666,8 @@ class EgoAgentTest {
         assertTrue(hippocampus.imprints.none { it.source == "ego_long_term_memory_assessment" })
         val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
         assertTrue(skipEvent != null)
-        assertEquals("confidence_below_threshold", skipEvent?.data?.get("reason_code"))
-        assertTrue((skipEvent?.data?.get("reason_detail") as? String)?.contains("below configured minimum") == true)
+        assertEquals("confidence_below_threshold", skipEvent.data["reason_code"])
+        assertTrue((skipEvent.data["reason_detail"] as? String)?.contains("below configured minimum") == true)
     }
 
     @Test
@@ -1721,8 +1721,8 @@ class EgoAgentTest {
         assertTrue(hippocampus.imprints.none { it.source == "ego_long_term_memory_assessment" })
         val skipEvent = instrumentation.events.firstOrNull { it.type == "long_term_memory_persistence_skipped" }
         assertTrue(skipEvent != null)
-        assertEquals("advisor_declined_save", skipEvent?.data?.get("reason_code"))
-        assertTrue((skipEvent?.data?.get("reason_detail") as? String)?.contains("not durable") == true)
+        assertEquals("advisor_declined_save", skipEvent.data["reason_code"])
+        assertTrue((skipEvent.data["reason_detail"] as? String)?.contains("not durable") == true)
     }
 
     @Test

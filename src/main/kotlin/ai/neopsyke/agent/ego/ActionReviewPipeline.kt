@@ -982,7 +982,7 @@ internal class ActionReviewPipeline(
             origin = resolvedAction.origin,
             groundingMetadata = resolvedAction.groundingMetadata,
         )
-        resolvedAction.groundingMetadata?.let { metadata ->
+        resolvedAction.groundingMetadata.let { metadata ->
             instrumentation.emit(
                 AgentEvents.groundingMetadataPropagated(
                     rootInputId = resolvedAction.rootInputId,
@@ -1010,8 +1010,8 @@ internal class ActionReviewPipeline(
                     "action_type" to resolvedAction.type.id,
                     "root_input_id" to resolvedAction.rootInputId,
                     "execution_status" to outcome.executionStatus.name.lowercase(),
-                    "grounding_required" to resolvedAction.groundingMetadata?.requirement?.name?.lowercase(),
-                    "grounding_source" to resolvedAction.groundingMetadata?.source?.name?.lowercase(),
+                    "grounding_required" to resolvedAction.groundingMetadata.requirement.name.lowercase(),
+                    "grounding_source" to resolvedAction.groundingMetadata.source.name.lowercase(),
                 )
             )
         )

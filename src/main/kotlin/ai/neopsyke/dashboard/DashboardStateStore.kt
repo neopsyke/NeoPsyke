@@ -208,7 +208,7 @@ class DashboardStateStore(
                         action.type == ActionType.CONTACT_USER &&
                         action.rootInputId != null
                     ) {
-                        val rootInputId = action.rootInputId ?: return
+                        val rootInputId = action.rootInputId
                         val sessionId = rootInputSessionMap[rootInputId]
                         if (sessionId != null) {
                             addChatMessageLocked(
@@ -359,10 +359,10 @@ class DashboardStateStore(
             }
         }
         if (eventForBroadcast != null) {
-            enqueueTransport(TransportMessage.InstrumentationEvent(eventForBroadcast!!))
+            enqueueTransport(TransportMessage.InstrumentationEvent(eventForBroadcast))
         }
         if (actionControlPayload != null) {
-            enqueueTransport(TransportMessage.ActionControlEvent(actionControlPayload!!))
+            enqueueTransport(TransportMessage.ActionControlEvent(actionControlPayload))
         }
     }
 
@@ -596,7 +596,7 @@ class DashboardStateStore(
             }
         }
         if (healthEventForBroadcast != null) {
-            enqueueTransport(TransportMessage.InstrumentationEvent(healthEventForBroadcast!!))
+            enqueueTransport(TransportMessage.InstrumentationEvent(healthEventForBroadcast))
         }
     }
 

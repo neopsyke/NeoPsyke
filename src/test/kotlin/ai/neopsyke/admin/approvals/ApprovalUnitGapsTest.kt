@@ -183,7 +183,7 @@ class ApprovalUnitGapsTest {
 
         val decision = resolver.resolve(staged)
         assertNotNull(decision.target)
-        assertEquals("telegram", decision.target!!.provider)
+        assertEquals("telegram", decision.target.provider)
         assertEquals("resolved_eligible", decision.routingScope)
 
         dashboardStore.close()
@@ -214,7 +214,7 @@ class ApprovalUnitGapsTest {
 
         val decision = resolver.resolve(staged)
         assertNotNull(decision.target)
-        assertEquals("webapp", decision.target!!.provider)
+        assertEquals("webapp", decision.target.provider)
         assertEquals("resolved_default_deliverable", decision.routingScope)
 
         dashboardStore.close()

@@ -101,7 +101,7 @@ internal class FallbackHandler(
                 reason = "enqueue_denial_continuation_failed_full"
             )
         } else {
-            action.groundingMetadata?.let { metadata ->
+            action.groundingMetadata.let { metadata ->
                 instrumentation.emit(
                     AgentEvents.groundingMetadataPropagated(
                         rootInputId = action.rootInputId,
@@ -160,7 +160,7 @@ internal class FallbackHandler(
                 reason = "enqueue_staged_action_continuation_failed_full"
             )
         } else {
-            action.groundingMetadata?.let { metadata ->
+            action.groundingMetadata.let { metadata ->
                 instrumentation.emit(
                     AgentEvents.groundingMetadataPropagated(
                         rootInputId = action.rootInputId,

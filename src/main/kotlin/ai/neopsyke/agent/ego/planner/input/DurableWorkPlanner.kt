@@ -456,7 +456,7 @@ class WorkPlanBuilder(
             actionType = ActionType.DURABLE_WORK_OPERATION,
             payload = TextSecurity.clamp(serializedPayload, config.maxActionPayloadChars),
             summary = TextSecurity.clamp(
-                "$summaryPrefix${referenceLabel?.let { " on $it" } ?: if (command is DurableWorkCommand.Create) ": ${(command as DurableWorkCommand.Create).title}" else ""}",
+                "$summaryPrefix${referenceLabel?.let { " on $it" } ?: if (command is DurableWorkCommand.Create) ": ${command.title}" else ""}",
                 config.maxActionSummaryChars,
             ),
         )

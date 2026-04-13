@@ -154,7 +154,7 @@ class NativeFetchTool(
         internal fun htmlToReadableText(html: String, baseUri: String): String {
             val doc = Jsoup.parse(html, baseUri)
             doc.select("script, style, noscript, svg, [hidden]").remove()
-            return buildString { renderNode(doc.body() ?: return@buildString, this) }
+            return buildString { renderNode(doc.body(), this) }
                 .replace(Regex("\n{3,}"), "\n\n")
                 .trim()
         }

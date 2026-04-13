@@ -18,6 +18,7 @@ import ai.neopsyke.agent.model.ConversationContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -122,9 +123,9 @@ class ScratchpadStoreTest {
         )
 
         assertTrue(input != null)
-        assertTrue((input?.workspaceConfidence ?: 0.0) > 0.30)
-        assertTrue((input?.sectionCount ?: 0) >= 2)
-        assertEquals(0, input?.resolutionDraftCount)
+        assertTrue((input.workspaceConfidence) > 0.30)
+        assertTrue((input.sectionCount) >= 2)
+        assertEquals(0, input.resolutionDraftCount)
     }
 
     @Test
@@ -206,18 +207,20 @@ class ScratchpadStoreTest {
         store.recordResolutionDraft(root, "Draft for intent one", intentionId = "intent-1")
         store.recordResolutionDraft(root, "Draft for intent two", intentionId = "intent-2")
         val groupedFinalPass = store.buildFinalPassInput(root, "candidate one", 1200, intentionId = "intent-final")
+        assertNotNull(groupedFinalPass)
 
-        assertEquals(2, groupedFinalPass?.resolutionDraftCount)
-        assertTrue(groupedFinalPass?.compilation?.contains("Draft for intent one") == true)
-        assertTrue(groupedFinalPass?.compilation?.contains("Draft for intent two") == true)
+        assertEquals(2, groupedFinalPass.resolutionDraftCount)
+        assertTrue(groupedFinalPass.compilation.contains("Draft for intent one"))
+        assertTrue(groupedFinalPass.compilation.contains("Draft for intent two"))
 
         store.resetDraftSequence(root)
         store.recordResolutionDraft(root, "Fresh draft after reset", intentionId = "intent-3")
         val resetFinalPass = store.buildFinalPassInput(root, "candidate two", 1200, intentionId = "intent-4")
+        assertNotNull(resetFinalPass)
 
-        assertEquals(1, resetFinalPass?.resolutionDraftCount)
-        assertTrue(resetFinalPass?.compilation?.contains("Fresh draft after reset") == true)
-        assertFalse(resetFinalPass?.compilation?.contains("Draft for intent one") == true)
+        assertEquals(1, resetFinalPass.resolutionDraftCount)
+        assertTrue(resetFinalPass.compilation.contains("Fresh draft after reset"))
+        assertFalse(resetFinalPass.compilation.contains("Draft for intent one"))
     }
 
     @Test
@@ -254,8 +257,8 @@ class ScratchpadStoreTest {
         val destroyed = store.destroy("root-a")
 
         assertTrue(destroyed != null)
-        assertEquals("root-a", destroyed?.rootInputId)
-        assertEquals(1L, destroyed?.rootInputReceivedAtMs)
+        assertEquals("root-a", destroyed.rootInputId)
+        assertEquals(1L, destroyed.rootInputReceivedAtMs)
         assertEquals("", store.promptSummary("root-a", maxTokens = 200))
         assertTrue(store.promptSummary("root-b", maxTokens = 200).isNotBlank())
     }
@@ -277,9 +280,9 @@ class ScratchpadStoreTest {
         val snapshot = store.debugSnapshot(root)
 
         assertTrue(snapshot != null)
-        assertTrue((snapshot?.sections?.size ?: 0) >= 2)
-        assertTrue((snapshot?.head?.workspaceConfidence ?: 0.0) > 0.0)
-        assertTrue((snapshot?.head?.version ?: -1L) > v1)
+        assertTrue(snapshot.sections.size >= 2)
+        assertTrue(snapshot.head.workspaceConfidence > 0.0)
+        assertTrue(snapshot.head.version > v1)
     }
 
     @Test
@@ -326,7 +329,7 @@ class ScratchpadStoreTest {
         val snapshot = store.debugSnapshot(root)
 
         assertTrue(snapshot != null)
-        assertEquals(1, snapshot!!.evidenceRecords.size)
+        assertEquals(1, snapshot.evidenceRecords.size)
         assertEquals("web/website#https://example.com", snapshot.evidenceRecords.single().source)
         assertTrue(snapshot.evidence.single().contains("sanitized_external_data"))
     }
@@ -459,7 +462,7 @@ class ScratchpadStoreTest {
         val entry = store.captureDigest(root, "session-1")
 
         assertTrue(entry != null)
-        assertEquals("Find pricing", entry!!.goal)
+        assertEquals("Find pricing", entry.goal)
         assertTrue(entry.sectionIndex.size >= 3) // Request, Plan, web_search_result
         assertTrue(entry.keyEvidence.isNotEmpty())
         assertTrue(entry.sectionIndex.any { it.startsWith("Plan") })

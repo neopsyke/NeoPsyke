@@ -161,7 +161,7 @@ internal class StimulusIngressCoordinator(
             receivedAtMs = stimulus.receivedAt.toEpochMilli(),
             resumedFromWaitingThread = resumedFromWaitingThread,
         )
-        cue.groundingMetadata?.let { metadata ->
+        cue.groundingMetadata.let { metadata ->
             instrumentation.emit(
                 AgentEvents.groundingMetadataPropagated(
                     rootInputId = cue.rootInputId,

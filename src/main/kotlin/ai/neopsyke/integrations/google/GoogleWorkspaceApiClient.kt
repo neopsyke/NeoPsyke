@@ -178,10 +178,10 @@ class GoogleWorkspaceApiClient(
             items.forEachIndexed { index, item ->
                 append("${index + 1}. ")
                 append(item.summary.orEmpty().ifBlank { "(untitled)" })
-                item.start?.dateTime?.orEmpty()?.ifBlank { item.start?.date.orEmpty() }?.takeIf { it.isNotBlank() }?.let {
+                item.start?.dateTime?.orEmpty()?.ifBlank { item.start.date.orEmpty() }?.takeIf { it.isNotBlank() }?.let {
                     append(" @ ").append(it)
                 }
-                item.end?.dateTime?.orEmpty()?.ifBlank { item.end?.date.orEmpty() }?.takeIf { it.isNotBlank() }?.let {
+                item.end?.dateTime?.orEmpty()?.ifBlank { item.end.date.orEmpty() }?.takeIf { it.isNotBlank() }?.let {
                     append(" -> ").append(it)
                 }
                 item.location?.takeIf { it.isNotBlank() }?.let { append(" [").append(it).append("]") }

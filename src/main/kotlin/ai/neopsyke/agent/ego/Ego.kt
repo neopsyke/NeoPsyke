@@ -323,7 +323,7 @@ class Ego(
             origin = cue.origin,
             groundingMetadata = cue.groundingMetadata,
         )
-        cue.groundingMetadata?.let { metadata ->
+        cue.groundingMetadata.let { metadata ->
             instrumentation.emit(
                 AgentEvents.groundingMetadataPropagated(
                     rootInputId = cue.rootInputId,
@@ -604,21 +604,17 @@ class Ego(
 
         // Incorporate resolved grounding metadata from InputPlanner classification.
         val resolvedInput = planner.lastResolvedInput ?: input
-        val resolvedGrounding = resolvedInput.groundingMetadata ?: planner.lastResolvedGrounding
-        val groundedContext = if (resolvedGrounding != null) {
-            instrumentation.emit(
-                AgentEvents.groundingMetadataPropagated(
-                    rootInputId = resolvedInput.rootInputId,
-                    fromEnvelopeType = "pending_input",
-                    toEnvelopeType = "planner_context",
-                    groundingRequired = resolvedGrounding.requirement == GroundingRequirement.REQUIRED,
-                    source = resolvedGrounding.source.name.lowercase(),
-                )
+        val resolvedGrounding = resolvedInput.groundingMetadata
+        instrumentation.emit(
+            AgentEvents.groundingMetadataPropagated(
+                rootInputId = resolvedInput.rootInputId,
+                fromEnvelopeType = "pending_input",
+                toEnvelopeType = "planner_context",
+                groundingRequired = resolvedGrounding.requirement == GroundingRequirement.REQUIRED,
+                source = resolvedGrounding.source.name.lowercase(),
             )
-            context.copy(groundingMetadata = resolvedGrounding)
-        } else {
-            context
-        }
+        )
+        val groundedContext = context.copy(groundingMetadata = resolvedGrounding)
 
         timing.startPhase("apply_decision")
         dispatcher.dispatch(
@@ -738,8 +734,8 @@ class Ego(
                     "summary" to intention.intention.summary,
                     "action_type" to intention.proposedActionType?.id,
                     "root_input_id" to intention.rootInputId,
-                    "grounding_required" to intention.groundingMetadata?.requirement?.name?.lowercase(),
-                    "grounding_source" to intention.groundingMetadata?.source?.name?.lowercase(),
+                    "grounding_required" to intention.groundingMetadata.requirement.name.lowercase(),
+                    "grounding_source" to intention.groundingMetadata.source.name.lowercase(),
                 )
             )
         )
@@ -764,7 +760,7 @@ class Ego(
             requestedCommitMode = intention.intention.commitMode,
             groundingMetadata = intention.groundingMetadata,
         )
-        intention.groundingMetadata?.let { metadata ->
+        intention.groundingMetadata.let { metadata ->
             instrumentation.emit(
                 AgentEvents.groundingMetadataPropagated(
                     rootInputId = intention.rootInputId,

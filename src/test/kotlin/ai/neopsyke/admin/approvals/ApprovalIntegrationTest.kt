@@ -615,7 +615,7 @@ class ApprovalIntegrationTest {
             assertNotNull(request)
             assertEquals(true, request.lastPromptDelivered)
             assertNotNull(request.lastPromptDeliveryDetail)
-            assertTrue(request.lastPromptDeliveryDetail!!.contains("telegram-delivered"))
+            assertTrue(request.lastPromptDeliveryDetail.contains("telegram-delivered"))
         }
     }
 
