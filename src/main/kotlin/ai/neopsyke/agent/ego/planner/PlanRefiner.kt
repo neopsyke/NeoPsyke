@@ -61,6 +61,7 @@ data class PlanRefinementRequest(
     val episodicRecall: String = "",
     val evidenceHints: String = "",
     val userFeedbackHint: String? = null,
+    val cronExpression: String? = null,
 )
 
 enum class PlanRefinementMode {
@@ -228,7 +229,12 @@ class LlmPlanRefiner(
                 appendLine("6. Terminal policy: user delivery is controlled by the work item runtime; do not add or require a final delivery step.")
         }
 
-        appendLine("7. Recoverability: if the plan is malformed or underspecified but the intended meaning is recoverable, repair it instead of rejecting it.")
+        if (request.planKind == PlanKind.DURABLE_WORK_CREATE && request.cronExpression != null) {
+            appendLine("7. Scheduling guard: this is a recurring scheduled goal (cron: ${request.cronExpression}). " +
+                "Scheduling/registration is handled by the runtime at goal creation time. " +
+                "Do NOT add steps to create, register, or schedule the work item — only include steps for the actual work payload.")
+        }
+        appendLine("${if (request.cronExpression != null) "8" else "7"}. Recoverability: if the plan is malformed or underspecified but the intended meaning is recoverable, repair it instead of rejecting it.")
         appendLine()
         appendLine("Plan kind: ${request.planKind.name.lowercase()}")
         appendLine()

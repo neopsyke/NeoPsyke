@@ -158,26 +158,6 @@ class ApprovalRuntime(
             audit(request.id, "reply_rejected_scope_mismatch", "Approval reply rejected due to provider/channel/principal mismatch.")
             return OwnerIngressResult.Consumed("Approval reply ignored because it did not match the active approval scope.")
         }
-        val promptRef = extractApprovalRef(message.content)
-        if (promptRef != null && promptRef != promptReference(request)) {
-            audit(
-                request.id,
-                "reply_rejected_prompt_ref_mismatch",
-                "Approval reply referenced a stale prompt instance.",
-                payload = promptRef,
-            )
-            remindActivePromptReference(request, "The approval reference did not match the active pending prompt.")
-            return OwnerIngressResult.Consumed("Approval reply ignored because it referenced a stale approval prompt.")
-        }
-        if (requiresExplicitPromptReference(request) && promptRef == null) {
-            audit(
-                request.id,
-                "reply_rejected_missing_prompt_ref",
-                "Approval reply ignored because the latest prompt requires an explicit approval reference.",
-            )
-            remindActivePromptReference(request, "Please reply to the latest approval prompt and include its approval ref.")
-            return OwnerIngressResult.Consumed("Approval reply ignored because it did not include the current approval ref.")
-        }
         if (message.receivedAtMs < request.lastPromptAtMs) {
             audit(request.id, "reply_rejected_stale", "Stale approval reply ignored.", payload = request.promptInstanceId)
             return OwnerIngressResult.Consumed("Stale approval reply ignored.")
@@ -474,7 +454,7 @@ class ApprovalRuntime(
             updated.target,
             buildString {
                 appendLine(view.render())
-                append(bindingInstruction(updated))
+                append("Reply naturally to approve, deny, or say what to change.")
             },
             "approval-explanation"
         )
@@ -555,7 +535,7 @@ class ApprovalRuntime(
         val delivery = deliverText(
             updated.target,
             "I could not tell whether that approved or denied the pending action. " +
-                "Please answer clearly whether to proceed or deny it. ${bindingInstruction(updated)}",
+                "Please answer clearly: approve it, deny it, or say what you'd like to change.",
             "approval-clarification"
         )
         updateDeliveryStatus(updated, delivery)
@@ -640,8 +620,7 @@ class ApprovalRuntime(
                 appendLine("${entry.label}:")
                 appendLine(entry.content.take(APPROVAL_CONTEXT_MAX_CHARS))
             }
-            appendLine("Approval ref: ${promptReference(request)}")
-            append(bindingInstruction(request))
+            append("Reply naturally to approve, deny, or say what to change.")
         }
         val delivery = deliverText(request.target, prompt, "approval-prompt")
         updateDeliveryStatus(request, delivery)
@@ -875,8 +854,6 @@ class ApprovalRuntime(
         const val UNROUTED_PROVIDER: String = "unrouted"
         const val APPROVAL_CONTEXT_MAX_CHARS: Int = 2_000
         const val DUPLICATE_TERMINAL_REPLY_WINDOW_MS: Long = 60_000
-        const val PROMPT_REFERENCE_CHARS: Int = 8
-        val APPROVAL_REF_REGEX: Regex = Regex("""(?:approval\s*ref|ref)\s*[:#]?\s*([a-z0-9]{8})""")
     }
 
     private fun resolveExpiredRequest(request: ApprovalRequest, nowMs: Long) {
@@ -983,30 +960,6 @@ class ApprovalRuntime(
         )
     }
 
-    private fun requiresExplicitPromptReference(request: ApprovalRequest): Boolean =
-        request.promptVersion > 1
-
-    private fun promptReference(request: ApprovalRequest): String =
-        request.promptInstanceId.take(PROMPT_REFERENCE_CHARS).lowercase()
-
-    private fun bindingInstruction(request: ApprovalRequest): String =
-        if (requiresExplicitPromptReference(request)) {
-            "Reply with approval ref ${promptReference(request)} to approve, deny, or say what to change."
-        } else {
-            "Reply naturally to approve, deny, or say what to change."
-        }
-
-    private fun remindActivePromptReference(request: ApprovalRequest, explanation: String) {
-        val delivery = deliverText(
-            request.target,
-            "$explanation Reply with approval ref ${promptReference(request)} to resolve the pending action.",
-            "approval-ref-binding"
-        )
-        updateDeliveryStatus(request, delivery)
-    }
-
-    private fun extractApprovalRef(content: String): String? =
-        APPROVAL_REF_REGEX.find(content.lowercase())?.groupValues?.getOrNull(1)
 }
 
 private fun ApprovalRequestStatus.isTerminal(): Boolean =

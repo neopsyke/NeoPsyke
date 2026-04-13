@@ -617,7 +617,7 @@ class ApprovalRuntimeTest {
     }
 
     @Test
-    fun `stale prompt ref is rejected even when reply arrives after refresh`() = runBlocking {
+    fun `approval works after clarification without requiring references`() = runBlocking {
         withRuntime(testStagedAction()) { runtime, store, _, actionControl, _, _, _, _ ->
             runtime.onApprovalStaged(
                 actionSummary = actionControl.currentStagedAction.summary,
@@ -626,7 +626,7 @@ class ApprovalRuntimeTest {
                 reasonCode = "NEEDS_APPROVAL",
                 conversationContext = actionControl.currentStagedAction.conversationContext,
             )
-            val beforeRefresh = store.requestByStagedActionId(actionControl.currentStagedAction.id)!!
+            // First reply is ambiguous → triggers clarification
             runtime.routeOwnerMessage(
                 OwnerMessageEnvelope(
                     content = "maybe",
@@ -634,69 +634,27 @@ class ApprovalRuntimeTest {
                     priority = InputPriority.HIGH,
                     conversationContext = actionControl.currentStagedAction.conversationContext,
                     receivedAtMs = System.currentTimeMillis(),
-                    eventId = "evt-ref-refresh-1",
+                    eventId = "evt-clarify-1",
                 )
             )
-            val refreshed = store.requestByStagedActionId(actionControl.currentStagedAction.id)!!
+            val clarified = store.requestByStagedActionId(actionControl.currentStagedAction.id)!!
+            assertEquals(ApprovalRequestStatus.AWAITING_CLARIFICATION, clarified.status)
 
-            val stale = runtime.routeOwnerMessage(
-                OwnerMessageEnvelope(
-                    content = "yes ref ${beforeRefresh.promptInstanceId.take(8)}",
-                    source = "chat:test",
-                    priority = InputPriority.HIGH,
-                    conversationContext = actionControl.currentStagedAction.conversationContext,
-                    receivedAtMs = refreshed.lastPromptAtMs + 5,
-                    eventId = "evt-ref-stale-1",
-                )
-            )
-
-            assertTrue(stale is OwnerIngressResult.Consumed)
-            assertEquals(0, actionControl.authorizeCalls)
-            assertEquals(ApprovalRequestStatus.AWAITING_CLARIFICATION, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
-        }
-    }
-
-    @Test
-    fun `latest refreshed prompt requires explicit approval ref`() = runBlocking {
-        withRuntime(testStagedAction()) { runtime, store, dashboardStore, actionControl, _, _, _, _ ->
-            runtime.onApprovalStaged(
-                actionSummary = actionControl.currentStagedAction.summary,
-                stagedAction = actionControl.currentStagedAction,
-                reason = "Owner approval required.",
-                reasonCode = "NEEDS_APPROVAL",
-                conversationContext = actionControl.currentStagedAction.conversationContext,
-            )
-            runtime.routeOwnerMessage(
-                OwnerMessageEnvelope(
-                    content = "what exactly is this doing?",
-                    source = "chat:test",
-                    priority = InputPriority.HIGH,
-                    conversationContext = actionControl.currentStagedAction.conversationContext,
-                    receivedAtMs = System.currentTimeMillis(),
-                    eventId = "evt-ref-explain-1",
-                )
-            )
-            val refreshed = store.requestByStagedActionId(actionControl.currentStagedAction.id)!!
-
-            val missingRef = runtime.routeOwnerMessage(
+            // Second reply is a clear "yes" — should be accepted without any approval ref
+            val approved = runtime.routeOwnerMessage(
                 OwnerMessageEnvelope(
                     content = "yes",
                     source = "chat:test",
                     priority = InputPriority.HIGH,
                     conversationContext = actionControl.currentStagedAction.conversationContext,
-                    receivedAtMs = refreshed.lastPromptAtMs + 5,
-                    eventId = "evt-ref-missing-1",
+                    receivedAtMs = clarified.lastPromptAtMs + 5,
+                    eventId = "evt-approve-after-clarify-1",
                 )
             )
 
-            assertTrue(missingRef is OwnerIngressResult.Consumed)
-            assertEquals(0, actionControl.authorizeCalls)
-            assertEquals(ApprovalRequestStatus.AWAITING_OWNER_REPLY, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
-            assertTrue(
-                dashboardStore.chatSessionJson(actionControl.currentStagedAction.conversationContext.sessionId)
-                    .orEmpty()
-                    .contains("approval ref ${refreshed.promptInstanceId.take(8)}")
-            )
+            assertTrue(approved is OwnerIngressResult.Consumed)
+            assertEquals(1, actionControl.authorizeCalls)
+            assertEquals(ApprovalRequestStatus.APPROVED, store.requestByStagedActionId(actionControl.currentStagedAction.id)?.status)
         }
     }
 

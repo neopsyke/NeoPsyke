@@ -238,6 +238,7 @@ class WorkPlanBuilder(
             instruction = instruction,
             completionCriteria = payload.completionCriteria?.trim().orEmpty(),
             context = context,
+            cronExpression = payload.cronExpression?.trim()?.ifBlank { null },
         )
 
         val command = DurableWorkCommand.Create(
@@ -495,6 +496,7 @@ class WorkPlanBuilder(
         context: PlannerContext,
         userFeedbackHint: String? = null,
         revisionContextHint: String? = null,
+        cronExpression: String? = null,
     ): List<DurableWorkPlanStepPayload>? {
         if (rawSteps.isNullOrEmpty()) return rawSteps
         if (!config.planner.planRefinementEnabled) return rawSteps
@@ -534,6 +536,7 @@ class WorkPlanBuilder(
             longTermMemoryRecall = context.longTermMemoryRecall,
             episodicRecall = context.episodicRecall,
             userFeedbackHint = userFeedbackHint,
+            cronExpression = cronExpression,
         )
 
         val result = planRefiner.refine(request)

@@ -99,7 +99,7 @@ class DefaultApprovalInterpreter(
                     ),
                     options = ChatRequestOptions(
                         temperature = 0.0,
-                        maxTokens = 64,
+                        maxTokens = 256,
                         responseFormat = ChatResponseFormat.JsonSchema(
                             name = "approval_interpreter_decision",
                             schemaJson = APPROVAL_SCHEMA_JSON,
