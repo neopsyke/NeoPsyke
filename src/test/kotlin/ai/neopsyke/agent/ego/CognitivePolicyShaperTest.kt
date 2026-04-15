@@ -127,11 +127,9 @@ class CognitivePolicyShaperTest {
             ),
             plannerActionSurface = plannerSurface,
             implementedAvailableActions = setOf(ActionType.WEB_SEARCH),
-            implementedDispatchableActions = setOf(ActionType.WEB_SEARCH),
         )
 
         assertEquals(setOf(ActionType.WEB_SEARCH), shaped.availableActions)
-        assertEquals(setOf(ActionType.WEB_SEARCH), shaped.dispatchableActions)
         assertEquals(setOf(IntentionKind.OBSERVE), shaped.allowedIntentions)
         assertEquals(setOf(CommitMode.NOT_APPLICABLE), shaped.allowedCommitModes)
     }
@@ -169,10 +167,9 @@ class CognitivePolicyShaperTest {
             ),
             plannerActionSurface = plannerSurface,
             implementedAvailableActions = setOf(ActionType.DURABLE_WORK_OPERATION),
-            implementedDispatchableActions = setOf(ActionType.DURABLE_WORK_OPERATION),
         )
 
-        assertEquals(setOf(ActionType.DURABLE_WORK_OPERATION), shaped.dispatchableActions)
+        assertEquals(setOf(ActionType.DURABLE_WORK_OPERATION), shaped.availableActions)
         assertTrue(IntentionKind.PREPARE in shaped.allowedIntentions)
         assertTrue(IntentionKind.STAGE in shaped.allowedIntentions)
         assertTrue(IntentionKind.COMMIT in shaped.allowedIntentions)

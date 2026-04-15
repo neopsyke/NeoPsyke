@@ -54,7 +54,7 @@ class WorkPlanBuilder(
     private val planRefiner: PlanRefiner,
 ) {
     fun plan(trigger: EgoTrigger.IncomingInput, context: PlannerContext): EgoDecision {
-        if (ActionType.DURABLE_WORK_OPERATION !in context.dispatchableActions) {
+        if (ActionType.DURABLE_WORK_OPERATION !in context.availableActions) {
             return unavailableDecision()
         }
 
@@ -151,6 +151,7 @@ class WorkPlanBuilder(
             ),
             SharedPromptSections.recentDialogueSection(context),
             SharedPromptSections.shortTermSummarySection(context),
+            SharedPromptSections.actionAvailabilitySection(context),
             PromptBudgetAllocator.Section(
                 key = "goal_trigger",
                 role = ChatRole.USER,
@@ -513,7 +514,7 @@ class WorkPlanBuilder(
             )
         }
 
-        val availableActions = context.dispatchableActions.map { actionType ->
+        val availableActions = context.availableActions.map { actionType ->
             ActionSummary(actionType = actionType.id, description = actionType.id)
         }
 

@@ -63,15 +63,8 @@ internal object CognitivePolicyShaper {
             .mapNotNull { descriptor -> shapeDescriptor(conversationContext, threadSecurityContext, descriptor) }
 
         val availableActions = visibleDefinitions.map { it.actionType }.toSet()
-        val dispatchableActions = visibleDefinitions
-            .filter { definition ->
-                descriptors.firstOrNull { it.actionType == definition.actionType }?.dispatchable == true
-            }
-            .map { it.actionType }
-            .toSet()
         return PlannerActionSurface(
             availableActions = availableActions,
-            dispatchableActions = dispatchableActions,
             actionDefinitions = visibleDefinitions,
         )
     }
@@ -80,28 +73,23 @@ internal object CognitivePolicyShaper {
         opportunity: Opportunity,
         plannerActionSurface: PlannerActionSurface,
         implementedAvailableActions: Set<ActionType>,
-        implementedDispatchableActions: Set<ActionType>,
     ): Opportunity {
         val availableActions = plannerActionSurface.availableActions intersect implementedAvailableActions
-        val dispatchableActions = plannerActionSurface.dispatchableActions intersect implementedDispatchableActions
         val actionDefinitions = plannerActionSurface.actionDefinitions
             .filter { definition -> definition.actionType in availableActions }
-        val dispatchableDefinitions = actionDefinitions
-            .filter { definition -> definition.actionType in dispatchableActions }
         val allowedCommitModes = shapeOpportunityCommitModes(
             baseCommitModes = opportunity.allowedCommitModes,
-            dispatchableDefinitions = dispatchableDefinitions,
+            availableDefinitions = actionDefinitions,
         )
         val allowedIntentions = shapeOpportunityIntentions(
             baseIntentions = opportunity.allowedIntentions,
-            dispatchableDefinitions = dispatchableDefinitions,
+            availableDefinitions = actionDefinitions,
             allowedCommitModes = allowedCommitModes,
         )
         val metadata = opportunity.metadata + opportunityPolicyMetadata(
             opportunity = opportunity,
             availableActions = availableActions,
-            dispatchableActions = dispatchableActions,
-            dispatchableDefinitions = dispatchableDefinitions,
+            availableDefinitions = actionDefinitions,
             allowedIntentions = allowedIntentions,
             allowedCommitModes = allowedCommitModes,
         )
@@ -109,7 +97,6 @@ internal object CognitivePolicyShaper {
             allowedIntentions = allowedIntentions,
             allowedCommitModes = allowedCommitModes,
             availableActions = availableActions,
-            dispatchableActions = dispatchableActions,
             actionDefinitions = actionDefinitions,
             metadata = metadata,
         )
@@ -277,16 +264,16 @@ internal object CognitivePolicyShaper {
 
     private fun shapeOpportunityIntentions(
         baseIntentions: Set<IntentionKind>,
-        dispatchableDefinitions: List<ActionPlanningDefinition>,
+        availableDefinitions: List<ActionPlanningDefinition>,
         allowedCommitModes: Set<CommitMode>,
     ): Set<IntentionKind> {
-        if (dispatchableDefinitions.isEmpty()) {
+        if (availableDefinitions.isEmpty()) {
             return emptySet()
         }
-        val hasObserveOnly = dispatchableDefinitions.all { it.effectClass == ActionEffectClass.OBSERVE }
-        val hasSideEffecting = dispatchableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
-        val hasDirectCommit = dispatchableDefinitions.any { it.directCommitAllowed }
-        val hasAutonomousCommit = dispatchableDefinitions.any { it.supportsAutonomousCommit }
+        val hasObserveOnly = availableDefinitions.all { it.effectClass == ActionEffectClass.OBSERVE }
+        val hasSideEffecting = availableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
+        val hasDirectCommit = availableDefinitions.any { it.directCommitAllowed }
+        val hasAutonomousCommit = availableDefinitions.any { it.supportsAutonomousCommit }
         val approvalBackedAllowed = CommitMode.APPROVAL_BACKED in allowedCommitModes
         return buildSet {
             if (IntentionKind.OBSERVE in baseIntentions) add(IntentionKind.OBSERVE)
@@ -305,15 +292,15 @@ internal object CognitivePolicyShaper {
 
     private fun shapeOpportunityCommitModes(
         baseCommitModes: Set<CommitMode>,
-        dispatchableDefinitions: List<ActionPlanningDefinition>,
+        availableDefinitions: List<ActionPlanningDefinition>,
     ): Set<CommitMode> {
-        if (dispatchableDefinitions.isEmpty()) {
+        if (availableDefinitions.isEmpty()) {
             return baseCommitModes.intersect(setOf(CommitMode.NOT_APPLICABLE))
                 .ifEmpty { setOf(CommitMode.NOT_APPLICABLE) }
         }
-        val hasSideEffecting = dispatchableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
-        val hasAutonomousCommit = dispatchableDefinitions.any { it.supportsAutonomousCommit }
-        val hasDirectCommit = dispatchableDefinitions.any { it.directCommitAllowed }
+        val hasSideEffecting = availableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
+        val hasAutonomousCommit = availableDefinitions.any { it.supportsAutonomousCommit }
+        val hasDirectCommit = availableDefinitions.any { it.directCommitAllowed }
         return buildSet {
             if (CommitMode.NOT_APPLICABLE in baseCommitModes) add(CommitMode.NOT_APPLICABLE)
             if (CommitMode.APPROVAL_BACKED in baseCommitModes && hasSideEffecting) add(CommitMode.APPROVAL_BACKED)
@@ -327,15 +314,14 @@ internal object CognitivePolicyShaper {
     private fun opportunityPolicyMetadata(
         opportunity: Opportunity,
         availableActions: Set<ActionType>,
-        dispatchableActions: Set<ActionType>,
-        dispatchableDefinitions: List<ActionPlanningDefinition>,
+        availableDefinitions: List<ActionPlanningDefinition>,
         allowedIntentions: Set<IntentionKind>,
         allowedCommitModes: Set<CommitMode>,
     ): Map<String, String> {
-        val hasSideEffecting = dispatchableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
+        val hasSideEffecting = availableDefinitions.any { it.effectClass != ActionEffectClass.OBSERVE }
         val surfaceKind = when {
-            dispatchableDefinitions.isEmpty() -> "no_dispatchable_actions"
-            dispatchableDefinitions.all { it.effectClass == ActionEffectClass.OBSERVE } -> "observe_only"
+            availableDefinitions.isEmpty() -> "no_available_actions"
+            availableDefinitions.all { it.effectClass == ActionEffectClass.OBSERVE } -> "observe_only"
             hasSideEffecting -> "side_effecting"
             else -> "mixed"
         }
@@ -343,9 +329,8 @@ internal object CognitivePolicyShaper {
             META_POLICY_SCOPE_ID to opportunity.securityContext.policyScope.id,
             META_SURFACE_KIND to surfaceKind,
             META_AVAILABLE_ACTION_COUNT to availableActions.size.toString(),
-            META_DISPATCHABLE_ACTION_COUNT to dispatchableActions.size.toString(),
-            META_DIRECT_COMMIT_AVAILABLE to dispatchableDefinitions.any { it.directCommitAllowed }.toString(),
-            META_AUTONOMOUS_COMMIT_AVAILABLE to dispatchableDefinitions.any { it.supportsAutonomousCommit }.toString(),
+            META_DIRECT_COMMIT_AVAILABLE to availableDefinitions.any { it.directCommitAllowed }.toString(),
+            META_AUTONOMOUS_COMMIT_AVAILABLE to availableDefinitions.any { it.supportsAutonomousCommit }.toString(),
             META_APPROVAL_BACKED_AVAILABLE to (CommitMode.APPROVAL_BACKED in allowedCommitModes).toString(),
             META_ALLOWED_INTENTIONS to allowedIntentions.joinToString(",") { it.name.lowercase() },
             META_ALLOWED_COMMIT_MODES to allowedCommitModes.joinToString(",") { it.name.lowercase() },
@@ -355,7 +340,6 @@ internal object CognitivePolicyShaper {
     private const val META_POLICY_SCOPE_ID: String = "policy_scope_id"
     private const val META_SURFACE_KIND: String = "surface_kind"
     private const val META_AVAILABLE_ACTION_COUNT: String = "available_action_count"
-    private const val META_DISPATCHABLE_ACTION_COUNT: String = "dispatchable_action_count"
     private const val META_DIRECT_COMMIT_AVAILABLE: String = "direct_commit_available"
     private const val META_AUTONOMOUS_COMMIT_AVAILABLE: String = "autonomous_commit_available"
     private const val META_APPROVAL_BACKED_AVAILABLE: String = "approval_backed_available"
@@ -365,6 +349,5 @@ internal object CognitivePolicyShaper {
 
 internal data class PlannerActionSurface(
     val availableActions: Set<ActionType>,
-    val dispatchableActions: Set<ActionType>,
     val actionDefinitions: List<ActionPlanningDefinition>,
 )

@@ -165,8 +165,8 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.ActionFeedback -> {
                         if (trigger.feedback.cue.actionType == ActionType.WEB_SEARCH) {
                             followUpHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
-                            followUpHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
-                            followUpHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
+                            followUpHasContactDispatchable = ActionType.CONTACT_USER in context.availableActions
+                            followUpHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.availableActions
                             followUpHasContactDefinition = context.actionDefinitions.any { it.actionType == ActionType.CONTACT_USER }
                             followUpHasReflectInternalDefinition = context.actionDefinitions.any {
                                 it.actionType == ActionType.REFLECT_INTERNAL
@@ -263,8 +263,8 @@ class IdEgoLifecycleIntegrationTest {
                     is EgoTrigger.Continuation -> {
                         if (trigger.continuation.planContext != null) {
                             planStepHasReflectInternalAvailable = ActionType.REFLECT_INTERNAL in context.availableActions
-                            planStepHasContactDispatchable = ActionType.CONTACT_USER in context.dispatchableActions
-                            planStepHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.dispatchableActions
+                            planStepHasContactDispatchable = ActionType.CONTACT_USER in context.availableActions
+                            planStepHasReflectInternalDispatchable = ActionType.REFLECT_INTERNAL in context.availableActions
                             planStepHasContactDefinition = context.actionDefinitions.any { it.actionType == ActionType.CONTACT_USER }
                             planStepHasReflectInternalDefinition = context.actionDefinitions.any {
                                 it.actionType == ActionType.REFLECT_INTERNAL

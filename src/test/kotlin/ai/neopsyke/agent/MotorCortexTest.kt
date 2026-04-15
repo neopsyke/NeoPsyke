@@ -221,10 +221,11 @@ class MotorCortexTest {
         assertEquals(true, byType[ActionType.CONTACT_USER]?.available)
         assertEquals(false, byType[ActionType.WEB_SEARCH]?.available)
         assertEquals(true, byType[ActionType.WEBSITE_FETCH]?.available)
-        assertEquals(
-            setOf(ActionType.CONTACT_USER, ActionType.RESOLUTION_DRAFT, ActionType.WEBSITE_FETCH, ActionType.REFLECT_INTERNAL, ActionType.REFLECT_EVIDENCE),
-            cortex.availableActionTypes()
-        )
+
+        val expectedAvailable = setOf(ActionType.CONTACT_USER, ActionType.RESOLUTION_DRAFT, ActionType.WEBSITE_FETCH, ActionType.REFLECT_INTERNAL, ActionType.REFLECT_EVIDENCE)
+        assertEquals(expectedAvailable, cortex.availableActionTypes())
+        assertEquals(expectedAvailable, cortex.cachedAvailableActionTypes(), "cachedAvailableActionTypes should match after startup")
+        assertFalse(cortex.availableActionTypes().contains(ActionType.WEB_SEARCH), "Unavailable actions must not appear in available set")
     }
 
     @Test

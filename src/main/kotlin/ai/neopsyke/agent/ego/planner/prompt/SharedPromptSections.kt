@@ -121,16 +121,8 @@ object SharedPromptSections {
             .ifBlank { "contact_user" }
 
     fun actionGuidanceBlock(context: PlannerContext): String {
-        val dispatchableActions = if (context.dispatchableActions.isEmpty()) {
-            context.availableActions
-        } else {
-            context.dispatchableActions
-        }
-        val plannerVisibleActions = dispatchableActions
-            .filter { context.availableActions.contains(it) }
-            .toSet()
         return context.actionDefinitions
-            .filter { plannerVisibleActions.contains(it.actionType) }
+            .filter { context.availableActions.contains(it.actionType) }
             .sortedBy { it.actionType.id }
             .joinToString("\n") { definition ->
                 val example = definition.payloadSchemaExample?.trim().orEmpty()
@@ -154,15 +146,7 @@ object SharedPromptSections {
     }
 
     fun plannerVisibleActionSchemaEnum(context: PlannerContext): String {
-        val dispatchableActions = if (context.dispatchableActions.isEmpty()) {
-            context.availableActions
-        } else {
-            context.dispatchableActions
-        }
-        val plannerVisibleActions = dispatchableActions
-            .filter { context.availableActions.contains(it) }
-            .toSet()
-        return plannerVisibleActions
+        return context.availableActions
             .map { it.id }
             .sorted()
             .joinToString("|")
@@ -190,17 +174,6 @@ object SharedPromptSections {
             .sorted()
             .joinToString(", ")
             .ifBlank { "none" }
-        val dispatchableActions = if (context.dispatchableActions.isEmpty()) {
-            context.availableActions
-        } else {
-            context.dispatchableActions
-        }
-        val unavailableActionList = dispatchableActions
-            .filterNot { context.availableActions.contains(it) }
-            .map { it.id }
-            .sorted()
-            .joinToString(", ")
-            .ifBlank { "none" }
         return PromptBudgetAllocator.Section(
             key = "planner_action_availability",
             role = ChatRole.USER,
@@ -210,8 +183,7 @@ object SharedPromptSections {
             content = """
                 Runtime action availability:
                 available_action_types=$availableActionList
-                unavailable_action_types=$unavailableActionList
-                Never propose unavailable_action_types.
+                Only propose actions from available_action_types.
             """.trimIndent()
         )
     }

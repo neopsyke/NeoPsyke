@@ -1033,7 +1033,6 @@ class Ego(
                     descriptor.allowedArgumentDataTrust.contains(threadSecurityContext.aggregatedDataTrust)
             }
         val implementedAvailableActions = motorCortex.availableActionTypes()
-        val implementedDispatchableActions = motorCortex.dispatchableActionTypes()
         val shapedActionSurface = CognitivePolicyShaper.shapePlannerActions(
             conversationContext = conversationContext,
             threadSecurityContext = threadSecurityContext,
@@ -1046,13 +1045,6 @@ class Ego(
                 .intersect(opportunity.availableActions)
         } else {
             shapedActionSurface.availableActions intersect implementedAvailableActions
-        }
-        val dispatchableActions = if (opportunity?.dispatchableActions?.isNotEmpty() == true) {
-            shapedActionSurface.dispatchableActions
-                .intersect(implementedDispatchableActions)
-                .intersect(opportunity.dispatchableActions)
-        } else {
-            shapedActionSurface.dispatchableActions intersect implementedDispatchableActions
         }
         val actionDefinitions = if (opportunity?.actionDefinitions?.isNotEmpty() == true) {
             shapedActionSurface.actionDefinitions
@@ -1094,7 +1086,6 @@ class Ego(
             ),
             allowedCommitModes = opportunity?.allowedCommitModes ?: CommitMode.entries.toSet(),
             availableActions = availableActions,
-            dispatchableActions = dispatchableActions,
             actionDefinitions = actionDefinitions,
             conversationContext = conversationContext,
             goalWorkSummary = goalSummaryResult.text,
@@ -1336,12 +1327,10 @@ class Ego(
             emptySet()
         }
         val filteredAvailable = baseContext.availableActions - blockedPlannerActions
-        val filteredDispatchable = baseContext.dispatchableActions - blockedPlannerActions
         val filteredDefinitions = baseContext.actionDefinitions.filterNot { it.actionType in blockedPlannerActions }
         return baseContext.copy(
             idState = idState,
             availableActions = filteredAvailable,
-            dispatchableActions = filteredDispatchable,
             actionDefinitions = filteredDefinitions,
         )
     }
@@ -1697,7 +1686,6 @@ class Ego(
                     "allowed_intentions" to opportunity.allowedIntentions.map { it.name.lowercase() },
                     "allowed_commit_modes" to opportunity.allowedCommitModes.map { it.name.lowercase() },
                     "available_actions" to opportunity.availableActions.map { it.id }.sorted(),
-                    "dispatchable_actions" to opportunity.dispatchableActions.map { it.id }.sorted(),
                     "opportunity_metadata" to opportunity.metadata,
                     "thread_snapshot" to cognitiveThreads.snapshot(rootInputId, opportunity.conversationContext),
                     "grounding_required" to groundingMetadata?.requirement?.name?.lowercase(),
@@ -1729,8 +1717,7 @@ class Ego(
         val shaped = CognitivePolicyShaper.shapeOpportunityContract(
             opportunity = opportunity,
             plannerActionSurface = shapedActionSurface,
-            implementedAvailableActions = motorCortex.actionRegistry().dispatchableActionTypes(),
-            implementedDispatchableActions = motorCortex.actionRegistry().dispatchableActionTypes(),
+            implementedAvailableActions = motorCortex.cachedAvailableActionTypes(),
         )
         cognitiveThreads.recordOpportunity(rootInputId, conversationContext, shaped)
         return shaped

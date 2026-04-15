@@ -347,7 +347,6 @@ class EgoAsyncFeedbackIntegrationTest {
             assertEquals("ACTION_TYPE_NOT_AVAILABLE", blockedEvent.data["reason_code"])
             assertTrue(retryContinuations.single().contains("Action 'durable_work_operation' is not available"))
             assertFalse((opportunityEvent.data["available_actions"] as List<*>).contains("durable_work_operation"))
-            assertFalse((opportunityEvent.data["dispatchable_actions"] as List<*>).contains("durable_work_operation"))
             assertTrue(
                 instrumentation.events.none {
                     it.type == "action_proposed" && it.data["action_type"] == "durable_work_operation"

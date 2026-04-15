@@ -39,7 +39,7 @@ class InputIntentRouter(
             rootInputId = rootInputId,
         )
 
-        val goalsAvailable = ActionType.DURABLE_WORK_OPERATION in context.dispatchableActions
+        val goalsAvailable = ActionType.DURABLE_WORK_OPERATION in context.availableActions
         val routeOptions = buildRouteOptions(goalsAvailable)
         val actionSummary = context.availableActions.map { it.id }.sorted().joinToString(", ")
 

@@ -74,11 +74,21 @@ class MotorCortex(
             .map { it.actionType }
             .toSet()
 
-    suspend fun dispatchableActionTypes(): Set<ActionType> =
-        actionImplementationStatuses()
-            .filter { it.dispatchable }
+    /**
+     * Non-suspend accessor for the cached set of available action types.
+     * Falls back to descriptor-only filtering when no startup snapshot exists yet.
+     */
+    fun cachedAvailableActionTypes(): Set<ActionType> {
+        val snapshot = lastStatusSnapshot
+            ?: return actionRegistry.descriptors()
+                .filter { it.dispatchable }
+                .map { it.actionType }
+                .toSet()
+        return snapshot
+            .filter { it.dispatchable && it.available }
             .map { it.actionType }
             .toSet()
+    }
 
     fun plannerDescriptors(): List<ActionDescriptor> =
         actionRegistry.descriptors()

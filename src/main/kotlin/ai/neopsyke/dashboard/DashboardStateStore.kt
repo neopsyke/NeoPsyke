@@ -1149,7 +1149,6 @@ class DashboardStateStore(
             allowedIntentions = data["allowed_intentions"].asIntentionKindSet(),
             allowedCommitModes = data["allowed_commit_modes"].asCommitModeSet(),
             availableActions = data["available_actions"].asActionTypeSet(),
-            dispatchableActions = data["dispatchable_actions"].asActionTypeSet(),
             metadata = (data["opportunity_metadata"] as? Map<*, *>)
                 ?.entries
                 ?.mapNotNull { (key, value) ->

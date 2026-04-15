@@ -430,13 +430,11 @@ internal class ActionReviewPipeline(
     ): Boolean {
         val disabledForScope = deliberation.disabledActionTypes(resolvedAction.rootInputId, sessionId)
         val availableActionsForScope = motorCortex.availableActionTypes() - disabledForScope
-        val dispatchableActionsForScope = motorCortex.dispatchableActionTypes() - disabledForScope
         val gateDecision = taskVerifier.review(
             action = resolvedAction,
             context = DecisionVerifierContext(
                 externalEvidence = deliberation.evidenceFor(resolvedAction.rootInputId, sessionId),
                 availableActions = availableActionsForScope,
-                dispatchableActions = dispatchableActionsForScope,
                 evidenceActionTypes = motorCortex.actionTypesWithCapability(ActionCapability.GATHERS_EVIDENCE),
                 groundingTechnicalFailureBudgetExceeded = deliberation.isGroundingTechnicalFailureBudgetExceeded(
                     resolvedAction.rootInputId,

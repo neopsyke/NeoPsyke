@@ -32,6 +32,7 @@ import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.dashboard.DashboardStateStore
 import ai.neopsyke.llm.LlmRoleLabels
+import ai.neopsyke.support.StubChatModelClient
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -284,11 +285,14 @@ class ApprovalUnitGapsTest {
         val dashboardStore = DashboardStateStore()
         dashboardStore.ensureChatSession(sessionId = staged.conversationContext.sessionId)
         dashboardStore.ensureChatSession(sessionId = ConversationContext.DEFAULT_SESSION_ID)
+        val llmClient = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"deny_and_reissue"}""")
+        }
         SqliteApprovalStore(tempDb.toString()).use { store ->
             val runtime = ApprovalRuntime(
                 config = AgentConfig(), store = store, actionControlService = actionControl,
                 dashboardStore = dashboardStore, telegramConfig = TelegramChannelConfig(enabled = false), telegramSink = null,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), llmClient),
                 forwardNormalInput = { content, source, _, context -> forwarded += "$source::$content" to context; true },
                 onApprovalExecuted = {}, onApprovalDenied = {},
             )

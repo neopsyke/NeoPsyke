@@ -174,7 +174,6 @@ internal class DecisionDispatcher(
                                 "opportunity_kind" to plannerContext?.opportunityKind?.name?.lowercase(),
                                 "allowed_intentions" to plannerContext?.allowedIntentions?.map { it.name.lowercase() }.orEmpty(),
                                 "available_actions" to plannerContext?.availableActions?.map { it.id }?.sorted().orEmpty(),
-                                "dispatchable_actions" to plannerContext?.dispatchableActions?.map { it.id }?.sorted().orEmpty(),
                                 "root_input_id" to rootInputId,
                             )
                         )
@@ -661,12 +660,6 @@ internal class DecisionDispatcher(
                     reason = "Action '${decision.actionType.id}' is not available in the current opportunity.",
                 )
 
-            decision.actionType !in plannerContext.dispatchableActions ->
-                PlannerContextViolation(
-                    reasonCode = "ACTION_TYPE_NOT_DISPATCHABLE",
-                    reason = "Action '${decision.actionType.id}' is visible but not dispatchable in the current opportunity.",
-                )
-
             decision.commitModePreference !in plannerContext.allowedCommitModes ->
                 PlannerContextViolation(
                     reasonCode = "COMMIT_MODE_NOT_ALLOWED",
@@ -687,7 +680,7 @@ internal class DecisionDispatcher(
             ?.sorted()
             ?.joinToString(", ")
             .orEmpty()
-        val dispatchableActions = plannerContext?.dispatchableActions
+        val availableActions = plannerContext?.availableActions
             ?.map { it.id }
             ?.sorted()
             ?.joinToString(", ")
@@ -701,9 +694,9 @@ internal class DecisionDispatcher(
                 append(allowedIntentions)
                 append('.')
             }
-            if (dispatchableActions.isNotBlank()) {
-                append(" Dispatchable actions: ")
-                append(dispatchableActions)
+            if (availableActions.isNotBlank()) {
+                append(" Available actions: ")
+                append(availableActions)
                 append('.')
             }
             append(" Do not repeat action '")
@@ -776,7 +769,7 @@ internal class DecisionDispatcher(
                 }
                 .sortedBy { it.actionType }
         }
-        return plannerContext?.dispatchableActions
+        return plannerContext?.availableActions
             .orEmpty()
             .map { actionType ->
                 ActionSummary(

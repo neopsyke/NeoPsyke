@@ -30,8 +30,10 @@ import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.dashboard.DashboardStateStore
+import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.session.SessionRecordingManager
 import ai.neopsyke.session.SessionRecordingMode
+import ai.neopsyke.support.StubChatModelClient
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -208,6 +210,7 @@ class ApprovalIntegrationTest {
         config: AgentConfig = AgentConfig(),
         telegramConfig: TelegramChannelConfig = TelegramChannelConfig(enabled = false),
         useTelegram: Boolean = false,
+        interpreterClient: ChatModelClient? = null,
         block: suspend (IntegrationHarness) -> Unit,
     ) {
         val tempDb = Files.createTempFile("approval-integ", ".db")
@@ -227,7 +230,7 @@ class ApprovalIntegrationTest {
                 dashboardStore = dashboardStore,
                 telegramConfig = telegramConfig,
                 telegramSink = telegramSink,
-                interpreter = DefaultApprovalInterpreter(config),
+                interpreter = DefaultApprovalInterpreter(config, interpreterClient),
                 forwardNormalInput = { content, source, _, context ->
                     forwarded += "$source::$content" to context
                     true
@@ -331,7 +334,7 @@ class ApprovalIntegrationTest {
     @Test
     fun `2 approve path authorizes staged action through action control`() = runBlocking {
         val staged = testStagedAction()
-        withHarness(staged) { h ->
+        withHarness(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }) { h ->
             stageAndRoute(h, staged)
 
             val result = h.runtime.routeOwnerMessage(ownerEnvelope("yes"))
@@ -346,7 +349,7 @@ class ApprovalIntegrationTest {
     @Test
     fun `3 deny path denies staged action through action control`() = runBlocking {
         val staged = testStagedAction()
-        withHarness(staged) { h ->
+        withHarness(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"deny"}""") }) { h ->
             stageAndRoute(h, staged)
 
             val result = h.runtime.routeOwnerMessage(ownerEnvelope("no"))
@@ -361,7 +364,7 @@ class ApprovalIntegrationTest {
     @Test
     fun `4 deny and reissue denies then forwards raw owner text to normal ingress`() = runBlocking {
         val staged = testStagedAction()
-        withHarness(staged) { h ->
+        withHarness(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"deny_and_reissue"}""") }) { h ->
             stageAndRoute(h, staged)
 
             val result = h.runtime.routeOwnerMessage(ownerEnvelope("yes, send it tomorrow instead"))
@@ -381,7 +384,7 @@ class ApprovalIntegrationTest {
     @Test
     fun `5 explanatory question returns metadata answer and keeps approval pending`() = runBlocking {
         val staged = testStagedAction()
-        withHarness(staged) { h ->
+        withHarness(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"explain"}""") }) { h ->
             stageAndRoute(h, staged)
 
             val result = h.runtime.routeOwnerMessage(ownerEnvelope("what exactly does this do?"))
@@ -422,7 +425,7 @@ class ApprovalIntegrationTest {
     fun `7 one active approval per conversation with multiple staged actions`() = runBlocking {
         val staged1 = testStagedAction(id = "staged-1", rootInputId = "root-1")
         val staged2 = testStagedAction(id = "staged-2", rootInputId = "root-2", actionHash = "hash-2")
-        withHarness(staged1) { h ->
+        withHarness(staged1, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }) { h ->
             stageAndRoute(h, staged1)
 
             // Stage a second action while first is pending — it should queue
@@ -581,7 +584,7 @@ class ApprovalIntegrationTest {
     @Test
     fun `11 approval classifier routing follows configured role model path`() = runBlocking {
         val staged = testStagedAction()
-        withHarness(staged) { h ->
+        withHarness(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }) { h ->
             stageAndRoute(h, staged)
 
             val result = h.runtime.routeOwnerMessage(ownerEnvelope("sure"))
@@ -590,7 +593,7 @@ class ApprovalIntegrationTest {
 
             val request = h.store.requestByStagedActionId(staged.id)
             assertNotNull(request)
-            assertEquals(false, request.usedModelAssistance)
+            assertEquals(true, request.usedModelAssistance)
         }
     }
 
@@ -622,7 +625,10 @@ class ApprovalIntegrationTest {
     @Test
     fun `13 approval succeeds after explanation without requiring references`() = runBlocking {
         val staged = testStagedAction()
-        withHarness(staged) { h ->
+        withHarness(staged, interpreterClient = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"explain"}""")
+            enqueueRawResponse("""{"decision":"approve"}""")
+        }) { h ->
             stageAndRoute(h, staged)
 
             h.runtime.routeOwnerMessage(ownerEnvelope("what is this?"))
@@ -641,7 +647,11 @@ class ApprovalIntegrationTest {
     @Test
     fun `14 approval resolution remains terminal exactly once across competing paths`() = runBlocking {
         val staged = testStagedAction()
-        withHarness(staged) { h ->
+        withHarness(staged, interpreterClient = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"approve"}""")
+            enqueueRawResponse("""{"decision":"approve"}""")
+            enqueueRawResponse("""{"decision":"approve"}""")
+        }) { h ->
             stageAndRoute(h, staged)
 
             val result1 = h.runtime.routeOwnerMessage(ownerEnvelope("yes", eventId = "evt-1"))
@@ -661,7 +671,7 @@ class ApprovalIntegrationTest {
     @Test
     fun `15 reissued owner messages carry approval origin provenance`() = runBlocking {
         val staged = testStagedAction()
-        withHarness(staged) { h ->
+        withHarness(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"deny_and_reissue"}""") }) { h ->
             stageAndRoute(h, staged)
 
             h.runtime.routeOwnerMessage(ownerEnvelope("yes, but do it differently"))
@@ -697,7 +707,7 @@ class ApprovalIntegrationTest {
                     dashboardStore = dashboardStore,
                     telegramConfig = TelegramChannelConfig(enabled = false),
                     telegramSink = null,
-                    interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                    interpreter = DefaultApprovalInterpreter(AgentConfig(), StubChatModelClient().apply { enqueueRawResponse("""{"decision":"deny"}""") }),
                     forwardNormalInput = { _, _, _, _ -> true },
                     onApprovalExecuted = {},
                     onApprovalDenied = {},

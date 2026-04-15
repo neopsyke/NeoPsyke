@@ -122,7 +122,6 @@ data class Opportunity(
     val allowedIntentions: Set<IntentionKind> = emptySet(),
     val allowedCommitModes: Set<CommitMode> = setOf(CommitMode.NOT_APPLICABLE),
     val availableActions: Set<ActionType> = emptySet(),
-    val dispatchableActions: Set<ActionType> = emptySet(),
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val metadata: Map<String, String> = emptyMap(),
 )

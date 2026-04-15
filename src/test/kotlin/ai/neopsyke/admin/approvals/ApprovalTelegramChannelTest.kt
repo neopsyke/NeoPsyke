@@ -30,6 +30,8 @@ import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.dashboard.DashboardStateStore
+import ai.neopsyke.llm.ChatModelClient
+import ai.neopsyke.support.StubChatModelClient
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -161,6 +163,7 @@ class ApprovalTelegramChannelTest {
     private suspend fun withRuntime(
         staged: StagedAction,
         config: AgentConfig = AgentConfig(),
+        interpreterClient: ChatModelClient? = null,
         block: suspend (ApprovalRuntime, SqliteApprovalStore, FakeActionControlService, FakeTelegramSink) -> Unit,
     ) {
         val tempDb = Files.createTempFile("approval-tg", ".db")
@@ -173,7 +176,7 @@ class ApprovalTelegramChannelTest {
             val runtime = ApprovalRuntime(
                 config = config, store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = telegramConfig, telegramSink = telegramSink,
-                interpreter = DefaultApprovalInterpreter(config),
+                interpreter = DefaultApprovalInterpreter(config, interpreterClient),
                 forwardNormalInput = { _, _, _, _ -> true },
                 onApprovalExecuted = {}, onApprovalDenied = {},
             )
@@ -217,7 +220,7 @@ class ApprovalTelegramChannelTest {
             val runtime = ApprovalRuntime(
                 config = AgentConfig(), store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = telegramConfig, telegramSink = telegramSink,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }),
                 forwardNormalInput = { content, _, _, _ -> forwarded += content; true },
                 onApprovalExecuted = {}, onApprovalDenied = {},
             )
@@ -238,7 +241,7 @@ class ApprovalTelegramChannelTest {
     @Test
     fun `3 natural language approval resolution via telegram`() = runBlocking {
         val staged = stagedAction()
-        withRuntime(staged) { runtime, store, actionControl, _ ->
+        withRuntime(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }) { runtime, store, actionControl, _ ->
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
                 reason = "Approval required.", reasonCode = "NEEDS_APPROVAL",
@@ -253,7 +256,7 @@ class ApprovalTelegramChannelTest {
     @Test
     fun `4 natural language denial resolution via telegram`() = runBlocking {
         val staged = stagedAction()
-        withRuntime(staged) { runtime, store, actionControl, _ ->
+        withRuntime(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"deny"}""") }) { runtime, store, actionControl, _ ->
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
                 reason = "Approval required.", reasonCode = "NEEDS_APPROVAL",
@@ -268,7 +271,7 @@ class ApprovalTelegramChannelTest {
     @Test
     fun `5 explanatory question behavior via telegram`() = runBlocking {
         val staged = stagedAction()
-        withRuntime(staged) { runtime, store, actionControl, telegramSink ->
+        withRuntime(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"explain"}""") }) { runtime, store, actionControl, telegramSink ->
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
                 reason = "Approval required.", reasonCode = "NEEDS_APPROVAL",
@@ -358,7 +361,10 @@ class ApprovalTelegramChannelTest {
     @Test
     fun `10 duplicate inbound event handling and idempotent terminal resolution`() = runBlocking {
         val staged = stagedAction()
-        withRuntime(staged) { runtime, store, actionControl, _ ->
+        withRuntime(staged, interpreterClient = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"approve"}""")
+            enqueueRawResponse("""{"decision":"approve"}""")
+        }) { runtime, store, actionControl, _ ->
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
                 reason = "Approval required.", reasonCode = "NEEDS_APPROVAL",

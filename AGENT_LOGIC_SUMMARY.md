@@ -161,7 +161,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 **`StimulusIngressCoordinator`** — Post-sensory routing:
 - Appraises goal-runtime cues through `GoalsGateway.nextWorkFromCue(...)`.
 - Binds thread/percept state.
-- Shapes opportunity contract before enqueue (allowedIntentions, allowedCommitModes, availableActions, dispatchableActions).
+- Shapes opportunity contract before enqueue (allowedIntentions, allowedCommitModes, availableActions).
 - Emits `ScheduledOpportunity` into scheduler.
 
 ### L2: Scheduler and Priority Model
@@ -281,7 +281,7 @@ Each lane:
   - `ProgressionDecision` (`ProgressionPlanner`)
   - `GoalWorkDecision` (`GoalWorkPlanner`)
   - `ImpulseDecision` (`ImpulsePlanner`)
-- Validates constraints: allowed intentions, commit modes, available/dispatchable actions.
+- Validates constraints: allowed intentions, commit modes, available actions.
 - Emits per-lane prompt-budget telemetry.
 
 ### L2: InputPlanner Sub-Planners
@@ -360,7 +360,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Only applies to `contact_user` actions (non-contact actions and fallback explanations always allowed).
 - Reads typed `GroundingMetadata` from `PendingAction.groundingMetadata` (set at input classification time).
 - Reads typed evidence state from `DeliberationEngine.ExternalEvidenceProgress`.
-- Reads evidence action availability/dispatchability.
+- Reads evidence action availability.
 - Reads typed `isForcedTerminal` marker on the action.
 - Decision: grounding not required → allow; evidence gathered → allow; evidence unavailable → graceful allow (`GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL`); technical failures → deny (`TECH_GROUNDING_EVIDENCE_FAILURE`); no evidence yet → deny (`GROUNDING_EVIDENCE_REQUIRED`).
 - Forced terminal + grounding required + technical failures → allow degraded answer with verification-failure disclaimer.
@@ -409,7 +409,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Sends approval prompt through dashboard chat or Telegram.
 - **Approval context**: `StagedAction` carries generic `approvalContext: List<ApprovalContextEntry>` (labeled text blocks). Action plugins build context via `buildApprovalContext(payload)`. For durable-work CREATE, this renders the plan steps. Context is display-only (never parsed back into runtime state).
 - Approval prompt renders context entries after summary/reason block (e.g., plan steps for durable-work creation).
-- Approval interpreter receives approval context as additional classification input for plan-edit replies.
+- Approval interpreter is fully LLM-based (no deterministic text classification). Receives approval context as additional classification input for plan-edit replies. Classification values: approve, deny, deny_and_reissue, explain, unclear.
 - `DENY_AND_REISSUE` handles plan-edit feedback: "combine steps", "use web search instead", "approve but change X" → classify as DENY_AND_REISSUE, forward as new input for replanning through Ego.
 - Keeps issuing root blocked until terminal state.
 - Approval/denial hash-bound to staged action; hash drift → superseded + replacement prompt.
@@ -589,6 +589,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - File: `src/main/kotlin/ai/neopsyke/agent/cortex/motor/MotorCortex.kt`
 - Discovery via `ServiceLoader<AgentActionPluginFactory>` + optional connector runtime.
 - Each plugin self-describes via `ActionDescriptor`: action id, dispatchable flag, planner description/payload guidance/example, deterministic superego directives, follow-up behavior, effect class, commit capabilities, trust constraints.
+- `MotorCortex.availableActionTypes()` filters by both `dispatchable` and `available`, ensuring only runtime-available actions appear in planner prompts. There is no separate `dispatchableActions` concept — all planners use `availableActions` as the single action surface.
 
 **Built-in action plugins**:
 - `contact_user` — User-facing output. Effect: COMMIT_PRIVATE. Direct+autonomous commit.
