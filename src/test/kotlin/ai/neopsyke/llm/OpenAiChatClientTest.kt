@@ -16,6 +16,19 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class OpenAiChatClientTest {
+    companion object {
+        private val SUCCESSFUL_RESPONSE = """
+            {
+              "id": "chat-1",
+              "model": "test-model",
+              "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+              ],
+              "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+            }
+        """.trimIndent()
+    }
+
     @Test
     fun `chat calls only chat completions endpoint`() {
         val seenPaths = mutableListOf<String>()
@@ -489,6 +502,52 @@ class OpenAiChatClientTest {
             assertTrue(ex.message.orEmpty().contains("finish_reason=stop"))
             assertTrue(ex.message.orEmpty().contains("refusal_chars=7"))
         }
+    }
+
+    @Test
+    fun `reasoning effort is passed for reasoning models`() {
+        var capturedBody = ""
+        val httpClient = fakeHttpClient { request ->
+            capturedBody = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            200 to SUCCESSFUL_RESPONSE
+        }
+
+        OpenAiChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/v1",
+            modelName = "gpt-5-nano",
+            httpClient = httpClient,
+        ).use { client ->
+            client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hi")),
+                options = ChatRequestOptions(reasoningEffort = "low", maxTokens = 64)
+            )
+        }
+
+        assertTrue(capturedBody.contains("\"reasoning_effort\":\"low\""), "reasoning_effort should be in the request for gpt-5 models")
+    }
+
+    @Test
+    fun `reasoning effort is omitted for non-reasoning models`() {
+        var capturedBody = ""
+        val httpClient = fakeHttpClient { request ->
+            capturedBody = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            200 to SUCCESSFUL_RESPONSE
+        }
+
+        OpenAiChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/v1",
+            modelName = "gpt-4o-mini",
+            httpClient = httpClient,
+        ).use { client ->
+            client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hi")),
+                options = ChatRequestOptions(reasoningEffort = "low", maxTokens = 64)
+            )
+        }
+
+        assertTrue(!capturedBody.contains("reasoning_effort"), "reasoning_effort should not be in the request for non-reasoning models")
     }
 
     private fun fakeHttpClient(

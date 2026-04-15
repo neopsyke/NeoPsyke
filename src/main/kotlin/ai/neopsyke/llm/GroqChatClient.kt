@@ -65,6 +65,7 @@ class GroqChatClient(
             messages = messages.map { GroqChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = options.temperature,
             maxTokens = options.maxTokens,
+            reasoningEffort = if (supportsReasoningEffort(modelName)) options.reasoningEffort else null,
             responseFormat = responseFormatAdaptation.responseFormat.toGroqResponseFormat()
         )
 
@@ -165,6 +166,9 @@ class GroqChatClient(
         const val DEFAULT_MODEL = "openai/gpt-oss-20b"
         private const val DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 
+        private fun supportsReasoningEffort(model: String): Boolean =
+            !model.trim().lowercase().startsWith("groq/compound")
+
         private fun defaultHttpClient(): OkHttpClient =
             OkHttpClient.Builder()
                 .callTimeout(Duration.ofSeconds(30))
@@ -221,6 +225,8 @@ private data class GroqChatCompletionRequest(
     val temperature: Double? = null,
     @param:JsonProperty("max_tokens")
     val maxTokens: Int? = null,
+    @param:JsonProperty("reasoning_effort")
+    val reasoningEffort: String? = null,
     @param:JsonProperty("response_format")
     val responseFormat: GroqResponseFormat? = null,
 )

@@ -145,6 +145,7 @@ class OpenAiChatClient(
             temperature = if (tuning.includeTemperature) options.temperature else null,
             maxTokens = if (tuning.maxTokensField == OpenAiMaxTokensField.MAX_TOKENS) options.maxTokens else null,
             maxCompletionTokens = if (tuning.maxTokensField == OpenAiMaxTokensField.MAX_COMPLETION_TOKENS) options.maxTokens else null,
+            reasoningEffort = if (prefersMaxCompletionTokens(modelName)) options.reasoningEffort else null,
             responseFormat = responseFormatAdaptation.responseFormat.toOpenAiResponseFormat()
         )
         val request = Request.Builder()
@@ -386,6 +387,8 @@ private data class OpenAiChatCompletionRequest(
     val maxTokens: Int? = null,
     @param:JsonProperty("max_completion_tokens")
     val maxCompletionTokens: Int? = null,
+    @param:JsonProperty("reasoning_effort")
+    val reasoningEffort: String? = null,
     @param:JsonProperty("response_format")
     val responseFormat: OpenAiResponseFormat? = null,
 )

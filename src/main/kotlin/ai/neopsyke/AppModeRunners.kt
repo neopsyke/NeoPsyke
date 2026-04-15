@@ -132,6 +132,7 @@ import ai.neopsyke.llm.OllamaChatClient
 import ai.neopsyke.llm.OllamaProviderStatusChecker
 import ai.neopsyke.llm.ProviderHealthState
 import ai.neopsyke.llm.ProviderStatus
+import ai.neopsyke.llm.ReasoningEffortChatClient
 import ai.neopsyke.llm.TokenBudgetGuardedChatClient
 import ai.neopsyke.llm.LlmCacheMode
 import ai.neopsyke.llm.LlmCacheManager
@@ -1053,6 +1054,9 @@ internal object AppModeRunners {
                     fun maybeCacheWrap(client: ChatModelClient): ChatModelClient =
                         llmCacheManager?.wrapClient(client) ?: client
 
+                    fun maybeReasoningEffortWrap(client: ChatModelClient, endpoint: ai.neopsyke.config.LlmEndpointConfig): ChatModelClient =
+                        endpoint.reasoningEffort?.let { effort -> ReasoningEffortChatClient(client, effort) } ?: client
+
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
                             delegate = maybeCacheWrap(createChatClient(
@@ -1136,10 +1140,13 @@ internal object AppModeRunners {
                                     ).use { longTermMemoryClient ->
                                         val approvalInterpreterClient = InstrumentedChatModelClient(
                                             delegate = TokenBudgetGuardedChatClient(
-                                                delegate = maybeCacheWrap(createChatClient(
-                                                    endpoint = llm.approvalInterpreter,
-                                                    callObserver = callObserverForProvider(llm.approvalInterpreter.providerLabel)
-                                                )),
+                                                delegate = maybeReasoningEffortWrap(
+                                                    maybeCacheWrap(createChatClient(
+                                                        endpoint = llm.approvalInterpreter,
+                                                        callObserver = callObserverForProvider(llm.approvalInterpreter.providerLabel)
+                                                    )),
+                                                    llm.approvalInterpreter,
+                                                ),
                                                 budgetGate = tokenBudgetGate,
                                                 provider = llm.approvalInterpreter.providerLabel,
                                                 role = LlmRoleLabels.APPROVAL_INTERPRETER
@@ -1222,11 +1229,14 @@ internal object AppModeRunners {
                                                         createPlannerClient = { endpoint ->
                                                             InstrumentedChatModelClient(
                                                                 delegate = TokenBudgetGuardedChatClient(
-                                                                    delegate = maybeCacheWrap(
-                                                                        createChatClient(
-                                                                            endpoint = endpoint,
-                                                                            callObserver = callObserverForProvider(endpoint.providerLabel)
-                                                                        )
+                                                                    delegate = maybeReasoningEffortWrap(
+                                                                        maybeCacheWrap(
+                                                                            createChatClient(
+                                                                                endpoint = endpoint,
+                                                                                callObserver = callObserverForProvider(endpoint.providerLabel)
+                                                                            )
+                                                                        ),
+                                                                        endpoint,
                                                                     ),
                                                                     budgetGate = tokenBudgetGate,
                                                                     provider = endpoint.providerLabel,
@@ -1641,6 +1651,9 @@ internal object AppModeRunners {
                     fun maybeCacheWrap(client: ChatModelClient): ChatModelClient =
                         llmCacheManager?.wrapClient(client) ?: client
 
+                    fun maybeReasoningEffortWrap(client: ChatModelClient, endpoint: ai.neopsyke.config.LlmEndpointConfig): ChatModelClient =
+                        endpoint.reasoningEffort?.let { effort -> ReasoningEffortChatClient(client, effort) } ?: client
+
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
                             delegate = maybeCacheWrap(createChatClient(
@@ -1794,11 +1807,14 @@ internal object AppModeRunners {
                                                     createPlannerClient = { endpoint ->
                                                         InstrumentedChatModelClient(
                                                             delegate = TokenBudgetGuardedChatClient(
-                                                                delegate = maybeCacheWrap(
-                                                                    createChatClient(
-                                                                        endpoint = endpoint,
-                                                                        callObserver = callObserverForProvider(endpoint.providerLabel)
-                                                                    )
+                                                                delegate = maybeReasoningEffortWrap(
+                                                                    maybeCacheWrap(
+                                                                        createChatClient(
+                                                                            endpoint = endpoint,
+                                                                            callObserver = callObserverForProvider(endpoint.providerLabel)
+                                                                        )
+                                                                    ),
+                                                                    endpoint,
                                                                 ),
                                                                 budgetGate = tokenBudgetGate,
                                                                 provider = endpoint.providerLabel,

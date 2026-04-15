@@ -13,6 +13,7 @@ data class ChatMessage(val role: ChatRole, val content: String)
 data class ChatRequestOptions(
     val temperature: Double? = null,
     val maxTokens: Int? = null,
+    val reasoningEffort: String? = null,
     val safePrompt: Boolean? = null,
     val responseFormat: ChatResponseFormat? = null,
     val metadata: ChatCallMetadata = ChatCallMetadata()

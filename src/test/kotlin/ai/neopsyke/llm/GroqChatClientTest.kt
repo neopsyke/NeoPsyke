@@ -17,6 +17,19 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class GroqChatClientTest {
+    companion object {
+        private val SUCCESSFUL_RESPONSE = """
+            {
+              "id": "resp-1",
+              "model": "test-model",
+              "choices": [
+                {"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}
+              ],
+              "usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}
+            }
+        """.trimIndent()
+    }
+
     @Test
     fun `chat builds request and parses successful response`() {
         var capturedRequest: Request? = null
@@ -218,6 +231,52 @@ class GroqChatClientTest {
             Files.deleteIfExists(dbPath)
             Files.deleteIfExists(dbPath.resolveSibling("metrics.salt"))
         }
+    }
+
+    @Test
+    fun `reasoning effort is passed for reasoning models on groq`() {
+        var capturedBody = ""
+        val httpClient = fakeHttpClient(status = 200) { request ->
+            capturedBody = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            SUCCESSFUL_RESPONSE
+        }
+
+        GroqChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/openai/v1",
+            modelName = "openai/gpt-oss-120b",
+            httpClient = httpClient,
+        ).use { client ->
+            client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hi")),
+                options = ChatRequestOptions(reasoningEffort = "low")
+            )
+        }
+
+        assertTrue(capturedBody.contains("\"reasoning_effort\":\"low\""), "reasoning_effort should be in the request for openai/* models")
+    }
+
+    @Test
+    fun `reasoning effort is omitted for compound models on groq`() {
+        var capturedBody = ""
+        val httpClient = fakeHttpClient(status = 200) { request ->
+            capturedBody = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            SUCCESSFUL_RESPONSE
+        }
+
+        GroqChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/openai/v1",
+            modelName = "groq/compound-mini",
+            httpClient = httpClient,
+        ).use { client ->
+            client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hi")),
+                options = ChatRequestOptions(reasoningEffort = "low")
+            )
+        }
+
+        assertTrue(!capturedBody.contains("reasoning_effort"), "reasoning_effort should not be sent for compound models")
     }
 
     private fun fakeHttpClient(
