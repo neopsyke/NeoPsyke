@@ -21,6 +21,7 @@ interface MetricsRuntime : Closeable {
     fun recordDeniedAction()
     fun recordPlannerNoop()
     fun recordPlannerOutputRepaired()
+    fun recordTruncationRetry()
     fun recordDroppedEvents(count: Long = 1)
     fun recordQueueSaturation(queueType: String)
     fun recordMemoryRecall(hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean)
@@ -43,6 +44,7 @@ class NoopMetricsRuntime : MetricsRuntime {
     override fun recordDeniedAction() {}
     override fun recordPlannerNoop() {}
     override fun recordPlannerOutputRepaired() {}
+    override fun recordTruncationRetry() {}
     override fun recordDroppedEvents(count: Long) {}
     override fun recordQueueSaturation(queueType: String) {}
     override fun recordMemoryRecall(hitCount: Int, latencyMs: Long, recallChars: Int, truncated: Boolean) {}
@@ -169,6 +171,16 @@ private class JsonlFallbackMetricsRuntime(
                 "ts" to Instant.now().toString(),
                 "provider" to provider,
                 "event" to "planner_output_repaired"
+            )
+        )
+    }
+
+    override fun recordTruncationRetry() {
+        appendLine(
+            mapOf(
+                "ts" to Instant.now().toString(),
+                "provider" to provider,
+                "event" to "truncation_retry"
             )
         )
     }
@@ -328,6 +340,7 @@ data class MetricsTotals(
     val errorCount: Long,
     val plannerNoopCount: Long = 0,
     val plannerOutputRepairedCount: Long = 0,
+    val truncationRetryCount: Long = 0,
     val queueSaturationEvents: Long = 0,
     val droppedEvents: Long = 0,
     val memoryRecallAttempts: Long = 0,

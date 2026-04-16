@@ -1,5 +1,7 @@
 package ai.neopsyke.agent
 
+import ai.neopsyke.agent.config.MetaReasonerConfig
+import ai.neopsyke.agent.config.SuperegoConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -14,27 +16,15 @@ class AgentModelsTest {
         assertEquals(0, config.planner.maxRunTotalTokens)
         assertEquals(0, config.planner.maxRunTokensPerProvider)
         assertEquals(0, config.planner.maxRunTokensPerRole)
-        assertEquals(192, config.superego.maxCompletionTokens)
-        assertEquals(true, config.superego.dynamicCompletionEnabled)
-        assertEquals(640, config.superego.dynamicCompletionHardMaxTokens)
-        assertEquals(0.10, config.superego.dynamicPromptToCompletionRatio)
-        assertEquals(160, config.superego.dynamicCompletionMinPromptTokens)
+        assertEquals(SuperegoConfig.DEFAULT_MAX_COMPLETION_TOKENS, config.superego.maxCompletionTokens)
         assertEquals(false, config.superego.twoStageReviewEnabled)
         assertEquals(0.60, config.superego.twoStageLowConfidenceThreshold)
         assertEquals(true, config.superego.twoStageEscalateOnMediumPolicyRisk)
-        assertEquals(1024, config.memory.longTermMemoryMaxTokens)
+        assertEquals(2048, config.memory.longTermMemoryMaxTokens)
         assertEquals(true, config.memory.longTermMemoryPromptCompressionEnabled)
         assertEquals(1100, config.memory.longTermMemoryPromptDialogueMaxChars)
         assertEquals(900, config.memory.longTermMemoryPromptRecallMaxChars)
-        assertEquals(true, config.memory.longTermMemoryDynamicCompletionEnabled)
-        assertEquals(2048, config.memory.longTermMemoryDynamicCompletionHardMaxTokens)
-        assertEquals(0.08, config.memory.longTermMemoryDynamicPromptToCompletionRatio)
-        assertEquals(160, config.memory.longTermMemoryDynamicCompletionMinPromptTokens)
-        assertEquals(512, config.metaReasoner.maxTokens)
-        assertEquals(true, config.metaReasoner.dynamicCompletionEnabled)
-        assertEquals(640, config.metaReasoner.dynamicCompletionHardMaxTokens)
-        assertEquals(0.10, config.metaReasoner.dynamicPromptToCompletionRatio)
-        assertEquals(160, config.metaReasoner.dynamicCompletionMinPromptTokens)
+        assertEquals(MetaReasonerConfig.DEFAULT_MAX_TOKENS, config.metaReasoner.maxTokens)
         assertEquals(0.98, config.metaReasoner.forcedTerminalPressureThreshold)
         assertEquals(8, config.metaReasoner.forcedTerminalStaleStreakThreshold)
     }

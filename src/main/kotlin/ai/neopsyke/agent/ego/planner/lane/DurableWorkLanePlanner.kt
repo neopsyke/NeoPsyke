@@ -125,6 +125,7 @@ class DurableWorkLanePlanner(
         }
 
         if (TruncationRetry.isLikelyTruncated(response)) {
+            runtime.notifyTruncationRetry()
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
             runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, "Return one complete JSON object."),
                 metadata.copy(callSite = "goal_work_truncation_retry"), StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT, maxTokens = bumped, temperature = 0.0)

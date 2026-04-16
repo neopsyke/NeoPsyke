@@ -1761,6 +1761,8 @@
         const runRepaired = asNum(run.plannerOutputRepairedCount);
         const allNoops = asNum(all.plannerNoopCount);
         const allRepaired = asNum(all.plannerOutputRepairedCount);
+        const runTruncRetries = asNum(run.truncationRetryCount);
+        const allTruncRetries = asNum(all.truncationRetryCount);
         const runImprintAttempts = asNum(run.memoryImprintAttempts);
         const runImprintSaved = asNum(run.memoryImprintSaved);
         const runImprintFailures = asNum(run.memoryImprintFailures);
@@ -1780,6 +1782,7 @@
         parts.push(chip("Errors", run.errorCount || 0, null));
         parts.push(chip("Noops", runNoops + " run / " + allNoops + " all", null));
         parts.push(chip("Planner Repaired", runRepaired + " run / " + allRepaired + " all", null));
+        parts.push(chip("Trunc Retries", runTruncRetries + " run / " + allTruncRetries + " all", null));
         parts.push(chip("Run Q Sat", run.queueSaturationEvents || 0, null));
         parts.push(chip("All Q Sat", all.queueSaturationEvents || 0, null));
         parts.push(chip("Run Dropped", run.droppedEvents || 0, null));

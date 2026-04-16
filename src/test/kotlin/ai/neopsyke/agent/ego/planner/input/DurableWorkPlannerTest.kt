@@ -47,6 +47,7 @@ class DurableWorkPlannerTest {
         val context = PlannerContext(
             recentDialogue = emptyList(),
             queue = QueueSnapshot(0, 0, 0),
+            availableContactChannels = setOf("telegram", "dashboard"),
         )
 
         val decision = planner.plan(
@@ -83,6 +84,7 @@ class DurableWorkPlannerTest {
             recentDialogue = emptyList(),
             queue = QueueSnapshot(0, 0, 0),
             goalIndex = mapOf(1 to "goal-1"),
+            availableContactChannels = setOf("telegram", "dashboard"),
         )
 
         val decision = planner.plan(
@@ -119,6 +121,7 @@ class DurableWorkPlannerTest {
         val context = PlannerContext(
             recentDialogue = emptyList(),
             queue = QueueSnapshot(0, 0, 0),
+            availableContactChannels = setOf("telegram", "dashboard"),
         )
 
         val decision = planner.plan(
@@ -130,6 +133,43 @@ class DurableWorkPlannerTest {
         assertTrue(intention.payload.contains(""""command":"create""""))
         // contact_channel should be null when not specified
         assertTrue(intention.payload.contains(""""contact_channel":null"""))
+    }
+
+    @Test
+    fun `planner prompt advertises canonical available contact channels`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """{"operation":"create","work_item_reference":null,"title":"Weather reminder","instruction":"Send weather forecast","completion_criteria":"Delivered","priority":"medium","cron_expression":"0 8 * * *","contact_channel":"dashboard","plan_steps":[{"id":"step1","description":"Fetch weather","acceptance_criteria":"Obtained forecast","grounding_requirement":"required","requires":[],"produces":["forecast"],"max_attempts":3},{"id":"step2","description":"Send to user","acceptance_criteria":"Delivered","grounding_requirement":"not_required","requires":["forecast"],"produces":[],"max_attempts":3}],"assistant_response":null,"reason":null}"""
+            )
+        }
+        val runtime = PlannerRuntime(
+            defaultModelClient = llm,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val planner = WorkPlanBuilder(
+            runtime = runtime,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            planRefiner = NoopPlanRefiner(),
+        )
+
+        val context = PlannerContext(
+            recentDialogue = emptyList(),
+            queue = QueueSnapshot(0, 0, 0),
+            availableContactChannels = setOf("telegram", "dashboard"),
+        )
+
+        val decision = planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 1, content = "remind me in the app every morning")),
+            context = context,
+        )
+
+        val prompt = llm.lastMessages.joinToString("\n") { it.content }
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertTrue(prompt.contains("Available delivery channels: dashboard, telegram."))
+        assertTrue(prompt.contains("on the dashboard\" or \"in the app\" -> \"dashboard\" if available"))
+        assertTrue(intention.payload.contains(""""contact_channel":"dashboard""""))
     }
 
     @Test
@@ -237,4 +277,3 @@ class DurableWorkPlannerTest {
         }
     }
 }
-

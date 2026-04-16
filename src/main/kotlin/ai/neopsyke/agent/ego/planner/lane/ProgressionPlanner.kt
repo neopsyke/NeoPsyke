@@ -164,6 +164,7 @@ class ProgressionPlanner(
         }
 
         if (TruncationRetry.isLikelyTruncated(response)) {
+            runtime.notifyTruncationRetry()
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
             runtime.call(
                 laneId = laneId,

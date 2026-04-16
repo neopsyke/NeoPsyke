@@ -7,6 +7,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import ai.neopsyke.agent.cortex.motor.actions.ContactChannelPolicy
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.GroundingMetadata
@@ -86,7 +87,7 @@ object WorkContextLoader {
         wakeReason: String,
     ): DurableWorkActivation {
         val tier2 = tier2Context(state.workItem.workspacePath)
-        val provider = state.workItem.contactChannel ?: DURABLE_WORK_RUNTIME_PROVIDER
+        val preferredChannel = state.workItem.contactChannel?.trim()?.lowercase()?.ifBlank { null }
         val zone = ZoneId.systemDefault()
         val now = ZonedDateTime.now(zone)
         val facts = mapOf(
@@ -94,6 +95,21 @@ object WorkContextLoader {
             "current_time_utc" to Instant.now().toString(),
             "current_time_local" to now.format(DateTimeFormatter.ofPattern("HH:mm:ss")) + " ($zone)",
         )
+        // Durable-work activation is system-internal: it has no real transport
+        // address. Use the runtime provider with an empty channelId so the
+        // output gateway always routes through the resolver, and carry the
+        // work item's contactChannel as a *hint* in channel.attributes.
+        val baseSecurity = ConversationSecurityContexts.internalAutomation(
+            provider = DURABLE_WORK_RUNTIME_PROVIDER,
+            channelId = "",
+        )
+        val security = if (preferredChannel != null) {
+            val hintedAttributes = baseSecurity.channel.attributes +
+                (ContactChannelPolicy.PREFERRED_CHANNEL_ATTRIBUTE to preferredChannel)
+            baseSecurity.copy(channel = baseSecurity.channel.copy(attributes = hintedAttributes))
+        } else {
+            baseSecurity
+        }
         return DurableWorkActivation(
             workItemId = state.id,
             stepId = step.id,
@@ -104,10 +120,7 @@ object WorkContextLoader {
             conversationContext = ConversationContext(
                 sessionId = ConversationContext.DEFAULT_SESSION_ID,
                 interlocutor = Interlocutor.named(DURABLE_WORK_RUNTIME_PROVIDER),
-                security = ConversationSecurityContexts.internalAutomation(
-                    provider = provider,
-                    channelId = rootInputId,
-                ),
+                security = security,
             ),
             wakeReason = wakeReason,
             groundingMetadata = GroundingMetadata(

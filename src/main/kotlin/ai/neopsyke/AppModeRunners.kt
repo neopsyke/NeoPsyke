@@ -430,9 +430,6 @@ internal object AppModeRunners {
                             longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                 modelClient = advisorClient,
                                 config = config,
-                                modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                 instrumentation = instrumentation
                             ),
                             hippocampus = activeHippocampus,
@@ -717,6 +714,9 @@ internal object AppModeRunners {
             channelPriority = config.approvals.channelPriority,
             defaultChannel = config.approvals.defaultChannel,
         )
+        val contactChannelPolicy = ai.neopsyke.agent.cortex.motor.actions.ContactChannelPolicy(
+            statusProvider = contactChannelStatusProvider,
+        )
         val conversationOutput = RoutedConversationOutputGateway(
             fallbackOutput = {},
             telegramSink = telegramSink,
@@ -946,13 +946,6 @@ internal object AppModeRunners {
                                 "pressure_assess_threshold" to config.metaReasoner.deliberationPressureAssessmentThreshold,
                                 "meta_reasoner_cooldown_steps" to config.metaReasoner.cooldownSteps,
                                 "meta_reasoner_max_tokens" to config.metaReasoner.maxTokens,
-                                "meta_reasoner_dynamic_completion_enabled" to config.metaReasoner.dynamicCompletionEnabled,
-                                "meta_reasoner_dynamic_completion_hard_max_tokens" to
-                                    config.metaReasoner.dynamicCompletionHardMaxTokens,
-                                "meta_reasoner_dynamic_prompt_to_completion_ratio" to
-                                    config.metaReasoner.dynamicPromptToCompletionRatio,
-                                "meta_reasoner_dynamic_completion_min_prompt_tokens" to
-                                    config.metaReasoner.dynamicCompletionMinPromptTokens,
                                 "long_term_memory_assess_every_steps" to config.memory.longTermMemoryAssessEverySteps,
                                 "long_term_memory_assess_cooldown_steps" to config.memory.longTermMemoryAssessCooldownSteps,
                                 "long_term_memory_min_confidence" to config.memory.longTermMemoryMinConfidence,
@@ -966,25 +959,12 @@ internal object AppModeRunners {
                                 "long_term_memory_recall_echo_min_token_count" to config.memory.longTermMemoryRecallEchoMinTokenCount,
                                 "long_term_memory_recall_echo_token_overlap_threshold" to
                                     config.memory.longTermMemoryRecallEchoTokenOverlapThreshold,
-                                "superego_dynamic_completion_enabled" to config.superego.dynamicCompletionEnabled,
-                                "superego_dynamic_completion_hard_max_tokens" to config.superego.dynamicCompletionHardMaxTokens,
-                                "superego_dynamic_prompt_to_completion_ratio" to config.superego.dynamicPromptToCompletionRatio,
-                                "superego_dynamic_completion_min_prompt_tokens" to config.superego.dynamicCompletionMinPromptTokens,
                                 "superego_two_stage_review_enabled" to config.superego.twoStageReviewEnabled,
                                 "superego_two_stage_low_confidence_threshold" to
                                     config.superego.twoStageLowConfidenceThreshold,
                                 "superego_two_stage_escalate_on_medium_policy_risk" to
                                     config.superego.twoStageEscalateOnMediumPolicyRisk,
-                                "long_term_memory_dynamic_completion_enabled" to config.memory.longTermMemoryDynamicCompletionEnabled,
-                                "long_term_memory_dynamic_completion_hard_max_tokens" to
-                                    config.memory.longTermMemoryDynamicCompletionHardMaxTokens,
-                                "long_term_memory_dynamic_prompt_to_completion_ratio" to
-                                    config.memory.longTermMemoryDynamicPromptToCompletionRatio,
-                                "long_term_memory_dynamic_completion_min_prompt_tokens" to
-                                    config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
-                                "superego_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.superego),
-                                "meta_reasoner_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
-                                "memory_advisor_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor)
+                                "superego_max_completion_tokens" to config.superego.maxCompletionTokens
                             )
                         )
                     )
@@ -1193,9 +1173,6 @@ internal object AppModeRunners {
                                                     val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                         modelClient = longTermMemoryClient,
                                                         config = config,
-                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                                        modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                                         instrumentation = instrumentation
                                                     )
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
@@ -1276,6 +1253,7 @@ internal object AppModeRunners {
                                                                         )
                                                                     }
                                                                 },
+                                                                onTruncationRetry = { metrics.recordTruncationRetry() },
                                                                 laneModelClientResolver = plannerLaneClientResolver,
                                                             ).let { EgoAssembler.PlannerBuildResult(planner = it.planner, planRefiner = it.planRefiner) }
                                                         },
@@ -1284,14 +1262,7 @@ internal object AppModeRunners {
                                                                 modelClient = superegoClient,
                                                                 config = config,
                                                                 actionRegistry = registry,
-                                                                modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
-                                                                modelContextWindow = superegoReviewRouting.primaryContextWindow,
-                                                                modelReasoningOverhead = superegoReviewRouting.primaryReasoningOverhead,
                                                                 escalationModelClient = superegoEscalationClient,
-                                                                escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
-                                                                    ?: superegoReviewRouting.primaryTokenWeight,
-                                                                escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
-                                                                escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
                                                                 authorizationPolicy = actionAuthorizationPolicy,
                                                                 instrumentation = instrumentation
                                                             )
@@ -1302,8 +1273,6 @@ internal object AppModeRunners {
                                                         metaReasoner = LlmMetaReasoner(
                                                             modelClient = metaReasonerClient,
                                                             config = config,
-                                                            modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
-                                                            modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
                                                             fallbackModelClient = metaReasonerFallbackClient,
                                                             instrumentation = instrumentation
                                                         ),
@@ -1355,6 +1324,7 @@ internal object AppModeRunners {
                                                         },
                                                         output = {},
                                                         conversationOutput = conversationOutput,
+                                                        contactChannelPolicy = contactChannelPolicy,
                                                     )
                                                     assembly.actionRegistry.loadWarnings.forEach { warning ->
                                                         instrumentation.emit(AgentEvents.warning(warning))
@@ -1774,9 +1744,6 @@ internal object AppModeRunners {
                                                 val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                     modelClient = longTermMemoryClient,
                                                     config = config,
-                                                    modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                                    modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                                    modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                                     instrumentation = instrumentation
                                                 )
                                                 val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
@@ -1834,6 +1801,7 @@ internal object AppModeRunners {
                                                             actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                             onPlannerNoop = { metrics.recordPlannerNoop() },
                                                             onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() },
+                                                            onTruncationRetry = { metrics.recordTruncationRetry() },
                                                             laneModelClientResolver = plannerLaneClientResolver,
                                                         ).let { EgoAssembler.PlannerBuildResult(planner = it.planner, planRefiner = it.planRefiner) }
                                                     },
@@ -1842,14 +1810,7 @@ internal object AppModeRunners {
                                                             modelClient = superegoClient,
                                                             config = config,
                                                             actionRegistry = registry,
-                                                            modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
-                                                            modelContextWindow = superegoReviewRouting.primaryContextWindow,
-                                                            modelReasoningOverhead = superegoReviewRouting.primaryReasoningOverhead,
                                                             escalationModelClient = superegoEscalationClient,
-                                                            escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
-                                                                ?: superegoReviewRouting.primaryTokenWeight,
-                                                            escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
-                                                            escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
                                                             authorizationPolicy = actionAuthorizationPolicy,
                                                             instrumentation = instrumentation
                                                         )
@@ -1860,8 +1821,6 @@ internal object AppModeRunners {
                                                     metaReasoner = LlmMetaReasoner(
                                                         modelClient = metaReasonerClient,
                                                         config = config,
-                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
-                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
                                                         fallbackModelClient = metaReasonerFallbackClient,
                                                         instrumentation = instrumentation
                                                     ),
@@ -2189,13 +2148,7 @@ internal object AppModeRunners {
 
     private data class SuperegoReviewRouting(
         val primaryEndpoint: LlmEndpointConfig,
-        val primaryTokenWeight: Double,
-        val primaryContextWindow: Int? = null,
-        val primaryReasoningOverhead: Double = 1.0,
         val escalationEndpoint: LlmEndpointConfig? = null,
-        val escalationTokenWeight: Double? = null,
-        val escalationContextWindow: Int? = null,
-        val escalationReasoningOverhead: Double = 1.0,
     )
 
     private fun resolveSuperegoReviewRouting(
@@ -2216,9 +2169,6 @@ internal object AppModeRunners {
                 )
                 return SuperegoReviewRouting(
                     primaryEndpoint = explicitPrimary,
-                    primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                    primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
-                    primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary)
                 )
             }
             instrumentation.emit(
@@ -2238,13 +2188,7 @@ internal object AppModeRunners {
             )
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitPrimary,
-                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
-                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary),
                 escalationEndpoint = explicitEscalation,
-                escalationTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
-                escalationContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation),
-                escalationReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitEscalation)
             )
         }
 
@@ -2252,9 +2196,6 @@ internal object AppModeRunners {
         if (explicitPrimary != null) {
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitPrimary,
-                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
-                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary)
             )
         }
 
@@ -2267,9 +2208,6 @@ internal object AppModeRunners {
             )
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitEscalation,
-                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation),
-                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitEscalation)
             )
         }
 
@@ -2296,9 +2234,6 @@ internal object AppModeRunners {
         )
         return SuperegoReviewRouting(
             primaryEndpoint = legacyEndpoint,
-            primaryTokenWeight = llm.modelCatalog.tokenWeightFor(legacyEndpoint),
-            primaryContextWindow = llm.modelCatalog.contextWindowFor(legacyEndpoint),
-            primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(legacyEndpoint)
         )
     }
     
@@ -2978,6 +2913,7 @@ private fun buildHierarchicalPlanner(
     actionPayloadRepair: (ai.neopsyke.agent.model.ActionType, String) -> String,
     onPlannerNoop: () -> Unit = {},
     onPlannerOutputRepaired: () -> Unit = {},
+    onTruncationRetry: () -> Unit = {},
     laneModelClientResolver: ((LaneId, ai.neopsyke.agent.ego.planner.ResolvedLaneConfig) -> ai.neopsyke.llm.ChatModelClient?)? = null,
 ): PlannerAssembly {
     val runtime = PlannerRuntime(
@@ -2986,6 +2922,7 @@ private fun buildHierarchicalPlanner(
         instrumentation = instrumentation,
         onPlannerNoop = onPlannerNoop,
         onPlannerOutputRepaired = onPlannerOutputRepaired,
+        onTruncationRetry = onTruncationRetry,
         actionPayloadRepair = actionPayloadRepair,
         laneModelClientResolver = laneModelClientResolver ?: { _, _ -> null },
     )

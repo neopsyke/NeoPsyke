@@ -12,6 +12,8 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
+import ai.neopsyke.agent.cortex.motor.actions.ChannelValidation
+import ai.neopsyke.agent.cortex.motor.actions.ContactChannelPolicy
 import ai.neopsyke.agent.model.ApprovalContextEntry
 import ai.neopsyke.agent.ego.planner.model.DurableWorkCommand
 import ai.neopsyke.agent.ego.planner.model.WorkItemReference
@@ -118,11 +120,12 @@ class DurableWorkOperationActionPlugin(
     }
 
     override suspend fun execute(action: PendingAction, context: ActionExecutionContext): ActionOutcome {
-        val command = parseDurableWorkCommand(action.payload)
+        val parsed = parseDurableWorkCommand(action.payload)
             ?: return ActionOutcome(
                 statusSummary = "Invalid durable_work_operation payload.",
                 executionStatus = ActionExecutionStatus.FAILED,
             )
+        val (command, rejectionNote) = applyChannelPolicy(parsed, action)
         val request = toRequest(command)
             ?: return ActionOutcome(
                 statusSummary = "Goal operation payload is missing required typed fields.",
@@ -130,11 +133,78 @@ class DurableWorkOperationActionPlugin(
             )
 
         val result = this.context.durableWorkGateway.executeOperation(request)
+        val summary = if (result.success && rejectionNote != null) {
+            "${result.message} $rejectionNote"
+        } else {
+            result.message
+        }
         return ActionOutcome(
-            statusSummary = result.message,
+            statusSummary = summary,
             executionStatus = if (result.success) ActionExecutionStatus.SUCCESS else ActionExecutionStatus.FAILED,
         )
     }
+
+    /**
+     * Owner-gates and availability-checks the contactChannel field on
+     * Create/Update commands.
+     *
+     *  * Non-owner or non-user-initiated callers cannot alter the channel:
+     *    the field is silently stripped (durable-work step activations never
+     *    reach this plugin, but this is belt-and-suspenders against any
+     *    future caller).
+     *  * Owner-initiated callers may only pick a currently-deliverable
+     *    channel; unknown values are stripped, and a clarification note is
+     *    returned so the next planning turn can forward it to the user via
+     *    the normal contact_user flow.
+     */
+    private fun applyChannelPolicy(
+        command: DurableWorkCommand,
+        action: PendingAction,
+    ): Pair<DurableWorkCommand, String?> {
+        val requested = when (command) {
+            is DurableWorkCommand.Create -> command.contactChannel
+            is DurableWorkCommand.Update -> command.contactChannel
+            else -> return command to null
+        } ?: return command to null
+
+        val policy = this.context.contactChannelPolicy ?: return command to null
+
+        if (!policy.canAlterContactChannel(action.conversationContext, action.origin)) {
+            logger.warn {
+                "Dropping contactChannel='$requested' on ${command.operationName}: " +
+                    "caller principal=${action.conversationContext.security.principal.role} " +
+                    "origin=${action.origin.source} lacks OWNER+USER provenance."
+            }
+            return strippedContactChannel(command) to null
+        }
+
+        return when (val validation = policy.validate(requested)) {
+            ChannelValidation.None,
+            is ChannelValidation.Accepted -> command to null
+
+            is ChannelValidation.Rejected -> {
+                logger.info {
+                    "Stripping unavailable contactChannel='${validation.requested}' " +
+                        "on ${command.operationName}; available=${validation.available}."
+                }
+                val availableText = validation.available
+                    .sorted()
+                    .joinToString(", ")
+                    .ifBlank { "no channels currently available" }
+                val note = "Requested contact channel '${validation.requested}' is not available. " +
+                    "Ask the user which to use; currently available: $availableText. " +
+                    "Delivery channel was not changed."
+                strippedContactChannel(command) to note
+            }
+        }
+    }
+
+    private fun strippedContactChannel(command: DurableWorkCommand): DurableWorkCommand =
+        when (command) {
+            is DurableWorkCommand.Create -> command.copy(contactChannel = null)
+            is DurableWorkCommand.Update -> command.copy(contactChannel = null)
+            else -> command
+        }
 
     private fun parseDurableWorkCommand(raw: String): DurableWorkCommand? =
         runCatching {

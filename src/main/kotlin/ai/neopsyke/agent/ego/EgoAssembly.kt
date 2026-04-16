@@ -3,6 +3,7 @@ package ai.neopsyke.agent.ego
 import ai.neopsyke.agent.cortex.motor.actions.control.ActionControlService
 import ai.neopsyke.agent.cortex.motor.actions.control.NoopActionControlService
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.ContactChannelPolicy
 import ai.neopsyke.agent.cortex.motor.actions.InMemoryEvidenceArtifactStore
 import ai.neopsyke.agent.cortex.motor.actions.ConversationOutputGateway
 import ai.neopsyke.agent.cortex.motor.actions.RoutedConversationOutputGateway
@@ -87,6 +88,7 @@ object EgoAssembler {
         actionControlServiceFactory: (MotorCortex) -> ActionControlService = { NoopActionControlService },
         output: (String) -> Unit = {},
         conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
+        contactChannelPolicy: ContactChannelPolicy? = null,
     ): EgoAssembly {
         val memory = buildMemorySystem(
             config = config,
@@ -108,6 +110,7 @@ object EgoAssembler {
                 evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = memory,
                 durableWorkGateway = durableWorkGateway,
+                contactChannelPolicy = contactChannelPolicy,
             )
         )
         val motorCortex = MotorCortex(actionRegistry = actionRegistry)
@@ -129,6 +132,7 @@ object EgoAssembler {
             durableWorkGateway = durableWorkGateway,
             evidenceArtifactStore = evidenceArtifactStore,
             planRefiner = plannerBuild.planRefiner,
+            contactChannelSupplier = contactChannelPolicy?.let { { it.availableChannels() } } ?: { emptySet() },
         )
         return EgoAssembly(
             ego = ego,

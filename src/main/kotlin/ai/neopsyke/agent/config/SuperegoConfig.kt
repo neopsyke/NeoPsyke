@@ -1,14 +1,14 @@
 package ai.neopsyke.agent.config
 
 data class SuperegoConfig(
-    val maxCompletionTokens: Int = 192,
-    val dynamicCompletionEnabled: Boolean = true,
-    val dynamicCompletionHardMaxTokens: Int = 640,
-    val dynamicPromptToCompletionRatio: Double = 0.10,
-    val dynamicCompletionMinPromptTokens: Int = 160,
+    val maxCompletionTokens: Int = DEFAULT_MAX_COMPLETION_TOKENS,
     val twoStageReviewEnabled: Boolean = false,
     val twoStageLowConfidenceThreshold: Double = 0.60,
     val twoStageEscalateOnMediumPolicyRisk: Boolean = true,
     val twoStageSkipForContactUserActions: Boolean = true,
     val twoStageSkipForWebSearchActions: Boolean = true,
-)
+) {
+    companion object {
+        const val DEFAULT_MAX_COMPLETION_TOKENS: Int = 1024
+    }
+}

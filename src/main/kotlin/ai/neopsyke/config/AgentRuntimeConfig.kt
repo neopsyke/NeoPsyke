@@ -104,10 +104,6 @@ private data class AgentRuntimeYamlPlannerLane(
 
 private data class AgentRuntimeYamlSuperego(
     val maxCompletionTokens: Int? = null,
-    val dynamicCompletionEnabled: Boolean? = null,
-    val dynamicCompletionHardMaxTokens: Int? = null,
-    val dynamicPromptToCompletionRatio: Double? = null,
-    val dynamicCompletionMinPromptTokens: Int? = null,
     val twoStageReviewEnabled: Boolean? = null,
     val twoStageLowConfidenceThreshold: Double? = null,
     val twoStageEscalateOnMediumPolicyRisk: Boolean? = null,
@@ -127,10 +123,6 @@ private data class AgentRuntimeYamlMemory(
     val longTermMemoryAssessCooldownSteps: Int? = null,
     val longTermMemoryMinConfidence: Double? = null,
     val longTermMemoryMaxTokens: Int? = null,
-    val longTermMemoryDynamicCompletionEnabled: Boolean? = null,
-    val longTermMemoryDynamicCompletionHardMaxTokens: Int? = null,
-    val longTermMemoryDynamicPromptToCompletionRatio: Double? = null,
-    val longTermMemoryDynamicCompletionMinPromptTokens: Int? = null,
     val longTermMemoryMaxSummaryChars: Int? = null,
     val longTermMemoryForceAssessOnAllowedAction: Boolean? = null,
     val longTermMemoryForceAssessOnTerminalAnswer: Boolean? = null,
@@ -170,10 +162,6 @@ private data class AgentRuntimeYamlMetaReasoner(
     val deliberationPressureAssessmentThreshold: Double? = null,
     val cooldownSteps: Int? = null,
     val maxTokens: Int? = null,
-    val dynamicCompletionEnabled: Boolean? = null,
-    val dynamicCompletionHardMaxTokens: Int? = null,
-    val dynamicPromptToCompletionRatio: Double? = null,
-    val dynamicCompletionMinPromptTokens: Int? = null,
     val forcedTerminalPressureThreshold: Double? = null,
     val forcedTerminalStaleStreakThreshold: Int? = null,
 )
@@ -445,26 +433,6 @@ object AgentRuntimeSettingsLoader {
                     superegoYaml.maxCompletionTokens,
                     defaults.superego.maxCompletionTokens
                 ),
-                dynamicCompletionEnabled = readBoolean(
-                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_ENABLED"],
-                    superegoYaml.dynamicCompletionEnabled,
-                    defaults.superego.dynamicCompletionEnabled
-                ),
-                dynamicCompletionHardMaxTokens = readPositiveInt(
-                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
-                    superegoYaml.dynamicCompletionHardMaxTokens,
-                    defaults.superego.dynamicCompletionHardMaxTokens
-                ),
-                dynamicPromptToCompletionRatio = readProbability(
-                    env["EGO_SUPEREGO_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
-                    superegoYaml.dynamicPromptToCompletionRatio,
-                    defaults.superego.dynamicPromptToCompletionRatio
-                ),
-                dynamicCompletionMinPromptTokens = readPositiveInt(
-                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
-                    superegoYaml.dynamicCompletionMinPromptTokens,
-                    defaults.superego.dynamicCompletionMinPromptTokens
-                ),
                 twoStageReviewEnabled = readBoolean(
                     env["EGO_SUPEREGO_TWO_STAGE_REVIEW_ENABLED"],
                     superegoYaml.twoStageReviewEnabled,
@@ -639,26 +607,6 @@ object AgentRuntimeSettingsLoader {
                     memoryYaml.longTermMemoryMaxTokens,
                     defaults.memory.longTermMemoryMaxTokens
                 ),
-                longTermMemoryDynamicCompletionEnabled = readBoolean(
-                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_ENABLED"],
-                    memoryYaml.longTermMemoryDynamicCompletionEnabled,
-                    defaults.memory.longTermMemoryDynamicCompletionEnabled
-                ),
-                longTermMemoryDynamicCompletionHardMaxTokens = readPositiveInt(
-                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
-                    memoryYaml.longTermMemoryDynamicCompletionHardMaxTokens,
-                    defaults.memory.longTermMemoryDynamicCompletionHardMaxTokens
-                ),
-                longTermMemoryDynamicPromptToCompletionRatio = readProbability(
-                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
-                    memoryYaml.longTermMemoryDynamicPromptToCompletionRatio,
-                    defaults.memory.longTermMemoryDynamicPromptToCompletionRatio
-                ),
-                longTermMemoryDynamicCompletionMinPromptTokens = readPositiveInt(
-                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
-                    memoryYaml.longTermMemoryDynamicCompletionMinPromptTokens,
-                    defaults.memory.longTermMemoryDynamicCompletionMinPromptTokens
-                ),
                 longTermMemoryMaxSummaryChars = readPositiveInt(
                     env["EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS"],
                     memoryYaml.longTermMemoryMaxSummaryChars,
@@ -730,26 +678,6 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_META_REASONER_MAX_TOKENS"],
                     metaReasonerYaml.maxTokens,
                     defaults.metaReasoner.maxTokens
-                ),
-                dynamicCompletionEnabled = readBoolean(
-                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_ENABLED"],
-                    metaReasonerYaml.dynamicCompletionEnabled,
-                    defaults.metaReasoner.dynamicCompletionEnabled
-                ),
-                dynamicCompletionHardMaxTokens = readPositiveInt(
-                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
-                    metaReasonerYaml.dynamicCompletionHardMaxTokens,
-                    defaults.metaReasoner.dynamicCompletionHardMaxTokens
-                ),
-                dynamicPromptToCompletionRatio = readProbability(
-                    env["EGO_META_REASONER_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
-                    metaReasonerYaml.dynamicPromptToCompletionRatio,
-                    defaults.metaReasoner.dynamicPromptToCompletionRatio
-                ),
-                dynamicCompletionMinPromptTokens = readPositiveInt(
-                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
-                    metaReasonerYaml.dynamicCompletionMinPromptTokens,
-                    defaults.metaReasoner.dynamicCompletionMinPromptTokens
                 ),
                 forcedTerminalPressureThreshold = readProbability(
                     env["EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD"],

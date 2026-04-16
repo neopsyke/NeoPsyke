@@ -66,6 +66,12 @@ class WorkPlanBuilder(
         )
 
         val goalsInfo = context.goalWorkSummary.ifBlank { "No active goals." }
+        val availableChannels = context.availableContactChannels
+        val channelsLine = if (availableChannels.isEmpty()) {
+            "No delivery channels are currently available; set contact_channel to null."
+        } else {
+            "Available delivery channels: ${availableChannels.sorted().joinToString(", ")}."
+        }
 
         val sections = listOfNotNull(
             PromptBudgetAllocator.Section(
@@ -96,7 +102,7 @@ class WorkPlanBuilder(
                     - If the user requests a recurring schedule, set cron_expression to a standard 5-field cron string (minute hour day-of-month month day-of-week).
                     - Examples: "every 5 minutes" -> "*/5 * * * *", "daily at 9:30 am" -> "30 9 * * *", "every Monday at 8am" -> "0 8 * * 1", "hourly" -> "0 * * * *".
                     - If the request is not recurring, set cron_expression to null.
-                    - If the user specifies a delivery channel (e.g. "via Telegram", "on Slack", "by email"), set contact_channel to the channel name (lowercase, e.g. "telegram"). Otherwise leave it null.
+                    - contact_channel MUST be one of the currently-available delivery channels (listed below) or null. Map the user's intent semantically: "via Telegram" or "send me a text" -> "telegram" if available; "on the dashboard" or "in the app" -> "dashboard" if available. If the user's intent does not match any available channel, set contact_channel to null (do NOT invent a channel name); the runtime will ask them to clarify.
                     - Always generate plan_steps for create: a short list of concrete execution steps.
                     - Each step should map to an available action (web_search, website_fetch, contact_user, etc.).
                     - Steps that fetch external data should set grounding_requirement to "required".
@@ -150,6 +156,14 @@ class WorkPlanBuilder(
                 importance = PromptBudgetAllocator.Importance.HIGH,
                 floorTokens = 24,
                 content = "Active goals:\n$goalsInfo"
+            ),
+            PromptBudgetAllocator.Section(
+                key = "goal_available_channels",
+                role = ChatRole.SYSTEM,
+                band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                importance = PromptBudgetAllocator.Importance.HIGH,
+                floorTokens = 12,
+                content = channelsLine,
             ),
             SharedPromptSections.recentDialogueSection(context),
             SharedPromptSections.shortTermSummarySection(context),

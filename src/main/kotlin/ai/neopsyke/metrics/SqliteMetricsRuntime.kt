@@ -59,6 +59,7 @@ class SqliteMetricsRuntime(
                   error_count INTEGER NOT NULL DEFAULT 0,
                   planner_noop_count INTEGER NOT NULL DEFAULT 0,
                   planner_output_repaired_count INTEGER NOT NULL DEFAULT 0,
+                  truncation_retry_count INTEGER NOT NULL DEFAULT 0,
                   queue_saturation_events INTEGER NOT NULL DEFAULT 0,
                   dropped_events INTEGER NOT NULL DEFAULT 0,
                   memory_recall_attempts INTEGER NOT NULL DEFAULT 0,
@@ -85,6 +86,7 @@ class SqliteMetricsRuntime(
             addRunsColumnIfMissing(statement, "provider", "TEXT NOT NULL DEFAULT 'unknown'")
             addRunsColumnIfMissing(statement, "planner_noop_count", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "planner_output_repaired_count", "INTEGER NOT NULL DEFAULT 0")
+            addRunsColumnIfMissing(statement, "truncation_retry_count", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "queue_saturation_events", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "dropped_events", "INTEGER NOT NULL DEFAULT 0")
             addRunsColumnIfMissing(statement, "memory_recall_attempts", "INTEGER NOT NULL DEFAULT 0")
@@ -212,6 +214,17 @@ class SqliteMetricsRuntime(
         synchronized(connection) {
             connection.prepareStatement(
                 "UPDATE runs SET planner_output_repaired_count = planner_output_repaired_count + 1 WHERE run_id = ?"
+            ).use { statement ->
+                statement.setString(1, runId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    override fun recordTruncationRetry() {
+        synchronized(connection) {
+            connection.prepareStatement(
+                "UPDATE runs SET truncation_retry_count = truncation_retry_count + 1 WHERE run_id = ?"
             ).use { statement ->
                 statement.setString(1, runId)
                 statement.executeUpdate()
@@ -444,6 +457,7 @@ class SqliteMetricsRuntime(
                        error_count,
                        planner_noop_count,
                        planner_output_repaired_count,
+                       truncation_retry_count,
                        queue_saturation_events,
                        dropped_events,
                        memory_recall_attempts,
@@ -487,6 +501,7 @@ class SqliteMetricsRuntime(
                             errorCount = rs.getLong("error_count"),
                             plannerNoopCount = rs.getLong("planner_noop_count"),
                             plannerOutputRepairedCount = rs.getLong("planner_output_repaired_count"),
+                            truncationRetryCount = rs.getLong("truncation_retry_count"),
                             queueSaturationEvents = rs.getLong("queue_saturation_events"),
                             droppedEvents = rs.getLong("dropped_events"),
                             memoryRecallAttempts = rs.getLong("memory_recall_attempts"),
@@ -531,6 +546,7 @@ class SqliteMetricsRuntime(
                        COALESCE(SUM(error_count), 0) AS error_count,
                        COALESCE(SUM(planner_noop_count), 0) AS planner_noop_count,
                        COALESCE(SUM(planner_output_repaired_count), 0) AS planner_output_repaired_count,
+                       COALESCE(SUM(truncation_retry_count), 0) AS truncation_retry_count,
                        COALESCE(SUM(queue_saturation_events), 0) AS queue_saturation_events,
                        COALESCE(SUM(dropped_events), 0) AS dropped_events,
                        COALESCE(SUM(memory_recall_attempts), 0) AS memory_recall_attempts,
@@ -573,6 +589,7 @@ class SqliteMetricsRuntime(
                         errorCount = rs.getLong("error_count"),
                         plannerNoopCount = rs.getLong("planner_noop_count"),
                         plannerOutputRepairedCount = rs.getLong("planner_output_repaired_count"),
+                        truncationRetryCount = rs.getLong("truncation_retry_count"),
                         queueSaturationEvents = rs.getLong("queue_saturation_events"),
                         droppedEvents = rs.getLong("dropped_events"),
                         memoryRecallAttempts = rs.getLong("memory_recall_attempts"),

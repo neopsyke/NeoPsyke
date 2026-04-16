@@ -1,5 +1,6 @@
 package ai.neopsyke.agent.cortex.motor.actions
 
+import ai.neopsyke.agent.config.TelegramChannelConfig
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.Interlocutor
@@ -148,7 +149,10 @@ class ConversationOutputGatewayTest {
             },
         )
         gateway.setChannelResolver(object : UserContactChannelResolver {
-            override fun resolve(conversationContext: ConversationContext) = ChannelResolutionResult(
+            override fun resolve(
+                conversationContext: ConversationContext,
+                preferredChannel: String?,
+            ) = ChannelResolutionResult(
                 target = DeliveryTarget(provider = "webapp", sessionId = "default", channelId = "default"),
                 scope = "resolved_priority",
             )
@@ -171,10 +175,155 @@ class ConversationOutputGatewayTest {
     }
 
     @Test
+    fun `durable-work automation context routes through resolver using preferred channel hint`() = runBlocking {
+        var deliveredChatId: String? = null
+        var seenHint: String? = null
+        val gateway = RoutedConversationOutputGateway(
+            fallbackOutput = { error("fallback should not be used") },
+            telegramSink = TelegramMessageSink { chatId, _ ->
+                deliveredChatId = chatId
+                ConversationDeliveryResult(delivered = true, detail = "sent")
+            },
+        )
+        gateway.setChannelResolver(object : UserContactChannelResolver {
+            override fun resolve(
+                conversationContext: ConversationContext,
+                preferredChannel: String?,
+            ): ChannelResolutionResult {
+                seenHint = preferredChannel
+                return ChannelResolutionResult(
+                    target = DeliveryTarget(
+                        provider = "telegram",
+                        sessionId = "telegram:owner",
+                        channelId = "owner-chat",
+                    ),
+                    scope = "resolved_hint",
+                )
+            }
+        })
+
+        val baseSecurity = ConversationSecurityContexts.internalAutomation(
+            provider = "durable-work-runtime",
+            channelId = "",
+        )
+        val security = baseSecurity.copy(
+            channel = baseSecurity.channel.copy(
+                attributes = mapOf(ContactChannelPolicy.PREFERRED_CHANNEL_ATTRIBUTE to "telegram"),
+            ),
+        )
+        val result = gateway.deliver(
+            text = "Hamburg forecast: sunny.",
+            conversationContext = ConversationContext(
+                sessionId = "default",
+                interlocutor = Interlocutor.named("durable-work-runtime"),
+                security = security,
+            ),
+        )
+
+        assertTrue(result.delivered)
+        assertEquals("owner-chat", deliveredChatId)
+        assertEquals("telegram", seenHint)
+    }
+
+    @Test
+    fun `real resolver honors dashboard preferred hint using production channel keys`() = runBlocking {
+        var sinkSessionId: String? = null
+        val gateway = RoutedConversationOutputGateway(
+            fallbackOutput = { error("fallback should not be used") },
+            dashboardSink = DashboardMessageSink { sessionId, _, _ ->
+                sinkSessionId = sessionId
+                ConversationDeliveryResult(delivered = true, detail = "dashboard ok")
+            },
+        )
+        val statusProvider = DefaultUserContactChannelStatusProvider(
+            dashboardAvailability = DashboardAvailabilityCheck { sessionId ->
+                sessionId == ConversationContext.DEFAULT_SESSION_ID
+            },
+            telegramConfig = TelegramChannelConfig(),
+            telegramSink = null,
+            telegramAckTracker = TelegramStartupAckTracker(),
+        )
+        gateway.setChannelResolver(
+            DefaultUserContactChannelResolver(
+                channelStatusProvider = statusProvider,
+                channelPriority = listOf("telegram", "dashboard"),
+                defaultChannel = "dashboard",
+            )
+        )
+
+        val baseSecurity = ConversationSecurityContexts.internalAutomation(
+            provider = "durable-work-runtime",
+            channelId = "",
+        )
+        val security = baseSecurity.copy(
+            channel = baseSecurity.channel.copy(
+                attributes = mapOf(ContactChannelPolicy.PREFERRED_CHANNEL_ATTRIBUTE to "dashboard"),
+            ),
+        )
+
+        val result = gateway.deliver(
+            text = "Weather update",
+            conversationContext = ConversationContext(
+                sessionId = ConversationContext.DEFAULT_SESSION_ID,
+                interlocutor = Interlocutor.named("durable-work-runtime"),
+                security = security,
+            ),
+        )
+
+        assertTrue(result.delivered)
+        assertEquals(ConversationContext.DEFAULT_SESSION_ID, sinkSessionId)
+    }
+
+    @Test
+    fun `non-DIRECT surface with trusted provider is not trusted with inbound channelId`() = runBlocking {
+        // Regression: a synthesized durable-work context with provider=telegram
+        // and a non-chat channelId must not be delivered directly; the resolver
+        // has to decide the real chat id.
+        var telegramCalledWith: String? = null
+        val gateway = RoutedConversationOutputGateway(
+            fallbackOutput = { error("fallback should not be used") },
+            telegramSink = TelegramMessageSink { chatId, _ ->
+                telegramCalledWith = chatId
+                ConversationDeliveryResult(delivered = true, detail = "sent")
+            },
+        )
+        gateway.setChannelResolver(object : UserContactChannelResolver {
+            override fun resolve(
+                conversationContext: ConversationContext,
+                preferredChannel: String?,
+            ) = ChannelResolutionResult(
+                target = DeliveryTarget(
+                    provider = "telegram",
+                    sessionId = "telegram:owner",
+                    channelId = "real-owner-chat-id",
+                ),
+                scope = "resolved_hint",
+            )
+        })
+
+        gateway.deliver(
+            text = "hello",
+            conversationContext = ConversationContext(
+                sessionId = "default",
+                interlocutor = Interlocutor.named("durable-work-runtime"),
+                security = ConversationSecurityContexts.internalAutomation(
+                    provider = "telegram",
+                    channelId = "work:some-goal:step2",
+                ),
+            ),
+        )
+
+        assertEquals("real-owner-chat-id", telegramCalledWith)
+    }
+
+    @Test
     fun `resolver returning no target fails closed`() = runBlocking {
         val gateway = RoutedConversationOutputGateway(fallbackOutput = {})
         gateway.setChannelResolver(object : UserContactChannelResolver {
-            override fun resolve(conversationContext: ConversationContext) = ChannelResolutionResult(
+            override fun resolve(
+                conversationContext: ConversationContext,
+                preferredChannel: String?,
+            ) = ChannelResolutionResult(
                 target = null,
                 scope = "unresolved",
                 failureReason = "No channels available",

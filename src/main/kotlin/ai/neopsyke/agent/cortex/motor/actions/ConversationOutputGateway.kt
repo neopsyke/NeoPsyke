@@ -1,5 +1,6 @@
 package ai.neopsyke.agent.cortex.motor.actions
 
+import ai.neopsyke.agent.model.ChannelSurface
 import ai.neopsyke.agent.model.ConversationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -37,12 +38,22 @@ class RoutedConversationOutputGateway(
         text: String,
         conversationContext: ConversationContext,
     ): ConversationDeliveryResult {
-        val provider = conversationContext.security.channel.provider.trim().lowercase()
-        return when (provider) {
-            "telegram" -> deliverViaTelegram(conversationContext.security.channel.channelId, text)
-            "webapp" -> deliverViaDashboard(conversationContext.sessionId, text)
-            else -> deliverViaResolver(text, conversationContext)
+        val channel = conversationContext.security.channel
+        val provider = channel.provider.trim().lowercase()
+        val channelId = channel.channelId.trim()
+
+        // Authenticated inbound chat: the transport itself provided the
+        // channelId (e.g. a real Telegram update). Deliver directly without
+        // consulting the resolver, since we already know this chat id is real.
+        if (channel.surface == ChannelSurface.DIRECT && channelId.isNotBlank()) {
+            return when (provider) {
+                "telegram" -> deliverViaTelegram(channelId, text)
+                "webapp" -> deliverViaDashboard(conversationContext.sessionId, text)
+                else -> deliverViaResolver(text, conversationContext)
+            }
         }
+
+        return deliverViaResolver(text, conversationContext)
     }
 
     private suspend fun deliverViaTelegram(channelId: String, text: String): ConversationDeliveryResult {
@@ -75,7 +86,14 @@ class RoutedConversationOutputGateway(
                     detail = "Message delivered via local output.",
                 )
             }
-        val resolution = resolver.resolve(conversationContext)
+        // A synthesized automation context may carry a preferred-channel hint
+        // in its attributes (e.g. set by durable-work from the work item's
+        // contactChannel). The resolver honors the hint only if it matches a
+        // currently-available target.
+        val preferredHint = conversationContext.security.channel
+            .attributes[ContactChannelPolicy.PREFERRED_CHANNEL_ATTRIBUTE]
+            ?: conversationContext.security.channel.provider
+        val resolution = resolver.resolve(conversationContext, preferredHint)
         val target = resolution.target
             ?: return ConversationDeliveryResult(
                 delivered = false,

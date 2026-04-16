@@ -8,7 +8,6 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.PlannerContext
-import ai.neopsyke.agent.support.AdaptiveCompletionBudget
 import ai.neopsyke.agent.support.LlmCallCircuitBreaker
 import ai.neopsyke.agent.support.LlmFailureClassifier
 import ai.neopsyke.agent.support.OnTripBehavior
@@ -62,8 +61,6 @@ object NoopMetaReasoner : MetaReasoner {
 class LlmMetaReasoner(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-    private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
-    private val modelContextWindow: Int? = null,
     private val fallbackModelClient: ChatModelClient? = null,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : MetaReasoner {
@@ -233,38 +230,12 @@ class LlmMetaReasoner(
 
     private fun resolveCompletionTokenBudget(messages: List<ChatMessage>): CompletionBudgetResolution {
         val baseBudget = config.metaReasoner.maxTokens
-        val hardMaxBudget = maxOf(baseBudget, config.metaReasoner.dynamicCompletionHardMaxTokens)
-        if (!config.metaReasoner.dynamicCompletionEnabled) {
-            val promptEstimate = AdaptiveCompletionBudget.estimatePromptTokens(messages)
-            return CompletionBudgetResolution(
-                budget = baseBudget,
-                promptEstimate = promptEstimate,
-                contextClamped = false,
-                hardMax = hardMaxBudget
-            )
-        }
-        val resolution = AdaptiveCompletionBudget.resolveDetailed(
-            request = AdaptiveCompletionBudget.Request(
-                messages = messages,
-                baseMaxTokens = baseBudget,
-                hardMaxTokens = hardMaxBudget,
-                promptToCompletionRatio = config.metaReasoner.dynamicPromptToCompletionRatio,
-                minPromptTokensForScaling = config.metaReasoner.dynamicCompletionMinPromptTokens,
-                modelTokenWeight = modelTokenWeight,
-                modelContextWindow = modelContextWindow
-            )
-        )
-        if (resolution.contextClamped) {
-            logger.warn {
-                "MetaReasoner completion budget clamped by context window " +
-                    "(prompt_estimate=${resolution.promptEstimate}, budget=${resolution.budget}, context_window=$modelContextWindow)."
-            }
-        }
+        val promptEstimate = messages.sumOf { TextSecurity.estimateTokens(it.content) + PER_MESSAGE_OVERHEAD_TOKENS }
         return CompletionBudgetResolution(
-            budget = resolution.budget,
-            promptEstimate = resolution.promptEstimate,
-            contextClamped = resolution.contextClamped,
-            hardMax = hardMaxBudget
+            budget = baseBudget,
+            promptEstimate = promptEstimate,
+            contextClamped = false,
+            hardMax = baseBudget * EMPTY_CONTENT_RETRY_MULTIPLIER,
         )
     }
 
@@ -498,7 +469,8 @@ class LlmMetaReasoner(
         private const val CALL_SITE_PRIMARY: String = "meta_reasoner"
         private const val CALL_SITE_FALLBACK: String = "meta_reasoner_fallback"
         private const val META_REASONER_PROMPT_CALL_SITE: String = "meta_reasoner_prompt"
-        private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
+        private const val PER_MESSAGE_OVERHEAD_TOKENS: Int = 4
+        private const val EMPTY_CONTENT_RETRY_MULTIPLIER: Int = 2
 
         private const val META_REASONER_RESPONSE_SCHEMA_RELAXED: String = """
             {

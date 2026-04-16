@@ -149,6 +149,7 @@ data class ActionPluginFactoryContext(
     val evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
     val durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
+    val contactChannelPolicy: ContactChannelPolicy? = null,
 )
 
 interface AgentActionPlugin : AutoCloseable {

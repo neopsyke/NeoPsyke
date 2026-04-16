@@ -91,6 +91,8 @@ class StubMetricsRuntime(
 
     override fun recordPlannerOutputRepaired() {}
 
+    override fun recordTruncationRetry() {}
+
     override fun recordDroppedEvents(count: Long) {}
 
     override fun recordQueueSaturation(queueType: String) {}

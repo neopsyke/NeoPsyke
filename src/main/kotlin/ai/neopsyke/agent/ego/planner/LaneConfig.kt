@@ -34,7 +34,7 @@ data class ResolvedLaneConfig(
 ) {
     companion object {
         const val DEFAULT_TEMPERATURE: Double = 0.2
-        const val DEFAULT_MAX_COMPLETION_TOKENS: Int = 1200
+        const val DEFAULT_MAX_COMPLETION_TOKENS: Int = 4096
         const val DEFAULT_RETRY_ATTEMPTS: Int = 2
         val DEFAULT_STRUCTURED_OUTPUT: StructuredOutputMode = StructuredOutputMode.STRICT
     }

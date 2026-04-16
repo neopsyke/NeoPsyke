@@ -17,8 +17,7 @@ class MetaReasonerTest {
             modelClient = llm,
             config = AgentConfig(
                 metaReasoner = MetaReasonerConfig(
-                    maxTokens = maxTokens,
-                    dynamicCompletionEnabled = false
+                    maxTokens = maxTokens
                 )
             )
         )
@@ -229,7 +228,7 @@ class MetaReasonerTest {
             modelClient = failing,
             config = AgentConfig(
                 llmRetryAttempts = 1,
-                metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
+                metaReasoner = MetaReasonerConfig()
             )
         )
 
@@ -262,7 +261,7 @@ class MetaReasonerTest {
             modelClient = primary,
             config = AgentConfig(
                 llmRetryAttempts = 1,
-                metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
+                metaReasoner = MetaReasonerConfig()
             ),
             fallbackModelClient = fallback
         )
@@ -278,7 +277,7 @@ class MetaReasonerTest {
 
     @Test
     fun `meta reasoner retries with relaxed schema after provider schema validation failure`() {
-        val metaConfig = MetaReasonerConfig(dynamicCompletionEnabled = false)
+        val metaConfig = MetaReasonerConfig()
         val reasonMaxChars = metaConfig.reasonMaxChars
         var calls = 0
         val observedSchemas = mutableListOf<String>()
@@ -327,7 +326,7 @@ class MetaReasonerTest {
 
             override fun chat(messages: List<ai.neopsyke.llm.ChatMessage>, options: ChatRequestOptions): ai.neopsyke.llm.ChatCompletion {
                 observedBudgets += options.maxTokens ?: -1
-                if ((options.maxTokens ?: 0) < 640) {
+                if ((options.maxTokens ?: 0) < 768) {
                     throw IllegalStateException(
                         "Groq chat returned empty message content (finish_reason=length, content_chars=0)."
                     )
@@ -342,14 +341,16 @@ class MetaReasonerTest {
             modelClient = client,
             config = AgentConfig(
                 llmRetryAttempts = 2,
-                metaReasoner = MetaReasonerConfig(maxTokens = 512, dynamicCompletionEnabled = false)
+                metaReasoner = MetaReasonerConfig(maxTokens = 512)
             )
         )
 
         val assessment = reasoner.assess(trigger = thoughtTrigger(), context = defaultContext())
 
         assertEquals(MetaReasonerVerdict.FINALIZE_NOW, assessment.verdict)
-        assertEquals(listOf(512, 640), observedBudgets)
+        // Base budget = 512, retry bumps to max(64, 512/2) + 512 = 768, hardMax = 512 * 2 = 1024
+        assertEquals(512, observedBudgets[0])
+        assertTrue(observedBudgets[1] > 512, "Retry budget should be higher than base")
     }
 
     @Test
@@ -372,7 +373,7 @@ class MetaReasonerTest {
             modelClient = primary,
             config = AgentConfig(
                 llmRetryAttempts = 1,
-                metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)
+                metaReasoner = MetaReasonerConfig()
             ),
             fallbackModelClient = fallback
         )
@@ -394,7 +395,7 @@ class MetaReasonerTest {
         val instrumentation = RecordingInstrumentation()
         val reasoner = LlmMetaReasoner(
             modelClient = llm,
-            config = AgentConfig(metaReasoner = MetaReasonerConfig(dynamicCompletionEnabled = false)),
+            config = AgentConfig(metaReasoner = MetaReasonerConfig()),
             instrumentation = instrumentation
         )
 

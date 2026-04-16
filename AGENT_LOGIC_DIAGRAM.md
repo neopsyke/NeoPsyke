@@ -325,7 +325,7 @@ sequenceDiagram
                             Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
                             Note over Ego,Sup: Superego prompt build uses same prompt allocator contract, includes action-origin context, and emits prompt_budget_allocation
                             Note over Ego,Sup: Escalate on low confidence, policy-risk, or technical fallback
-                            Note over Ego,Sup: Superego completion max_tokens scales with prompt estimate [bounded floor/hard-cap] and model token_weight
+                            Note over Ego,Sup: Superego completion max_tokens is a generous fixed cap from config (safety net, not guidance)
                             Note over Ego,Sup: Structured output is schema-enforced [response_format=json_schema]
                             Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
                             Sup-->>Ego: allow or deny (with reason_code on deny)
@@ -370,7 +370,7 @@ sequenceDiagram
                             end
                             Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
                             Note over SC,Ego: Feedback continuations and terminal thread resolution are decided only after typed feedback re-enters through SensoryCortex and StimulusIngressCoordinator; WAITING outcomes suspend the thread instead of auto-queuing a continuation
-                            Note over Ego,Motor: contact_user delivery is channel-aware. Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
+                            Note over Ego,Motor: contact_user delivery is channel-aware. Durable-work hints use canonical keys (dashboard, telegram), then resolver maps them to live delivery targets; Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
                             Note over ACAPI,Dash: Dashboard-approved staged executions can append a completion/answer message back into the originating chat session before root-session mapping is cleared
                             Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
@@ -404,7 +404,7 @@ sequenceDiagram
         Note over Ego,Delib: Meta-reasoner output is schema-enforced. repeated empty-content or schema-validation failures can trigger optional fallback endpoint
         Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
         Note over Ego,Mem: Episodic recall filters session/interlocutor only when explicitly requested by user input
-        Note over Ego,Mem: Memory-advisor completion max_tokens scales with prompt estimate [bounded floor/hard-cap] and model token_weight
+        Note over Ego,Mem: Memory-advisor completion max_tokens is a generous fixed cap from config (safety net, not guidance)
         Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
         Note over Ego,Mem: Saved durable memories are normalized to first-person agent perspective before imprint
         Note over Ego,Mem: Episodic logbook entries carry active channel/principal/policy-scope metadata

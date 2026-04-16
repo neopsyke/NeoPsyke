@@ -163,8 +163,7 @@ class SuperegoGatekeeperTest {
             modelClient = llm,
             config = AgentConfig(
                 superego = SuperegoConfig(
-                    maxCompletionTokens = 77,
-                    dynamicCompletionEnabled = false
+                    maxCompletionTokens = 77
                 )
             )
         )

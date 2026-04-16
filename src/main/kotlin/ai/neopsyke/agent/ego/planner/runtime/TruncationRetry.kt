@@ -8,9 +8,9 @@ import ai.neopsyke.llm.ChatCompletion
  */
 object TruncationRetry {
 
-    const val TRUNCATION_RETRY_MIN_TOKEN_BUMP: Int = 96
+    const val TRUNCATION_RETRY_MIN_TOKEN_BUMP: Int = 256
     const val TRUNCATION_RETRY_DIVISOR: Int = 2
-    const val PLANNER_TRUNCATION_RETRY_HARD_MAX_TOKENS: Int = 1_600
+    const val PLANNER_TRUNCATION_RETRY_HARD_MAX_TOKENS: Int = 8_192
 
     /**
      * Returns true if the completion appears truncated (finish_reason=length/max_tokens

@@ -55,6 +55,7 @@ class Ego(
     private val durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
     private val evidenceArtifactStore: EvidenceArtifactStore = InMemoryEvidenceArtifactStore(),
     private val planRefiner: PlanRefiner = NoopPlanRefiner(),
+    private val contactChannelSupplier: () -> Set<String> = { emptySet() },
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
     @Volatile private var approvalStagingHook: ApprovalStagingHook? = null
@@ -1098,6 +1099,7 @@ class Ego(
             ),
             allowedCommitModes = opportunity?.allowedCommitModes ?: CommitMode.entries.toSet(),
             availableActions = availableActions,
+            availableContactChannels = contactChannelSupplier(),
             actionDefinitions = actionDefinitions,
             conversationContext = conversationContext,
             goalWorkSummary = goalSummaryResult.text,

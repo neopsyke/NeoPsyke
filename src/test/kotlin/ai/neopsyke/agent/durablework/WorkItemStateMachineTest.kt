@@ -395,9 +395,9 @@ class ProjectStateMachineTest {
         val state = initialState()
         val (updated, _) = WorkItemStateMachine.transition(
             state,
-            WorkItemEvent.Updated(workItemId = "proj-1", contactChannel = "webapp", timestamp = now),
+            WorkItemEvent.Updated(workItemId = "proj-1", contactChannel = "dashboard", timestamp = now),
         )
-        assertEquals("webapp", updated.workItem.contactChannel)
+        assertEquals("dashboard", updated.workItem.contactChannel)
     }
 
     @Test

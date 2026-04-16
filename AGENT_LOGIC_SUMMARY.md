@@ -394,7 +394,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
   - Low confidence (below `twoStageLowConfidenceThreshold`).
   - High policy risk (always) or medium (if configured).
 - Superego prompt includes: policy directives, candidate action details, action origin context, latest user message, short-term context.
-- Completion budget adaptive by prompt size, bounded by config, cost-weighted by model `token_weight`.
+- Completion budget is a generous fixed cap from config (safety net against runaway generation, not output guidance). `max_tokens` is a hard truncation at every provider — it does not guide models to produce shorter responses.
 
 ### L2: Action Control and Staging
 - File: `src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/control/ActionControlService.kt`
@@ -478,7 +478,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Schema-validation fallback: retry with relaxed schema (removes `reason.maxLength`).
 - Empty-content retry with adaptive completion-budget increase.
 - Primary endpoint can fail over to optional `meta_reasoner_fallback` after repeated technical failures.
-- Completion budget adaptive by prompt size, bounded by `MetaReasonerConfig`, weighted by model `token_weight`.
+- Completion budget is a generous fixed cap from `MetaReasonerConfig.maxTokens` (safety net, not guidance). Empty-content retry uses 2x budget as hard max.
 - Verdicts: `CONTINUE`, `CONTINUE_WITH_CONSTRAINTS`, `FINALIZE_NOW`, `REQUEST_TOOL_THEN_FINALIZE`.
 
 ---
@@ -507,7 +507,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Subject classification: `user` (preferences/facts) or `self` (Id/internal reflections).
 - Self-origin normalization: replaces "user" language with agent language; MCP writes stamp subject as "me".
 - Oversized dialogue/recall compressed before advisor prompt.
-- Completion budget adaptive by prompt size, bounded by `MemoryConfig`, cost-weighted by model `token_weight`.
+- Completion budget is a generous fixed cap from `MemoryConfig.longTermMemoryMaxTokens` (safety net, not guidance).
 - `MemorySystem` enforces: interval/cooldown gates, explicit remember-intent fast path, confidence threshold, recall-echo suppression, duplicate fingerprint suppression, temporary disable after repeated parse-fallback streaks.
 - Every blocked persistence emits `long_term_memory_persistence_skipped` with reason code/detail.
 
@@ -576,8 +576,10 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Work step roots stable per `work:<workItemId>:<stepId>` for thread/scratchpad continuity across wait/resume.
 
 **Durable work activations** use trusted internal automation `ConversationContext`.
-- Channel routing: `WorkContextLoader.buildWorkUnit()` uses `workItem.contactChannel` as the conversation `provider` (e.g. `"telegram"`). Falls back to `durable-work-runtime` when null.
-- `contactChannel` is set via `WorkPlanBuilder` on create/update operations from the `contact_channel` planner payload field.
+- Channel routing: `WorkContextLoader.buildWorkUnit()` always sets `provider = "durable-work-runtime"` with an empty `channelId` (surface = `AUTOMATION`). `workItem.contactChannel` is carried as a preferred-channel hint in `channel.attributes["preferred_channel"]`, never as a transport address.
+- Delivery: `RoutedConversationOutputGateway.deliver()` trusts the incoming `channelId` only when `surface == DIRECT` (authenticated inbound chat). For `AUTOMATION` contexts it always routes through `DefaultUserContactChannelResolver`, which honors the preferred-channel hint first, then falls back to `channelPriority`/`defaultChannel`, and only returns targets present in `UserContactChannelStatusProvider.availableChannels()` (config-backed, ACK-verified).
+- `contactChannel` is set via `WorkPlanBuilder` on create/update operations from the `contact_channel` planner payload field. Canonical durable-work channel names are user-facing keys from `availableChannels()` (`dashboard`, `telegram`), not transport providers (`webapp`). The planner prompt enumerates currently-available channels and instructs the LLM to map user intent semantically or set null.
+- `ContactChannelPolicy` gates the `durable_work_operation` plugin: only owner-initiated actions (`principal.role == OWNER && origin.source == USER`) may alter `contactChannel`; requested values outside `availableChannels()` are stripped at execute time so other fields (title, cron, instruction) still apply, and a clarification note is appended to the action outcome so the next planning turn can forward it to the user via the normal `contact_user` flow.
 - Context isolation: goal step execution is conversation-independent (a cron-backed goal may fire minutes or months after setup). `Ego.processGoalWork` strips `shortTermContextSummary`, `recentDialogue`, `sessionScratchpadDigest`, and `ambientContext` from the planner context. Long-term recall, lessons, and episodic recall are preserved — they carry durable user preferences and prior execution history.
 - Memory recall does not receive ambient context. Recall cues are derived from the trigger (step description for durable work, explicit queries for continuations) and episodic vector cues.
 - Scratchpads created when work is actually processed, not when cue ingested.

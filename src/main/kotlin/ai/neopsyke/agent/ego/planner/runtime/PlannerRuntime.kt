@@ -35,6 +35,7 @@ class PlannerRuntime(
     private val instrumentation: AgentInstrumentation,
     private val onPlannerNoop: () -> Unit = {},
     private val onPlannerOutputRepaired: () -> Unit = {},
+    private val onTruncationRetry: () -> Unit = {},
     private val actionPayloadRepair: (ai.neopsyke.agent.model.ActionType, String) -> String = { _, raw -> raw },
     private val laneModelClientResolver: (LaneId, ResolvedLaneConfig) -> ChatModelClient? = { _, _ -> null },
 ) {
@@ -228,6 +229,8 @@ class PlannerRuntime(
     }
 
     fun onOutputRepaired() = onPlannerOutputRepaired()
+
+    fun notifyTruncationRetry() = onTruncationRetry()
 
     fun repairActionPayload(actionType: ai.neopsyke.agent.model.ActionType, raw: String): String =
         actionPayloadRepair(actionType, raw)

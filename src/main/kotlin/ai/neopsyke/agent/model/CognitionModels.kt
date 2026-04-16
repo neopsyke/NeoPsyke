@@ -116,6 +116,7 @@ data class PlannerContext(
     ),
     val allowedCommitModes: Set<CommitMode> = CommitMode.entries.toSet(),
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
+    val availableContactChannels: Set<String> = emptySet(),
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val conversationContext: ConversationContext = ConversationContext.default(),
     val idState: IdStateSnapshot? = null,

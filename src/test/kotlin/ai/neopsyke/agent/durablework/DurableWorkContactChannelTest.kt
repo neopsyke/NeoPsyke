@@ -1,5 +1,6 @@
 package ai.neopsyke.agent.durablework
 
+import ai.neopsyke.agent.cortex.motor.actions.ContactChannelPolicy
 import ai.neopsyke.agent.ego.planner.model.DurableWorkCommand
 import ai.neopsyke.agent.ego.planner.model.SerializedDurableWorkCommand
 import ai.neopsyke.agent.model.AmbientContext
@@ -55,19 +56,19 @@ class GoalContactChannelTest {
     fun `SerializedDurableWorkCommand update round-trips contactChannel`() {
         val command = DurableWorkCommand.Update(
             reference = ai.neopsyke.agent.ego.planner.model.WorkItemReference.ByInternalId("goal-1"),
-            contactChannel = "webapp",
+            contactChannel = "dashboard",
         )
         val serialized = SerializedDurableWorkCommand.fromDurableWorkCommand(command)
-        assertEquals("webapp", serialized.contactChannel)
+        assertEquals("dashboard", serialized.contactChannel)
 
         val restored = serialized.toDurableWorkCommand() as DurableWorkCommand.Update
-        assertEquals("webapp", restored.contactChannel)
+        assertEquals("dashboard", restored.contactChannel)
     }
 
     // ── WorkContextLoader.buildWorkUnit ──────────────────────────────────
 
     @Test
-    fun `buildWorkUnit uses contactChannel as provider when set`() {
+    fun `buildWorkUnit carries contactChannel as a preferred-channel hint`() {
         val state = goalState(contactChannel = "telegram")
         val work = WorkContextLoader.buildWorkUnit(
             state = state,
@@ -75,11 +76,17 @@ class GoalContactChannelTest {
             rootInputId = "root-1",
             wakeReason = "cron_wake_active",
         )
-        assertEquals("telegram", work.conversationContext.security.channel.provider)
+        val channel = work.conversationContext.security.channel
+        assertEquals("durable-work-runtime", channel.provider)
+        assertEquals("", channel.channelId)
+        assertEquals(
+            "telegram",
+            channel.attributes[ContactChannelPolicy.PREFERRED_CHANNEL_ATTRIBUTE],
+        )
     }
 
     @Test
-    fun `buildWorkUnit falls back to goal-runtime when contactChannel is null`() {
+    fun `buildWorkUnit omits hint when contactChannel is null`() {
         val state = goalState(contactChannel = null)
         val work = WorkContextLoader.buildWorkUnit(
             state = state,
@@ -87,7 +94,10 @@ class GoalContactChannelTest {
             rootInputId = "root-1",
             wakeReason = "cron_wake_active",
         )
-        assertEquals("durable-work-runtime", work.conversationContext.security.channel.provider)
+        val channel = work.conversationContext.security.channel
+        assertEquals("durable-work-runtime", channel.provider)
+        assertEquals("", channel.channelId)
+        assertNull(channel.attributes[ContactChannelPolicy.PREFERRED_CHANNEL_ATTRIBUTE])
     }
 
     // ── WorkItemSnapshot round-trip ──────────────────────────────────────────

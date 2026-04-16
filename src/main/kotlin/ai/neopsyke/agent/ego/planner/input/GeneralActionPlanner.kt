@@ -161,6 +161,7 @@ class GeneralActionPlanner(
 
         // Truncation retry
         if (TruncationRetry.isLikelyTruncated(response)) {
+            runtime.notifyTruncationRetry()
             instrumentation.emit(AgentEvents.warning("GeneralAction response appears truncated; retrying."))
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(LaneId.GENERAL_ACTION).maxCompletionTokens)
             val retryMessages = allocation.messages + ChatMessage(

@@ -6,11 +6,19 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.ContactChannelPolicy
+import ai.neopsyke.agent.cortex.motor.actions.DeliveryTarget
+import ai.neopsyke.agent.cortex.motor.actions.UserContactChannelStatusProvider
 import ai.neopsyke.agent.cortex.motor.actions.plugin.builtin.DurableWorkOperationActionPlugin
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.model.ActionExecutionStatus
+import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.model.ActionType
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
+import ai.neopsyke.agent.model.Interlocutor
+import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.model.GroundingMetadata
@@ -325,14 +333,14 @@ class DurableWorkOperationActionPluginTest {
                 id = 1L,
                 urgency = Urgency.MEDIUM,
                 type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"command":"update","work_item_id":"goal-1","contact_channel":"webapp"}""",
+                payload = """{"command":"update","work_item_id":"goal-1","contact_channel":"dashboard"}""",
                 summary = "update goal",
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
             ActionExecutionContext(searchResultCount = 0),
         )
 
-        assertEquals("webapp", capturedRequest?.contactChannel)
+        assertEquals("dashboard", capturedRequest?.contactChannel)
     }
 
     private fun pluginWithGateway(gateway: DurableWorkGateway) = DurableWorkOperationActionPlugin(
@@ -345,6 +353,139 @@ class DurableWorkOperationActionPluginTest {
             durableWorkGateway = gateway,
         )
     )
+
+    private fun pluginWithPolicy(
+        gateway: DurableWorkGateway,
+        policy: ContactChannelPolicy,
+    ) = DurableWorkOperationActionPlugin(
+        ActionPluginFactoryContext(
+            config = AgentConfig(durableWork = DurableWorkConfig(enabled = true)),
+            webSearchActionHandler = null,
+            fetchTool = null,
+            output = {},
+            reflectionMemoryRecorder = NoopReflectionMemoryRecorder,
+            durableWorkGateway = gateway,
+            contactChannelPolicy = policy,
+        )
+    )
+
+    private fun ownerUpdateAction(payload: String): PendingAction = PendingAction(
+        id = 1L,
+        urgency = Urgency.MEDIUM,
+        type = ActionType.DURABLE_WORK_OPERATION,
+        payload = payload,
+        summary = "update goal",
+        conversationContext = ConversationContext(
+            sessionId = "default",
+            interlocutor = Interlocutor.named("Owner"),
+            security = ConversationSecurityContexts.ownerDirect(
+                provider = "telegram",
+                channelId = "chat-123",
+            ),
+        ),
+        origin = ActionOrigin.USER,
+        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+    )
+
+    private fun systemUpdateAction(payload: String): PendingAction = PendingAction(
+        id = 2L,
+        urgency = Urgency.MEDIUM,
+        type = ActionType.DURABLE_WORK_OPERATION,
+        payload = payload,
+        summary = "update goal",
+        conversationContext = ConversationContext(
+            sessionId = "default",
+            interlocutor = Interlocutor.named("durable-work-runtime"),
+            security = ConversationSecurityContexts.internalAutomation(
+                provider = "durable-work-runtime",
+                channelId = "",
+            ),
+        ),
+        origin = ActionOrigin(OriginSource.DURABLE_WORK),
+        groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+    )
+
+    private fun fakePolicy(available: Set<String>): ContactChannelPolicy {
+        val provider = object : UserContactChannelStatusProvider {
+            override fun availableChannels(): Map<String, DeliveryTarget> =
+                available.associateWith { name ->
+                    DeliveryTarget(
+                        provider = if (name == "dashboard") "webapp" else name,
+                        sessionId = "default",
+                        channelId = "stub-$name",
+                    )
+                }
+        }
+        return ContactChannelPolicy(provider)
+    }
+
+    @Test
+    fun `owner-initiated update with available channel is passed through`() = runBlocking {
+        var capturedRequest: DurableWorkOperationRequest? = null
+        val gateway = object : DurableWorkGateway by NoopDurableWorkGateway {
+            override fun executeOperation(request: DurableWorkOperationRequest): DurableWorkOperationResult {
+                capturedRequest = request
+                return DurableWorkOperationResult(true, "Work item updated: contact updated.", "goal-1")
+            }
+        }
+        val plugin = pluginWithPolicy(gateway, fakePolicy(setOf("telegram", "dashboard")))
+
+        val outcome = plugin.execute(
+            ownerUpdateAction("""{"command":"update","work_item_id":"goal-1","contact_channel":"telegram"}"""),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals(ActionExecutionStatus.SUCCESS, outcome.executionStatus)
+        assertEquals("telegram", capturedRequest?.contactChannel)
+        assertFalse(outcome.statusSummary.contains("not available"))
+    }
+
+    @Test
+    fun `owner-initiated update with unavailable channel strips channel and notes clarification in summary`() = runBlocking {
+        var capturedRequest: DurableWorkOperationRequest? = null
+        val gateway = object : DurableWorkGateway by NoopDurableWorkGateway {
+            override fun executeOperation(request: DurableWorkOperationRequest): DurableWorkOperationResult {
+                capturedRequest = request
+                return DurableWorkOperationResult(true, "Work item updated: cron=0 20 * * *.", "goal-1")
+            }
+        }
+        val plugin = pluginWithPolicy(gateway, fakePolicy(setOf("telegram", "dashboard")))
+
+        val outcome = plugin.execute(
+            ownerUpdateAction(
+                """{"command":"update","work_item_id":"goal-1","cron_expression":"0 20 * * *","contact_channel":"morse"}"""
+            ),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        // Other valid fields still apply; the channel was stripped before hitting the gateway.
+        assertEquals(ActionExecutionStatus.SUCCESS, outcome.executionStatus)
+        assertEquals("0 20 * * *", capturedRequest?.cronExpression)
+        assertEquals(null, capturedRequest?.contactChannel)
+        assertTrue(outcome.statusSummary.contains("'morse'"))
+        assertTrue(outcome.statusSummary.contains("not available"))
+        assertTrue(outcome.statusSummary.contains("telegram"))
+        assertTrue(outcome.statusSummary.contains("dashboard"))
+    }
+
+    @Test
+    fun `non-owner caller cannot alter contactChannel`() = runBlocking {
+        var capturedRequest: DurableWorkOperationRequest? = null
+        val gateway = object : DurableWorkGateway by NoopDurableWorkGateway {
+            override fun executeOperation(request: DurableWorkOperationRequest): DurableWorkOperationResult {
+                capturedRequest = request
+                return DurableWorkOperationResult(true, "Work item updated.", "goal-1")
+            }
+        }
+        val plugin = pluginWithPolicy(gateway, fakePolicy(setOf("telegram", "dashboard")))
+
+        plugin.execute(
+            systemUpdateAction("""{"command":"update","work_item_id":"goal-1","contact_channel":"telegram"}"""),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals(null, capturedRequest?.contactChannel)
+    }
 
     private fun testScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }

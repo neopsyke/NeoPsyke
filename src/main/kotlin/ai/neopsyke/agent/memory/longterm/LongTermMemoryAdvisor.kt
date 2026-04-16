@@ -8,7 +8,6 @@ import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.DeliberationState
 import ai.neopsyke.agent.model.DialogueTurn
-import ai.neopsyke.agent.support.AdaptiveCompletionBudget
 import ai.neopsyke.agent.support.ContextBlockCompressor
 import ai.neopsyke.agent.support.RetryPolicy
 import ai.neopsyke.agent.support.TextSecurity
@@ -72,9 +71,6 @@ object NoopLongTermMemoryAdvisor : LongTermMemoryAdvisor {
 class LlmLongTermMemoryAdvisor(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
-    private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
-    private val modelContextWindow: Int? = null,
-    private val modelReasoningOverhead: Double = 1.0,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
 ) : LongTermMemoryAdvisor {
     override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
@@ -119,31 +115,8 @@ class LlmLongTermMemoryAdvisor(
         return parseResponse(response.content, context)
     }
 
-    private fun resolveCompletionTokenBudget(messages: List<ChatMessage>): Int {
-        val baseBudget = config.memory.longTermMemoryMaxTokens
-        if (!config.memory.longTermMemoryDynamicCompletionEnabled) {
-            return baseBudget
-        }
-        val resolution = AdaptiveCompletionBudget.resolveDetailed(
-            request = AdaptiveCompletionBudget.Request(
-                messages = messages,
-                baseMaxTokens = baseBudget,
-                hardMaxTokens = config.memory.longTermMemoryDynamicCompletionHardMaxTokens,
-                promptToCompletionRatio = config.memory.longTermMemoryDynamicPromptToCompletionRatio,
-                minPromptTokensForScaling = config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
-                modelTokenWeight = modelTokenWeight,
-                modelContextWindow = modelContextWindow,
-                reasoningOverheadMultiplier = modelReasoningOverhead
-            )
-        )
-        if (resolution.contextClamped) {
-            logger.warn {
-                "LongTermMemoryAdvisor completion budget clamped by context window " +
-                    "(prompt_estimate=${resolution.promptEstimate}, budget=${resolution.budget}, context_window=$modelContextWindow)."
-            }
-        }
-        return resolution.budget
-    }
+    private fun resolveCompletionTokenBudget(@Suppress("UNUSED_PARAMETER") messages: List<ChatMessage>): Int =
+        config.memory.longTermMemoryMaxTokens
 
     private fun buildPromptPayload(context: LongTermMemoryAssessmentContext): MemoryAdvisorPromptPayload {
         val dialogueBlock = context.recentDialogue
@@ -431,7 +404,6 @@ class LlmLongTermMemoryAdvisor(
     )
 
     private companion object {
-        private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
         /**
          * Matches metacognitive verb prefixes that wrap an underlying fact.
          * Examples stripped: "I learned that ...", "I should remember ...", "I'm keeping in mind that ...".
