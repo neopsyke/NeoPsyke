@@ -2,12 +2,15 @@ package ai.neopsyke.agent.durablework
 
 import ai.neopsyke.agent.ego.planner.model.DurableWorkCommand
 import ai.neopsyke.agent.ego.planner.model.SerializedDurableWorkCommand
+import ai.neopsyke.agent.model.AmbientContext
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Verifies that the contactChannel field flows correctly through the goal
@@ -107,6 +110,42 @@ class GoalContactChannelTest {
 
         val restored = snapshot.toState(workspacePath)
         assertNull(restored.workItem.contactChannel)
+    }
+
+    // ── AmbientContext scratchpad theme filtering ─────────────────────────
+
+    @Test
+    fun `AmbientContext copy with empty scratchpad themes excludes themes from render`() {
+        val original = AmbientContext(
+            activeWorkItems = listOf("Send daily weather reminder via Telegram"),
+            recentScratchpadThemes = listOf("Update channel to Telegram and time to 00:15"),
+            recentUsefulActionsOrUpdates = listOf("Executed web_search: forecast data"),
+        )
+
+        val filtered = original.copy(recentScratchpadThemes = emptyList())
+
+        assertFalse(filtered.isEmpty())
+        assertTrue(filtered.render().contains("active_goals"))
+        assertTrue(filtered.render().contains("recent_useful_actions_updates"))
+        assertFalse(filtered.render().contains("recent_scratchpad_themes"))
+        assertFalse(filtered.render().contains("Update channel to Telegram"))
+    }
+
+    @Test
+    fun `AmbientContext filtering preserves other fields`() {
+        val original = AmbientContext(
+            activeWorkItems = listOf("Goal A"),
+            recentScratchpadThemes = listOf("Theme X"),
+            recentUsefulActionsOrUpdates = listOf("Action Y"),
+            unresolvedOpenLoops = listOf("Loop Z"),
+        )
+
+        val filtered = original.copy(recentScratchpadThemes = emptyList())
+
+        assertEquals(listOf("Goal A"), filtered.activeWorkItems)
+        assertEquals(emptyList(), filtered.recentScratchpadThemes)
+        assertEquals(listOf("Action Y"), filtered.recentUsefulActionsOrUpdates)
+        assertEquals(listOf("Loop Z"), filtered.unresolvedOpenLoops)
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

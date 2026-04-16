@@ -890,12 +890,25 @@ class Ego(
 
         timing.startPhase("planner_context")
         val trigger = EgoTrigger.DurableWork(work)
-        val context = plannerContext(
+        val rawContext = plannerContext(
             trigger = trigger,
             rootInputId = work.rootInputId,
             sessionId = sessionId,
             conversationContext = convCtx,
             opportunity = opportunity,
+        )
+        // Goal step execution is conversation-independent: a cron-backed goal
+        // may fire minutes or months after the user set it up, so session-level
+        // context (recent dialogue, short-term summary, scratchpad digest,
+        // ambient context) is noise at best and a contamination source at worst.
+        // The step has its own focused scratchpad + goal context. Long-term
+        // recall, lessons, and episodic recall are kept — they carry durable
+        // user preferences and prior execution history.
+        val context = rawContext.copy(
+            shortTermContextSummary = "",
+            recentDialogue = emptyList(),
+            sessionScratchpadDigest = "",
+            ambientContext = AmbientContext(),
         )
 
         timing.startPhase("meta_assessment")
@@ -1011,7 +1024,6 @@ class Ego(
             shortTermSummary = shortTermSummary,
             recentDialogue = recentDialogue,
             episodicCues = episodicCues,
-            ambientContext = ambientContext,
         )
         val lessons = memory.recallLessons(trigger, recentDialogue)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)

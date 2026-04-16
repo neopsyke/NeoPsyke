@@ -26,6 +26,113 @@ import kotlin.test.assertTrue
 class DurableWorkPlannerTest {
 
     @Test
+    fun `create with contact_channel wires through to payload`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """{"operation":"create","work_item_reference":null,"title":"Weather reminder","instruction":"Send weather forecast","completion_criteria":"Delivered","priority":"medium","cron_expression":"0 8 * * *","contact_channel":"telegram","plan_steps":[{"id":"step1","description":"Fetch weather","acceptance_criteria":"Obtained forecast","grounding_requirement":"required","requires":[],"produces":["forecast"],"max_attempts":3},{"id":"step2","description":"Send to user","acceptance_criteria":"Delivered","grounding_requirement":"not_required","requires":["forecast"],"produces":[],"max_attempts":3}],"assistant_response":null,"reason":null}"""
+            )
+        }
+        val runtime = PlannerRuntime(
+            defaultModelClient = llm,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val planner = WorkPlanBuilder(
+            runtime = runtime,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            planRefiner = NoopPlanRefiner(),
+        )
+
+        val context = PlannerContext(
+            recentDialogue = emptyList(),
+            queue = QueueSnapshot(0, 0, 0),
+        )
+
+        val decision = planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 1, content = "remind me of weather daily via telegram")),
+            context = context,
+        )
+
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.DURABLE_WORK_OPERATION, intention.actionType)
+        assertTrue(intention.payload.contains(""""command":"create""""))
+        assertTrue(intention.payload.contains(""""contact_channel":"telegram""""))
+    }
+
+    @Test
+    fun `update with contact_channel wires through to payload`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """{"operation":"update","work_item_reference":{"type":"by_position","id":"1","candidates":null,"original_text":null,"resolved_from":null},"title":null,"instruction":null,"completion_criteria":null,"priority":null,"cron_expression":"15 0 * * *","contact_channel":"telegram","plan_steps":null,"assistant_response":null,"reason":null}"""
+            )
+        }
+        val runtime = PlannerRuntime(
+            defaultModelClient = llm,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val planner = WorkPlanBuilder(
+            runtime = runtime,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            planRefiner = NoopPlanRefiner(),
+        )
+
+        val context = PlannerContext(
+            recentDialogue = emptyList(),
+            queue = QueueSnapshot(0, 0, 0),
+            goalIndex = mapOf(1 to "goal-1"),
+        )
+
+        val decision = planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 1, content = "change reminder channel to telegram and time to 00:15")),
+            context = context,
+        )
+
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.DURABLE_WORK_OPERATION, intention.actionType)
+        assertTrue(intention.payload.contains(""""command":"update""""))
+        assertTrue(intention.payload.contains(""""contact_channel":"telegram""""))
+        assertTrue(intention.payload.contains(""""cron_expression":"15 0 * * *""""))
+    }
+
+    @Test
+    fun `create without contact_channel produces null in payload`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """{"operation":"create","work_item_reference":null,"title":"Check stocks","instruction":"Check stock prices","completion_criteria":"Price checked","priority":"medium","cron_expression":"0 9 * * 1-5","contact_channel":null,"plan_steps":[{"id":"step1","description":"Fetch stock prices","acceptance_criteria":"Prices obtained","grounding_requirement":"required","requires":[],"produces":["prices"],"max_attempts":3}],"assistant_response":null,"reason":null}"""
+            )
+        }
+        val runtime = PlannerRuntime(
+            defaultModelClient = llm,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val planner = WorkPlanBuilder(
+            runtime = runtime,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+            planRefiner = NoopPlanRefiner(),
+        )
+
+        val context = PlannerContext(
+            recentDialogue = emptyList(),
+            queue = QueueSnapshot(0, 0, 0),
+        )
+
+        val decision = planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 1, content = "check stocks daily at 9am")),
+            context = context,
+        )
+
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertTrue(intention.payload.contains(""""command":"create""""))
+        // contact_channel should be null when not specified
+        assertTrue(intention.payload.contains(""""contact_channel":null"""))
+    }
+
+    @Test
     fun `revise_plan uses resolved work-item snapshot as refinement context`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse(
@@ -111,6 +218,11 @@ class DurableWorkPlannerTest {
         assertTrue(captured.shortTermContextSummary.contains("plan_revision: 3"))
         assertTrue(captured.shortTermContextSummary.contains("latest_artifact_summary"))
         assertEquals("first step keeps failing", captured.userFeedbackHint)
+    }
+
+    private class NoopPlanRefiner : PlanRefiner {
+        override fun refine(request: PlanRefinementRequest): PlanRefinementResult =
+            PlanRefinementResult(steps = request.steps, reason = "noop")
     }
 
     private class CapturingPlanRefiner : PlanRefiner {

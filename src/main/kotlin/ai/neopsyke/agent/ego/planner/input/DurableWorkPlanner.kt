@@ -96,6 +96,7 @@ class WorkPlanBuilder(
                     - If the user requests a recurring schedule, set cron_expression to a standard 5-field cron string (minute hour day-of-month month day-of-week).
                     - Examples: "every 5 minutes" -> "*/5 * * * *", "daily at 9:30 am" -> "30 9 * * *", "every Monday at 8am" -> "0 8 * * 1", "hourly" -> "0 * * * *".
                     - If the request is not recurring, set cron_expression to null.
+                    - If the user specifies a delivery channel (e.g. "via Telegram", "on Slack", "by email"), set contact_channel to the channel name (lowercase, e.g. "telegram"). Otherwise leave it null.
                     - Always generate plan_steps for create: a short list of concrete execution steps.
                     - Each step should map to an available action (web_search, website_fetch, contact_user, etc.).
                     - Steps that fetch external data should set grounding_requirement to "required".
@@ -113,7 +114,7 @@ class WorkPlanBuilder(
                     - Never silently guess when uncertain. Return ambiguous instead.
                     - For list, delete_all, and create, work_item_reference can be null.
 
-                    For "update": set relevant fields (title, instruction, priority, completion_criteria, cron_expression) to new values; leave others null.
+                    For "update": set relevant fields (title, instruction, priority, completion_criteria, cron_expression, contact_channel) to new values; leave others null.
                     For "reprioritize": set priority to the new priority value.
                     For "revise_plan": set reason to explain why, and generate new plan_steps with the revised execution plan.
                     For "fallback": provide a helpful response in assistant_response.
@@ -135,6 +136,7 @@ class WorkPlanBuilder(
                       "completion_criteria":"for create/update",
                       "priority":"low|medium|high|critical (for create/update/reprioritize)",
                       "cron_expression":"5-field cron or null (for create/update)",
+                      "contact_channel":"delivery channel name or null (for create/update)",
                       "plan_steps":[{"id":"step1","description":"...","acceptance_criteria":"...","grounding_requirement":"required|not_required","requires":[],"produces":["artifact"],"max_attempts":3}],
                       "assistant_response":"required when operation=fallback",
                       "reason":"optional"
@@ -251,6 +253,7 @@ class WorkPlanBuilder(
                 GOAL_COMPLETION_CRITERIA_MAX_CHARS,
             ),
             cronExpression = payload.cronExpression?.trim()?.ifBlank { null },
+            contactChannel = payload.contactChannel?.trim()?.lowercase()?.ifBlank { null },
             planSteps = planSteps,
         )
 
@@ -321,6 +324,7 @@ class WorkPlanBuilder(
                     },
                     completionCriteria = payload.completionCriteria?.trim()?.ifBlank { null },
                     cronExpression = payload.cronExpression?.trim()?.ifBlank { null },
+                    contactChannel = payload.contactChannel?.trim()?.lowercase()?.ifBlank { null },
                 )
             }
             "revise_plan" -> resolvedReference(reference)?.let { ref ->
@@ -609,6 +613,8 @@ class WorkPlanBuilder(
         val priority: String? = null,
         @param:JsonProperty("cron_expression")
         val cronExpression: String? = null,
+        @param:JsonProperty("contact_channel")
+        val contactChannel: String? = null,
         @param:JsonProperty("plan_steps")
         val planSteps: List<PlanStepPayload>? = null,
         @param:JsonProperty("assistant_response")
@@ -660,7 +666,7 @@ class WorkPlanBuilder(
                 {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["operation", "work_item_reference", "title", "instruction", "completion_criteria", "priority", "cron_expression", "plan_steps", "assistant_response", "reason"],
+                  "required": ["operation", "work_item_reference", "title", "instruction", "completion_criteria", "priority", "cron_expression", "contact_channel", "plan_steps", "assistant_response", "reason"],
                   "properties": {
                     "operation": { "type": "string" },
                     "work_item_reference": {
@@ -680,6 +686,7 @@ class WorkPlanBuilder(
                     "completion_criteria": { "type": ["string", "null"], "maxLength": 200 },
                     "priority": { "type": ["string", "null"], "enum": ["low", "medium", "high", "critical", null] },
                     "cron_expression": { "type": ["string", "null"], "maxLength": 40 },
+                    "contact_channel": { "type": ["string", "null"], "maxLength": 40 },
                     "plan_steps": {
                       "type": ["array", "null"],
                       "items": {

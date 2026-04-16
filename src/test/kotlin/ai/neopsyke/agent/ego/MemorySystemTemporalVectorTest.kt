@@ -25,6 +25,7 @@ import java.time.temporal.ChronoUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class MemorySystemTemporalVectorTest {
@@ -197,7 +198,7 @@ class MemorySystemTemporalVectorTest {
     }
 
     @Test
-    fun `learning impulse recall cue includes shared ambient context`() {
+    fun `learning impulse recall cue does not include ambient context`() {
         var capturedCue: String? = null
         val recordingHippocampus = object : Hippocampus {
             override val providerName: String = "recording"
@@ -223,21 +224,21 @@ class MemorySystemTemporalVectorTest {
             ),
             shortTermSummary = "",
             recentDialogue = emptyList(),
-            ambientContext = ai.neopsyke.agent.model.AmbientContext(
-                activeWorkItems = listOf("Build the memory subsystem"),
-                recentExactLearningTopics = listOf("kotlin, coroutines")
-            )
         )
 
-        assertTrue(capturedCue != null, "Expected hippocampus to be called")
-        assertTrue(capturedCue.contains("Ambient context:"))
-        assertTrue(capturedCue.contains("active_goals:"))
-        assertTrue(capturedCue.contains("Build the memory subsystem"))
-        assertTrue(capturedCue.contains("Learning freshness guidance:"))
+        assertNotNull(capturedCue, "Expected hippocampus to be called")
+        assertTrue(
+            capturedCue.contains("I feel curious"),
+            "Expected base impulse prompt in cue"
+        )
+        assertFalse(
+            capturedCue.contains("Ambient context:"),
+            "Ambient context should not appear in recall cue"
+        )
     }
 
     @Test
-    fun `non learning impulse recall cue still includes shared ambient context`() {
+    fun `non learning impulse recall cue does not include ambient context`() {
         var capturedCue: String? = null
         val recordingHippocampus = object : Hippocampus {
             override val providerName: String = "recording"
@@ -263,15 +264,10 @@ class MemorySystemTemporalVectorTest {
             ),
             shortTermSummary = "",
             recentDialogue = emptyList(),
-            ambientContext = ai.neopsyke.agent.model.AmbientContext(
-                unresolvedOpenLoops = listOf("Follow up on the release checklist")
-            )
         )
 
-        assertTrue(capturedCue != null, "Expected hippocampus to be called")
-        assertTrue(capturedCue.contains("Ambient context:"))
-        assertTrue(capturedCue.contains("unresolved_open_loops:"))
-        assertTrue(capturedCue.contains("Follow up on the release checklist"))
+        assertNotNull(capturedCue, "Expected hippocampus to be called")
+        assertFalse(capturedCue.contains("Ambient context:"))
         assertFalse(capturedCue.contains("Learning freshness guidance:"))
     }
 

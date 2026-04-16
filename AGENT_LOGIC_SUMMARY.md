@@ -576,6 +576,10 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Work step roots stable per `work:<workItemId>:<stepId>` for thread/scratchpad continuity across wait/resume.
 
 **Durable work activations** use trusted internal automation `ConversationContext`.
+- Channel routing: `WorkContextLoader.buildWorkUnit()` uses `workItem.contactChannel` as the conversation `provider` (e.g. `"telegram"`). Falls back to `durable-work-runtime` when null.
+- `contactChannel` is set via `WorkPlanBuilder` on create/update operations from the `contact_channel` planner payload field.
+- Context isolation: goal step execution is conversation-independent (a cron-backed goal may fire minutes or months after setup). `Ego.processGoalWork` strips `shortTermContextSummary`, `recentDialogue`, `sessionScratchpadDigest`, and `ambientContext` from the planner context. Long-term recall, lessons, and episodic recall are preserved — they carry durable user preferences and prior execution history.
+- Memory recall does not receive ambient context. Recall cues are derived from the trigger (step description for durable work, explicit queries for continuations) and episodic vector cues.
 - Scratchpads created when work is actually processed, not when cue ingested.
 - Durable-work-origin `WAITING` without async handles → contract violation.
 - Activation journal records `STARTED`, `STEP_SELECTED`, `CONTEXT_MATERIALIZED`, `NEXT_WAKE_SCHEDULED`, `FINISHED`, `RECOVERED`.

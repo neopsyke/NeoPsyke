@@ -4,7 +4,6 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.cortex.motor.actions.ReflectionMemoryRecorder
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionType
-import ai.neopsyke.agent.model.AmbientContext
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
@@ -170,14 +169,12 @@ class MemorySystem(
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
         episodicCues: List<String> = emptyList(),
-        ambientContext: AmbientContext = AmbientContext(),
     ): String {
         val text = recallMemory(
             trigger = trigger,
             shortTermSummary = shortTermSummary,
             recentDialogue = recentDialogue,
             episodicCues = episodicCues,
-            ambientContext = ambientContext,
         )
         val state = activeState()
         state.latestShortTermSummary = shortTermSummary
@@ -999,7 +996,6 @@ class MemorySystem(
         shortTermSummary: String,
         recentDialogue: List<DialogueTurn>,
         episodicCues: List<String> = emptyList(),
-        ambientContext: AmbientContext = AmbientContext(),
     ): String {
         if (!hippocampus.enabled) return ""
         val triggerLabel = when (trigger) {
@@ -1016,7 +1012,7 @@ class MemorySystem(
             is EgoTrigger.DurableWork -> trigger.workUnit.stepDescription.trim()
             is EgoTrigger.IncomingImpulse -> {
                 val baseCue = trigger.impulse.prompt.trim()
-                buildImpulseRecallCue(baseCue, trigger.impulse.needId, ambientContext)
+                buildImpulseRecallCue(baseCue, trigger.impulse.needId)
             }
             is EgoTrigger.Continuation -> {
                 val query = trigger.continuation.longTermMemoryRecallQuery?.trim().orEmpty()
@@ -1142,26 +1138,14 @@ class MemorySystem(
     private fun buildImpulseRecallCue(
         baseCue: String,
         needId: String,
-        ambientContext: AmbientContext,
     ): String {
-        val renderedAmbientContext = ambientContext.render()
-        val learningGuidance = if (needId == LEARNING_NEED_ID && ambientContext.recentExactLearningTopics.isNotEmpty()) {
-            "Learning freshness guidance: avoid exact repeats from recent_exact_learning_topics, but deeper follow-up exploration remains valid."
+        val learningGuidance = if (needId == LEARNING_NEED_ID && ambientLearningTopicsSnapshot.isNotEmpty()) {
+            "Learning freshness guidance: avoid exact repeats of recently explored topics, but deeper follow-up exploration remains valid."
         } else {
             null
         }
-        if (!ambientContext.isEmpty()) {
-            instrumentation.emit(
-                AgentEvents.ambientContextSnapshot(
-                    trigger = "impulse",
-                    usage = "memory_recall_cue",
-                    ambientContext = ambientContext,
-                )
-            )
-        }
         return listOfNotNull(
             baseCue.takeIf { it.isNotBlank() },
-            renderedAmbientContext.takeIf { it.isNotBlank() }?.let { "Ambient context:\n$it" },
             learningGuidance,
         ).joinToString(separator = "\n")
     }
