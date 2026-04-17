@@ -13,13 +13,14 @@ It is not an implementation plan. It defines:
 
 - the intended product behavior
 - the architectural boundaries
-- what the current Goal runtime already provides
+- what the current durable-work runtime already provides
 - what should change to align with the vision
 - explicit phase-1 and phase-2 runtime contracts
 - phased acceptance criteria so each release can ship independently
 
-The current Goal runtime should be treated as the nucleus of the final design,
-not as a failed side feature to discard.
+The current durable-work runtime, which grew from the earlier goal-focused
+runtime, should be treated as the nucleus of the final design, not as a failed
+side feature to discard.
 
 ## Design Focus
 
@@ -63,10 +64,10 @@ Examples:
 - check social media periodically and prepare draft answers
 - produce recurring summaries or reminders
 
-### 2. Long-Term Goals
+### 2. Responsibilities
 
-Persistent open-ended objectives that may wake from Id impulses or scheduled
-review cycles and may require memory over long time spans.
+Persistent open-ended responsibilities that may wake from Id impulses or
+scheduled review cycles and may require memory over long time spans.
 
 Examples:
 
@@ -80,7 +81,9 @@ These require durable state such as:
 - user preferences
 - previously reported findings
 
-### 3. Durable Workflows
+User-facing name recommendation for this shape: `Responsibility`.
+
+### 3. Workflows
 
 Durable multi-step work with blockers, dependencies, and artifacts.
 
@@ -99,7 +102,7 @@ concerns are out of scope for the current phase-1 and phase-2 design.
 ### One durable-work substrate
 
 The system should converge toward one durable-work runtime rather than separate
-planner families for reminders, goals, and workflows.
+planner families for recurrent tasks, responsibilities, and workflows.
 
 ### One reasoning path
 
@@ -112,6 +115,12 @@ produced by the Ego, not by isolated LLM calls in the motor layer or runtime.
 The Ego has access to ambient context, long-term memory, episodic recall,
 available actions, and deliberation state. Plan generation without these
 inputs produces plans that cannot be executed reliably.
+
+This does not require one monolithic planner prompt for every durable-work
+shape, and it does not require adding another router layer under Ego. Semantic
+routing should remain an LLM classification in the existing input-routing path;
+once that router returns a typed route, dispatch to the target L2 planner can
+stay deterministic.
 
 ### Runtime outside the mind
 
@@ -126,8 +135,8 @@ natural-language heuristics and not with hidden side channels.
 ### Durable ledger of progress
 
 The system must preserve what happened, what changed, what remains blocked, and
-what artifacts were produced. Broad goals must be allowed to evolve and replan,
-but changes must still leave an auditable trail.
+what artifacts were produced. Broad durable commitments must be allowed to
+evolve and replan, but changes must still leave an auditable trail.
 
 ### Safe side-effect handling
 
@@ -140,13 +149,14 @@ The system should be released in phases. Each phase must be independently
 valuable, testable, and reliable before the next phase adds more autonomy or
 more trigger types.
 
-## What The Current Goal Runtime Already Covers
+## What The Current Durable-Work Runtime Already Covers
 
-The current Goal runtime already covers an important portion of this vision.
+The current durable-work runtime already covers an important portion of this
+vision.
 
 ### Durable persistence
 
-Goals already have:
+Durable work items already have:
 
 - an append-only event log
 - snapshots
@@ -159,7 +169,7 @@ This is the right foundation for durable work continuity.
 
 ### Sequential durable plans
 
-Goals already support:
+Durable work items already support:
 
 - multi-step plans
 - step dependencies
@@ -185,10 +195,11 @@ model.
 
 ### Runtime outside Ego
 
-The current GoalManager already lives outside the Ego and emits work for the
-Ego to process. That boundary is strategically correct and should be preserved.
+The current durable-work manager already lives outside the Ego and emits work
+for the Ego to process. That boundary is strategically correct and should be
+preserved.
 
-### Goal operations
+### Durable-work operations
 
 The current system already supports lifecycle operations such as:
 
@@ -205,24 +216,21 @@ This gives NeoPsyke a usable operator surface for user-visible durable work.
 
 ## Current Design Limits
 
-The current Goal runtime is best described as durable sequential goals with
-timers and simple blocking.
+The current durable-work runtime is best described as durable sequential work
+with timers and simple blocking.
 
 That is already useful, but it does not yet fully cover the intended scope.
 
 ### What is not yet broad enough
 
-- Plan generation for durable work happens in the motor layer
-  (`LlmWorkPlanBuilder` inside `DurableWorkRuntime.createWorkItem()`), not in
-  the Ego. This LLM call has no access to ambient context, memory, available
-  actions, or deliberation state. Plans are generated blind and cannot be
-  reviewed by the user before the work item is committed.
-- There is no plan refinement or validation pass. Plans generated by the LLM
-  are accepted as-is, even when they contain unexecutable or redundant steps.
-  This applies to both durable work plans and Ego inline plans.
-- The approval system has no mechanism to surface rich structured context (such
-  as plan steps) alongside the approval prompt. The user sees only a summary
-  and reason, not the plan that will govern execution.
+- Generic lifecycle management is now reasonably unified, but creation and
+  major revision semantics are still broader than one monolithic prompt should
+  handle across recurrent tasks, responsibilities, and later workflows.
+- Responsibility creation needs a stronger multi-turn intake path so the Ego
+  can gather enough operating detail before committing a durable work item.
+- Id impulses exist, but the current impulse path still needs an Ego-owned
+  bridge for exposing reviewable responsibilities and routing one selected
+  candidate back through the durable-work runtime as an `id_review`.
 - Generic external-event triggers are modeled but not yet realized as a
   first-class runtime capability.
 - Durable per-item structured state is weak for monitoring scenarios such as
@@ -234,18 +242,22 @@ That is already useful, but it does not yet fully cover the intended scope.
   user-visible health semantics.
 - Resource contention, work ownership, and concurrent wake coalescing are not
   yet explicit runtime contracts.
-- User observability is still closer to "goal status" than to a full durable
+- User observability is still closer to a single-kind status view than to a
+  full durable
   operator view.
 - Multi-activation testing and replay are supported by adjacent infrastructure,
   but they are not yet specified as required durable-work validation semantics.
-- Id impulses are present at the Ego level, but they are not yet a strong
-  first-class trigger source for reviewing durable work.
+- The terminology surface is still mixed. `Goal` remains in too many places
+  even though `DurableWork` is the architectural umbrella and user-facing
+  semantics should split into recurrent tasks and responsibilities.
 
 ### What should not be overcomplicated
 
 The system does not need, at this stage:
 
 - separate planner families per durable-work category
+- one monolithic create/update/revise planner prompt across semantically
+  different durable-work kinds
 - a general-purpose distributed workflow engine
 - arbitrary graph execution
 - full branching/subflow semantics from day one
@@ -254,7 +266,8 @@ The system does not need, at this stage:
 
 ## Target Alignment
 
-The current Goal runtime should evolve into a broader durable-work runtime
+The current durable-work runtime should evolve into a broader durable-work
+runtime
 while keeping its core strengths:
 
 - event-sourced persistence
@@ -262,12 +275,7 @@ while keeping its core strengths:
 - typed work activation into the Ego
 - explicit lifecycle and progress state
 
-The main design shift is conceptual:
-
-- today's concept: "persistent goals"
-- target concept: "durable work"
-
-In the aligned design, recurrent tasks, long-term goals, and later workflows
+In the aligned design, recurrent tasks, responsibilities, and later workflows
 are different shapes of the same durable-work substrate.
 
 The main differences between them should be expressed through:
@@ -282,9 +290,8 @@ They should not be expressed through entirely separate reasoning subsystems.
 
 ## Terminology
 
-The word Goal remains valuable, but it is too narrow as the umbrella term for
-the full feature set. It fits long-term objectives well, but it
-under-describes recurring monitoring and durable orchestration.
+`DurableWork` should remain the internal architectural umbrella, but it should
+not be forced as the main end-user term.
 
 Recommended terminology:
 
@@ -292,19 +299,21 @@ Recommended terminology:
 - **Runtime/service name:** `DurableWorkRuntime`
 - **Gateway/interface name:** `DurableWorkGateway`
 - **Single durable unit:** `WorkItem`
-- **User-facing plain language:** keep `goal` available where it feels natural
+- **User-facing phase-1 kind:** `RecurrentTask`
+- **User-facing phase-2 kind:** `Responsibility`
+- **Possible future phase-3 kind:** `Workflow`
 
 Recommendation:
 
 - Use Durable Work as the architectural umbrella.
-- Treat Goal as one important user-facing flavor and as the historical nucleus
-  of the system.
-- Prefer a clean internal rename during phase 1 rather than carrying two sets
-  of internal names indefinitely.
+- Keep user-facing semantics split by kind instead of forcing one shared
+  umbrella noun in the product surface.
+- Do not keep `Goal` as the architectural umbrella.
+- Shared runtime semantics should not force vague UI wording.
 
 ## Proposed Structural Changes
 
-### 1. Generalize the current Goal runtime into a DurableWorkRuntime
+### 1. Generalize the current runtime into a DurableWorkRuntime
 
 The existing runtime should be evolved rather than replaced.
 
@@ -327,6 +336,29 @@ activation. The runtime may shape context differently depending on trigger
 source, but it should not create separate planners unless the reasoning
 contract is materially different.
 
+The best split is:
+
+- keep the existing L1 semantic router as the only routing layer for fresh user
+  input
+- let that router use an LLM call to choose the durable-work target
+- after routing, dispatch deterministically to one of three durable-work L2
+  planners:
+  - generic operations planner
+  - `RecurrentTask` create/update/revise planner
+  - `Responsibility` create/update/revise planner
+
+The generic operations planner should cover only structurally shared lifecycle
+operations such as `list`, `status`, `pause`, `resume`, `delete`,
+`delete_all`, `complete`, and `reprioritize`.
+
+`create`, `update`, and major `revise_plan` should be type-specific because
+they reshape the semantics of the durable work item rather than just its
+lifecycle state.
+
+This avoids planner proliferation without forcing one monolithic
+create/update/revise prompt across recurrent tasks, responsibilities, and
+later workflows.
+
 ### 3. Strengthen durable state
 
 The runtime should evolve from mostly document-style persistence toward a
@@ -345,7 +377,7 @@ report aggregation.
 The runtime should converge toward a common trigger model over:
 
 - timer or cron
-- Id review wakes
+- Ego-routed Id review wakes
 - manual or user wakes
 - tool-result wakes
 - external events later
@@ -549,8 +581,10 @@ complexity into the Ego.
 - Routine recurring checks should outrank low-urgency review wakes.
 - Noisy monitors should be demoted by policy rather than relying on the planner
   to rediscover that they are noisy each time.
-- Id may wake or request review of existing durable work in phase 2, but it
-  should not create new work items autonomously by default.
+- Id should remain an impulse source only in phase 2. Ego may use a "be useful"
+  impulse plus a bounded slate of reviewable responsibilities to request one
+  `id_review` wake against existing durable work, but Id should not create new
+  work items autonomously by default.
 
 ### User observability and delivery policy
 
@@ -679,10 +713,10 @@ Lesson:
 
 ### Objective
 
-Evolve the current Goal runtime into a stable durable-work nucleus for:
+Evolve the current durable-work runtime into a stable durable-work nucleus for:
 
 - recurring timer-based tasks
-- user-created persistent goals
+- user-created recurrent tasks
 - simple sequential multi-step work
 
 ### Scope
@@ -706,6 +740,13 @@ Included:
   available actions, memory, episodic context, and runtime facts. The runtime
   receives pre-built plans and does not make LLM calls for plan generation or
   runtime-side replanning.
+- the existing L1 semantic router remains the only routing layer for fresh
+  user input; it uses an LLM call to choose the target durable-work L2 planner,
+  and then dispatch stays deterministic on the typed route
+- the durable-work L2 split may stay simple in phase 1:
+  generic operations plus type-specific `create`/`update`/`revise_plan`
+  planners as needed; phase 1 does not require separate end-to-end planner
+  families per kind
 - plan refinement: a shared `PlanRefiner` validates and improves all plans
   (durable work and Ego inline) before they are committed. It is a single
   bounded LLM-powered repair/refinement step that can fix malformed-but-
@@ -771,15 +812,15 @@ Excluded:
 - Once planning ownership moves into Ego, the runtime no longer silently
   re-generates plans. Missing plans on `CREATE` or `REVISE_PLAN` fail closed by
   default; any deterministic fallback exists only as an explicit recovery mode.
-- The feature can be considered production-stable for reminders, recurring
-  checks, and simple sequential durable work before phase 2 begins.
+- The feature can be considered production-stable for recurrent tasks,
+  recurring checks, and simple sequential durable work before phase 2 begins.
 
-### Phase 2: Durable Monitoring And Long-Term Objectives
+### Phase 2: Durable Monitoring And Responsibilities
 
 ### Objective
 
-Extend the durable-work nucleus to support open-ended monitoring and broader
-long-term objectives that require remembered operational state over time.
+Extend the durable-work nucleus to support open-ended monitoring and
+responsibilities that require remembered operational state over time.
 
 ### Scope
 
@@ -788,14 +829,32 @@ Included:
 - durable typed state for seen items, cursors, dedupe keys, report windows, and
   other monitoring state
 - long-term recurring search and monitor patterns
+- responsibility-style durable work with remembered operating context
 - stronger delivery and report policies
 - phase-1 compatible schema evolution for monitoring state
-- Id review wakes as a valid trigger source for reviewing or advancing existing
-  durable work
+- Ego-routed Id review wakes as a valid trigger source for reviewing or
+  advancing existing responsibilities
 - cleaner support for "keep looking and tell me when something important
   changes"
 - richer digest assembly, report windows, and compaction or archival policy as
   needed for long-lived monitoring workloads
+- typed per-kind `create`/`update`/`revise_plan` planning strategies behind the
+  existing L1 semantic router
+
+Implementation shape:
+
+- `DurableWorkRuntime` keeps one shared runtime substrate but persists
+  phase-2-owned typed state for delivery, monitoring, review, and wake context.
+- `WorkItemKind` splits the user-facing surface into `RecurrentTask` and
+  `Responsibility` while preserving `DurableWork` as the internal umbrella.
+- `InputIntentRouter` remains the only semantic durable-work router. After it
+  returns `durable_work`, L2 dispatch is deterministic to generic lifecycle,
+  recurrent-task, or responsibility planning.
+- Responsibility creation uses bounded Ego-owned intake draft state and does
+  not persist a live runtime item until `CREATE` succeeds.
+- Review wakes remain runtime-owned and typed (`manual_review`, `id_review`,
+  `overdue_check`, etc.), and paused responsibilities should not emit overdue
+  review work.
 
 Excluded:
 
@@ -809,15 +868,19 @@ Excluded:
   same item repeatedly across many cycles.
 - A monitoring task can maintain durable operational state without encoding
   everything as free-form text.
-- A broad objective can be periodically reviewed and advanced over time without
+- A responsibility can be periodically reviewed and advanced over time without
   being reduced to a one-shot reminder.
 - Delivery policy can suppress noisy repeated summaries and surface only
   meaningful deltas.
 - Id review wakes can review or advance existing durable work without bypassing
   the shared durable-work model.
+- Responsibility creation can gather missing operating detail across several
+  turns before the final durable-work `CREATE`.
 - Phase-1 plan generation, refinement, approval context, and user feedback
-  mechanisms remain stable. Phase-2 does not introduce separate plan generation
-  paths, runtime-side hidden replanning, or ad-hoc plan-revision protocols.
+  mechanisms remain stable. Phase 2 keeps one L1 semantic router, does not add
+  another durable-work router layer, does not introduce separate end-to-end
+  planner families, and does not reintroduce runtime-side hidden replanning or
+  ad-hoc plan-revision protocols.
 - Phase-1 schemas, leases, side-effect semantics, recovery rules, and user
   observability remain valid without requiring a redesign of the phase-1 core.
 - Phase 1 behavior remains stable and does not regress while the richer state
@@ -843,8 +906,9 @@ This specification does not require:
 
 ## Success Condition
 
-This vision is fulfilled when NeoPsyke can treat recurring tasks, long-term
-objectives, and later richer durable workflows as one family of durable work
+This vision is fulfilled when NeoPsyke can treat recurring tasks,
+responsibilities, and later richer durable workflows as one family of durable
+work
 that:
 
 - persists outside the Ego
@@ -854,6 +918,6 @@ that:
 - handles retries, restarts, and side effects safely
 - remains reliable when delivered incrementally in independent phases
 
-At that point, the current Goal runtime will have evolved into the intended
+At that point, the current runtime will have evolved into the intended
 DurableWorkRuntime rather than being replaced by a proliferation of special
 automation subsystems.

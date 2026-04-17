@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.ego.planner.model
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import ai.neopsyke.agent.durablework.WorkItemKind
 import ai.neopsyke.agent.durablework.WorkItemPriority
 
 /**
@@ -27,12 +28,14 @@ data class DurableWorkPlanStepPayload(
 sealed interface DurableWorkCommand {
 
     data class Create(
+        val workItemKind: WorkItemKind = WorkItemKind.RECURRENT_TASK,
         val title: String,
         val instruction: String,
         val priority: WorkItemPriority = WorkItemPriority.MEDIUM,
         val completionCriteria: String = "",
         val cronExpression: String? = null,
         val contactChannel: String? = null,
+        val operatorSummary: String? = null,
         val planSteps: kotlin.collections.List<DurableWorkPlanStepPayload>? = null,
     ) : DurableWorkCommand
 
@@ -44,7 +47,11 @@ sealed interface DurableWorkCommand {
 
     data class Resume(val reference: WorkItemReference) : DurableWorkCommand
 
+    data class Review(val reference: WorkItemReference, val reason: String? = null) : DurableWorkCommand
+
     data class Complete(val reference: WorkItemReference) : DurableWorkCommand
+
+    data class Retire(val reference: WorkItemReference, val reason: String? = null) : DurableWorkCommand
 
     data class Delete(val reference: WorkItemReference) : DurableWorkCommand
 
@@ -58,6 +65,7 @@ sealed interface DurableWorkCommand {
         val completionCriteria: String? = null,
         val cronExpression: String? = null,
         val contactChannel: String? = null,
+        val operatorSummary: String? = null,
     ) : DurableWorkCommand
 
     data class RevisePlan(
@@ -79,7 +87,9 @@ sealed interface DurableWorkCommand {
             is Status -> "status"
             is Pause -> "pause"
             is Resume -> "resume"
+            is Review -> "review"
             is Complete -> "complete"
+            is Retire -> "retire"
             is Delete -> "delete"
             is DeleteAll -> "delete_all"
             is Update -> "update"

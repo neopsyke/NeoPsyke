@@ -98,7 +98,7 @@ class InputPlanner(
             is InputRoute.GeneralAction -> generalActionPlanner.plan(groundedTrigger, groundedContext)
             is InputRoute.MultiStepTask -> taskDecompositionPlanner.plan(groundedTrigger, groundedContext)
             is InputRoute.DurableWork -> {
-                val decision = goalPlanner.plan(groundedTrigger, groundedContext)
+                val decision = goalPlanner.plan(groundedTrigger, groundedContext, route.target)
                 if (decision is EgoDecision.Noop) {
                     instrumentation.emit(
                         AgentEvent(

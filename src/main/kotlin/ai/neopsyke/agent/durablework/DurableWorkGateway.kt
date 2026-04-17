@@ -20,23 +20,32 @@ interface DurableWorkGateway : WorkItemRegistry, ActionLifecycleObserver {
     fun workItemStatus(workItemId: String): WorkItemState? = null
     fun workItemProjection(workItemId: String): WorkItemProjection? = null
     fun allProjections(): List<WorkItemProjection> = emptyList()
+    fun reviewableResponsibilities(limit: Int = 8): List<ReviewableResponsibility> = emptyList()
 }
 
 object NoopDurableWorkGateway : DurableWorkGateway {
     override fun activeWorkItems(): List<ai.neopsyke.agent.id.WorkItemCommitment> = emptyList()
 }
 
+enum class ReviewRequestSource {
+    MANUAL,
+    ID,
+}
+
 data class DurableWorkOperationRequest(
     val operation: DurableWorkOperation,
     val workItemId: String? = null,
+    val workItemKind: WorkItemKind? = null,
     val title: String? = null,
     val instruction: String? = null,
     val priority: WorkItemPriority? = null,
     val completionCriteria: String? = null,
     val cronExpression: String? = null,
     val contactChannel: String? = null,
+    val operatorSummary: String? = null,
     val reason: String? = null,
     val planSteps: List<ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload>? = null,
+    val reviewSource: ReviewRequestSource = ReviewRequestSource.MANUAL,
 )
 
 data class DurableWorkOperationResult(
@@ -49,12 +58,23 @@ enum class DurableWorkOperation {
     CREATE,
     STATUS,
     LIST,
+    REVIEW,
     PAUSE,
     RESUME,
     REPRIORITIZE,
     COMPLETE,
+    RETIRE,
     DELETE,
     DELETE_ALL,
     REVISE_PLAN,
     UPDATE,
 }
+
+data class ReviewableResponsibility(
+    val workItemId: String,
+    val title: String,
+    val operatorSummary: String,
+    val nextReviewAt: java.time.Instant? = null,
+    val lastReviewAt: java.time.Instant? = null,
+    val priority: WorkItemPriority = WorkItemPriority.MEDIUM,
+)

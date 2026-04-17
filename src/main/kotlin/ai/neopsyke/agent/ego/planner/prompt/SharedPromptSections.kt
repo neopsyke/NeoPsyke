@@ -305,7 +305,19 @@ object SharedPromptSections {
                 key = "planner_active_goals",
                 role = ChatRole.USER,
                 band = PromptBudgetAllocator.Band.OPTIONAL,
-                content = "Persistent goals (resolve references into typed goal_reference / goal_id fields for durable_work_operation):\n$it"
+                content = "Active durable work items (resolve numbered references into typed work_item_reference fields for durable_work_operation):\n$it"
+            )
+        }
+
+    fun reviewableResponsibilitiesSection(context: PlannerContext): PromptBudgetAllocator.Section? =
+        context.reviewableResponsibilitySummary.takeIf { it.isNotBlank() }?.let {
+            PromptBudgetAllocator.Section(
+                key = "planner_reviewable_responsibilities",
+                role = ChatRole.USER,
+                band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                importance = PromptBudgetAllocator.Importance.HIGH,
+                floorTokens = 24,
+                content = "Responsibilities eligible for review:\n$it"
             )
         }
 
@@ -358,7 +370,14 @@ object SharedPromptSections {
                 band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                 importance = PromptBudgetAllocator.Importance.HIGH,
                 floorTokens = 40,
-                content = buildSelfMotivatedContext(idState),
+                content = buildString {
+                    append(buildSelfMotivatedContext(idState))
+                    context.reviewableResponsibilitySummary.takeIf { it.isNotBlank() }?.let {
+                        append("\n\nReviewable responsibility slate:\n")
+                        append(it)
+                        append("\nIf advancing an existing responsibility is the best useful move, you may choose action_type=durable_work_operation with a typed review command against one numbered responsibility.")
+                    }
+                },
             )
         }
 

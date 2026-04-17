@@ -51,7 +51,18 @@ class PlanStepDependencyTest {
 
     @Test
     fun `goal status enum covers all lifecycle states`() {
-        val expected = setOf("CREATED", "PLANNING", "ACTIVE", "BLOCKED", "SUSPENDED", "COMPLETED", "FAILED", "STALLED", "NEEDS_ATTENTION")
+        val expected = setOf(
+            "CREATED",
+            "PLANNING",
+            "ACTIVE",
+            "BLOCKED",
+            "SUSPENDED",
+            "COMPLETED",
+            "FAILED",
+            "STALLED",
+            "NEEDS_ATTENTION",
+            "RETIRED",
+        )
         assertEquals(expected, WorkItemStatus.entries.map { it.name }.toSet())
     }
 

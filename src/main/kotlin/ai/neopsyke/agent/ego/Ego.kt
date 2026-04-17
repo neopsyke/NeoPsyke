@@ -1071,6 +1071,7 @@ class Ego(
         }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
         val goalSummaryResult = buildNumberedGoalSummary()
+        val reviewableResponsibilities = buildReviewableResponsibilitySummary()
         return PlannerContext(
             recentDialogue = recentDialogue,
             queue = scheduler.queueSnapshot(),
@@ -1105,6 +1106,8 @@ class Ego(
             goalWorkSummary = goalSummaryResult.text,
             goalIndex = goalSummaryResult.index,
             goalSnapshots = goalSummaryResult.snapshots,
+            reviewableResponsibilitySummary = reviewableResponsibilities.text,
+            reviewableResponsibilityIndex = reviewableResponsibilities.index,
             groundingMetadata = groundingMetadataForTrigger(trigger),
         )
     }
@@ -1176,6 +1179,7 @@ class Ego(
                 state?.let { workState ->
                     snapshots[g.workItemId] = DurableWorkItemSnapshot(
                         workItemId = workState.id,
+                        kind = workState.workItem.kind,
                         title = workState.workItem.title,
                         instruction = workState.workItem.instruction,
                         completionCriteria = workState.workItem.completionCriteria,
@@ -1226,6 +1230,25 @@ class Ego(
             }
         }
         return GoalSummaryResult(text, index, snapshots)
+    }
+
+    private fun buildReviewableResponsibilitySummary(): GoalSummaryResult {
+        val reviewable = durableWorkGateway.reviewableResponsibilities(MAX_REVIEWABLE_RESPONSIBILITIES)
+        if (reviewable.isEmpty()) return GoalSummaryResult("", emptyMap(), emptyMap())
+        val index = linkedMapOf<Int, String>()
+        val text = buildString {
+            append("Reviewable responsibilities:")
+            reviewable.forEachIndexed { i, item ->
+                val position = i + 1
+                index[position] = item.workItemId
+                append("\n$position. \"${item.title}\" (${item.priority.name.lowercase()}")
+                item.nextReviewAt?.let { append(", next_review_at=$it") }
+                item.lastReviewAt?.let { append(", last_review_at=$it") }
+                append(")")
+                append("\n   summary: ${TextSecurity.preview(item.operatorSummary, GOAL_ARTIFACT_SUMMARY_PREVIEW_CHARS)}")
+            }
+        }
+        return GoalSummaryResult(text, index, emptyMap())
     }
 
     private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {
@@ -1648,6 +1671,7 @@ class Ego(
     private companion object {
         const val GOAL_ARTIFACT_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_AMBIENT_PROJECTS: Int = 4
+        const val MAX_REVIEWABLE_RESPONSIBILITIES: Int = 8
         const val AMBIENT_PROJECT_PREVIEW_CHARS: Int = 180
         const val MAX_AMBIENT_SCRATCHPAD_SIGNALS: Int = 6
         const val MAX_AMBIENT_OPEN_LOOPS: Int = 4

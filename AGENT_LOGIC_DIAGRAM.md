@@ -265,6 +265,9 @@ sequenceDiagram
         else Task = durable work opportunity
             Ego->>PG: finalizeDurableWorkCycle(rootInputId) after queues drain for that work root
     Note over Ego,PG: Durable runtime resumes from stable per-step roots, records activation boundaries in an activation journal, and may re-emit durable-work cues for resumable steps
+    Note over Ego,PG: Durable-work wakes are typed [cron_due, overdue_check, id_review, manual_review, wait_resolved, recovery, etc.] and the activation context carries those wake reasons into Ego
+    Note over Ego,PG: Runtime-owned phase-2 state tracks monitor cursors, seen items, change history, digest windows, delivery suppression reasons, and responsibility review history
+    Note over Ego,PG: Responsibility cycles are open-ended current-plan exhaustion does not auto-complete the responsibility review-capable wakes can rearm the next cycle and overdue review is surfaced as operator-visible next wake state
     Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, durable-work, or wake-only ingress before scheduler work begins
         else Task = input or feedback opportunity
             Ego->>Mem: recall and short-term summary
@@ -279,7 +282,10 @@ sequenceDiagram
             Note over Ego,Planner: Planner prompt includes conversation security summary, thread trust state, percept summary/family, opportunity summary/kind, allowed intentions/commit modes, and trigger provenance summary untrusted external content is framed as data, not instruction
             Note over Ego,Planner: HierarchicalEgoPlanner dispatches to typed L1 lanes based on trigger type (no text inspection)
             Note over Ego,Planner: InputPlanner uses InputIntentRouter (LLM classifier) then dispatches to typed L2 sub-planner
+            Note over Ego,Planner: Durable-work routing stays under the existing L1 router. After route selection, dispatch is deterministic to generic lifecycle, recurrent-task, or responsibility planning
+            Note over Ego,Planner: Runtime lane config exposes durable_work_generic durable_work_recurrent_task and durable_work_responsibility, and the responsibility path can reserve a larger intake prompt budget
             Note over Ego,Planner: Durable-work creation and management use typed DurableWorkCommand with LLM-resolved references (no regex heuristics)
+            Note over Ego,Planner: Responsibility creation uses bounded intake draft state inside Ego, while Id "be useful" planning can see a bounded reviewable-responsibility slate and route one selected item into a typed review command
             Note over Ego,Planner: Durable-work-operation payload boundary is canonical SerializedDurableWorkCommand (command + typed work_item_reference), consumed directly by DurableWorkOperationActionPlugin
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: intend/plan/noop
@@ -433,7 +439,7 @@ flowchart LR
     PM --> AJ["ActivationJournal"]
     PM --> EL["WorkEffectLedger"]
     PSM --> PCS["WorkItemCommand stream"]
-    PCS -->|persist| Store["WorkItemStore / goal-events.jsonl + goal.json + goal-snapshot.json"]
+    PCS -->|persist| Store["WorkItemStore / goal-events.jsonl + goal-events.archive.jsonl + goal.json + goal-snapshot.json"]
     PCS -->|work ready| Sig["DurableWorkCue"]
     TS -->|"cron tick after completed/failed recurring work item"| PSM
     PSM -->|"reset plan steps + clear produced keys"| PCS

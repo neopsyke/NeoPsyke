@@ -20,6 +20,7 @@ sealed interface WorkItemEvent {
         val priority: WorkItemPriority,
         val completionCriteria: String,
         val contactChannel: String? = null,
+        val kind: WorkItemKind = WorkItemKind.RECURRENT_TASK,
         override val timestamp: Instant = Instant.now(),
     ) : WorkItemEvent
 
@@ -43,6 +44,7 @@ sealed interface WorkItemEvent {
         val title: String? = null,
         val completionCriteria: String? = null,
         val contactChannel: String? = null,
+        val operatorSummary: String? = null,
         val reason: String? = null,
         override val timestamp: Instant = Instant.now(),
     ) : WorkItemEvent
@@ -143,6 +145,18 @@ sealed interface WorkItemEvent {
         override val timestamp: Instant = Instant.now(),
     ) : WorkItemEvent
 
+    data class Retired(
+        override val workItemId: String,
+        val reason: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class ResponsibilityCycleRearmed(
+        override val workItemId: String,
+        val reason: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
     data class PriorityChanged(
         override val workItemId: String,
         val priority: WorkItemPriority,
@@ -194,7 +208,7 @@ sealed interface WorkItemEvent {
 
     data class WakeCoalesced(
         override val workItemId: String,
-        val wakeReason: String,
+        val wakeReason: WakeReason,
         override val timestamp: Instant = Instant.now(),
     ) : WorkItemEvent
 
@@ -205,6 +219,7 @@ sealed interface WorkItemEvent {
         val stepId: String,
         val leaseToken: String,
         val planRevision: Int,
+        val wakeReasons: List<WakeReason> = emptyList(),
         override val timestamp: Instant = Instant.now(),
     ) : WorkItemEvent
 
@@ -246,6 +261,108 @@ sealed interface WorkItemEvent {
     data class DeliverySent(
         override val workItemId: String,
         val summary: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class DeliveryDecisionRecorded(
+        override val workItemId: String,
+        val decision: DeliveryDecision,
+        val suppressionReason: DeliverySuppressionReason? = null,
+        val fingerprint: String? = null,
+        val summary: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class MonitorScanStarted(
+        override val workItemId: String,
+        val sourceKey: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class MonitorScanCompleted(
+        override val workItemId: String,
+        val sourceKey: String,
+        val scanSummary: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class MonitorCursorAdvanced(
+        override val workItemId: String,
+        val sourceKey: String,
+        val cursor: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class SeenItemRecorded(
+        override val workItemId: String,
+        val itemKey: String,
+        val fingerprint: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class SeenItemUpdated(
+        override val workItemId: String,
+        val itemKey: String,
+        val fingerprint: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class MeaningfulChangeDetected(
+        override val workItemId: String,
+        val itemKey: String,
+        val changeClass: ChangeClass,
+        val summary: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class ReportWindowOpened(
+        override val workItemId: String,
+        val windowKey: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class ReportWindowClosed(
+        override val workItemId: String,
+        val windowKey: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class DeliverySuppressed(
+        override val workItemId: String,
+        val reason: DeliverySuppressionReason,
+        val summary: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class ReviewRecorded(
+        override val workItemId: String,
+        val wakeReasonType: WakeReasonType,
+        val outcome: String,
+        val summary: String? = null,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class IdReviewRequested(
+        override val workItemId: String,
+        val reason: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class IdReviewAccepted(
+        override val workItemId: String,
+        val reason: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class IdReviewDeferred(
+        override val workItemId: String,
+        val reason: String,
+        override val timestamp: Instant = Instant.now(),
+    ) : WorkItemEvent
+
+    data class EventSegmentRolled(
+        override val workItemId: String,
+        val segmentName: String,
         override val timestamp: Instant = Instant.now(),
     ) : WorkItemEvent
 

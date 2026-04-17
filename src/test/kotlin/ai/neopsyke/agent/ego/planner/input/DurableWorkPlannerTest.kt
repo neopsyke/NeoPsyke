@@ -1,11 +1,13 @@
 package ai.neopsyke.agent.ego.planner.input
 
 import ai.neopsyke.agent.config.AgentConfig
+import ai.neopsyke.agent.durablework.WorkItemKind
 import ai.neopsyke.agent.durablework.StepStatus
 import ai.neopsyke.agent.durablework.WorkItemStatus
 import ai.neopsyke.agent.ego.planner.PlanRefinementResult
 import ai.neopsyke.agent.ego.planner.PlanRefinementRequest
 import ai.neopsyke.agent.ego.planner.PlanRefiner
+import ai.neopsyke.agent.ego.planner.model.DurableWorkRouteTarget
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.DurableWorkItemSnapshot
 import ai.neopsyke.agent.model.DurableWorkPlanStepSnapshot
@@ -258,6 +260,214 @@ class DurableWorkPlannerTest {
         assertTrue(captured.shortTermContextSummary.contains("plan_revision: 3"))
         assertTrue(captured.shortTermContextSummary.contains("latest_artifact_summary"))
         assertEquals("first step keeps failing", captured.userFeedbackHint)
+    }
+
+    @Test
+    fun `responsibility planner asks focused clarification and stores intake draft`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "operation":"clarify",
+                  "work_item_kind":"RESPONSIBILITY",
+                  "work_item_reference":null,
+                  "title":"Apartment search",
+                  "instruction":null,
+                  "completion_criteria":null,
+                  "priority":"medium",
+                  "cron_expression":null,
+                  "contact_channel":"dashboard",
+                  "operator_summary":"Keep watching the apartment market in Berlin",
+                  "plan_steps":null,
+                  "assistant_response":null,
+                  "clarification_question":"What neighborhoods, budget, and move-in date should I optimize for?",
+                  "responsibility_summary":"Watch for good Berlin apartments and tell me when something materially better appears.",
+                  "known_preferences":["Berlin"],
+                  "known_constraints":["Need budget"],
+                  "known_signals_of_success":["Useful shortlist"],
+                  "review_cadence_hint":"daily",
+                  "delivery_hint":"dashboard",
+                  "open_questions":["Need budget","Need neighborhoods"],
+                  "ready_to_create":false,
+                  "reason":"missing operating constraints"
+                }
+                """.trimIndent()
+            )
+        }
+        val runtime = PlannerRuntime(
+            defaultModelClient = llm,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val planner = WorkPlanBuilder(runtime, AgentConfig(), NoopAgentInstrumentation, NoopPlanRefiner())
+
+        val decision = planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 1, content = "help me keep an eye on apartments in Berlin")),
+            context = PlannerContext(recentDialogue = emptyList(), queue = QueueSnapshot(0, 0, 0), availableContactChannels = setOf("dashboard")),
+            target = DurableWorkRouteTarget.RESPONSIBILITY,
+        )
+
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.CONTACT_USER, intention.actionType)
+        assertTrue(intention.payload.contains("budget", ignoreCase = true))
+
+        val secondPrompt = llm.lastMessages.joinToString("\n") { it.content }
+        assertTrue(secondPrompt.contains("Responsibilities are ongoing ownership commitments"))
+    }
+
+    @Test
+    fun `responsibility planner creates responsibility using stored intake draft`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "operation":"clarify",
+                  "work_item_kind":"RESPONSIBILITY",
+                  "work_item_reference":null,
+                  "title":"Apartment search",
+                  "instruction":null,
+                  "completion_criteria":null,
+                  "priority":"medium",
+                  "cron_expression":null,
+                  "contact_channel":"dashboard",
+                  "operator_summary":"Keep watching Berlin apartments",
+                  "plan_steps":null,
+                  "assistant_response":null,
+                  "clarification_question":"What neighborhoods and budget should I use?",
+                  "responsibility_summary":"Watch for strong apartment matches in Berlin.",
+                  "known_preferences":["Berlin"],
+                  "known_constraints":["Need budget"],
+                  "known_signals_of_success":["Useful shortlist"],
+                  "review_cadence_hint":"daily",
+                  "delivery_hint":"dashboard",
+                  "open_questions":["Need budget"],
+                  "ready_to_create":false,
+                  "reason":"missing budget"
+                }
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {
+                  "operation":"create",
+                  "work_item_kind":"RESPONSIBILITY",
+                  "work_item_reference":null,
+                  "title":"Apartment search",
+                  "instruction":"Monitor Berlin apartment listings, prioritize Prenzlauer Berg and Friedrichshain, stay under 2200 EUR, and surface only materially better matches.",
+                  "completion_criteria":"User confirms the responsibility is fulfilled or retired.",
+                  "priority":"high",
+                  "cron_expression":"0 9 * * *",
+                  "contact_channel":"dashboard",
+                  "operator_summary":"Own Berlin apartment monitoring with budget and neighborhood constraints.",
+                  "plan_steps":[
+                    {"id":"scan","description":"Scan fresh apartment listings","acceptance_criteria":"Fresh listings reviewed","grounding_requirement":"required","requires":[],"produces":["matches"],"max_attempts":3},
+                    {"id":"summarize","description":"Summarize only materially better matches","acceptance_criteria":"Digest prepared","grounding_requirement":"not_required","requires":["matches"],"produces":[],"max_attempts":3}
+                  ],
+                  "assistant_response":null,
+                  "clarification_question":null,
+                  "responsibility_summary":"Watch for strong apartment matches in Berlin.",
+                  "known_preferences":["Prenzlauer Berg","Friedrichshain"],
+                  "known_constraints":["Budget under 2200 EUR"],
+                  "known_signals_of_success":["Useful shortlist"],
+                  "review_cadence_hint":"daily",
+                  "delivery_hint":"dashboard",
+                  "open_questions":[],
+                  "ready_to_create":true,
+                  "reason":"enough detail collected"
+                }
+                """.trimIndent()
+            )
+        }
+        val runtime = PlannerRuntime(
+            defaultModelClient = llm,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val planner = WorkPlanBuilder(runtime, AgentConfig(), NoopAgentInstrumentation, NoopPlanRefiner())
+        val context = PlannerContext(
+            recentDialogue = emptyList(),
+            queue = QueueSnapshot(0, 0, 0),
+            availableContactChannels = setOf("dashboard"),
+            conversationContext = ai.neopsyke.agent.model.ConversationContext.default(),
+        )
+
+        planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 1, content = "help me keep an eye on apartments in Berlin")),
+            context = context,
+            target = DurableWorkRouteTarget.RESPONSIBILITY,
+        )
+        val decision = planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 2, content = "use Prenzlauer Berg or Friedrichshain and stay under 2200 EUR")),
+            context = context,
+            target = DurableWorkRouteTarget.RESPONSIBILITY,
+        )
+
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.DURABLE_WORK_OPERATION, intention.actionType)
+        assertTrue(intention.payload.contains(""""work_item_kind":"RESPONSIBILITY""""))
+        assertTrue(intention.payload.contains(""""operator_summary":""""))
+        assertTrue(intention.payload.contains("Own Berlin apartment monitoring with budget and neighborhood constraints."))
+        assertTrue(intention.payload.contains(""""cron_expression":"0 9 * * *""""))
+        assertTrue(intention.payload.contains(""""command":"create""""))
+        assertTrue(intention.payload.contains(WorkItemKind.RESPONSIBILITY.name))
+    }
+
+    @Test
+    fun `review command prefers reviewable responsibility slate numbering`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "operation":"review",
+                  "work_item_kind":null,
+                  "work_item_reference":{"type":"by_position","id":"1","candidates":null,"original_text":"first responsibility","resolved_from":"reviewable_responsibility_slate"},
+                  "title":null,
+                  "instruction":null,
+                  "completion_criteria":null,
+                  "priority":null,
+                  "cron_expression":null,
+                  "contact_channel":null,
+                  "operator_summary":null,
+                  "plan_steps":null,
+                  "assistant_response":null,
+                  "clarification_question":null,
+                  "responsibility_summary":null,
+                  "known_preferences":[],
+                  "known_constraints":[],
+                  "known_signals_of_success":[],
+                  "review_cadence_hint":null,
+                  "delivery_hint":null,
+                  "open_questions":[],
+                  "ready_to_create":false,
+                  "reason":"be useful"
+                }
+                """.trimIndent()
+            )
+        }
+        val runtime = PlannerRuntime(
+            defaultModelClient = llm,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val planner = WorkPlanBuilder(runtime, AgentConfig(), NoopAgentInstrumentation, NoopPlanRefiner())
+
+        val decision = planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 1, content = "review the first responsibility")),
+            context = PlannerContext(
+                recentDialogue = emptyList(),
+                queue = QueueSnapshot(0, 0, 0),
+                goalIndex = mapOf(1 to "task-1"),
+                reviewableResponsibilitySummary = "1. Apartment search",
+                reviewableResponsibilityIndex = mapOf(1 to "resp-1"),
+            ),
+            target = DurableWorkRouteTarget.GENERIC,
+        )
+
+        val intention = assertIs<EgoDecision.FormIntention>(decision)
+        assertEquals(ActionType.DURABLE_WORK_OPERATION, intention.actionType)
+        assertTrue(intention.payload.contains(""""command":"review""""))
+        assertTrue(intention.payload.contains(""""work_item_id":"resp-1""""))
+        assertTrue(intention.payload.contains(""""reason":"be useful""""))
     }
 
     private class NoopPlanRefiner : PlanRefiner {

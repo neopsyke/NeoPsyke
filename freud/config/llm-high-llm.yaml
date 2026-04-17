@@ -47,6 +47,15 @@ cognitive_roles:
       task_decomposition:
         provider: groq
         model: openai/gpt-oss-120b
+      durable_work_generic:
+        provider: groq
+        model: openai/gpt-oss-120b
+      durable_work_recurrent_task:
+        provider: groq
+        model: openai/gpt-oss-120b
+      durable_work_responsibility:
+        provider: groq
+        model: openai/gpt-oss-120b
       goal_creation:
         provider: groq
         model: openai/gpt-oss-120b

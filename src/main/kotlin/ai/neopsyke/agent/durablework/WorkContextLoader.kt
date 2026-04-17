@@ -85,6 +85,7 @@ object WorkContextLoader {
         step: PlanStep,
         rootInputId: String,
         wakeReason: String,
+        wakeReasons: List<WakeReason> = emptyList(),
     ): DurableWorkActivation {
         val tier2 = tier2Context(state.workItem.workspacePath)
         val preferredChannel = state.workItem.contactChannel?.trim()?.lowercase()?.ifBlank { null }
@@ -123,6 +124,28 @@ object WorkContextLoader {
                 security = security,
             ),
             wakeReason = wakeReason,
+            activationContext = ActivationContext(
+                workItemId = state.id,
+                planRevision = state.workItem.planRevision,
+                wakeSequence = state.workItem.activationCount + 1,
+                wakeReasons = wakeReasons.ifEmpty {
+                    listOf(WakeReason(type = WakeReasonType.PLAN_READY, detail = wakeReason.ifBlank { null }))
+                },
+                runtimeUrgency = when (state.workItem.priority) {
+                    WorkItemPriority.CRITICAL -> RuntimeUrgency.CRITICAL
+                    WorkItemPriority.HIGH -> RuntimeUrgency.HIGH
+                    WorkItemPriority.MEDIUM -> RuntimeUrgency.MEDIUM
+                    WorkItemPriority.LOW -> RuntimeUrgency.LOW
+                },
+                deliveryMode = state.workItem.deliveryPolicy,
+                monitoringSummary = MonitorActivationSnapshot(
+                    summary = state.workItem.operatorSummary,
+                    sourceKeys = state.durableState.monitor.sources.map { it.sourceKey },
+                    seenItemCount = state.durableState.monitor.seenItems.size,
+                    pendingChangeCount = state.durableState.monitor.changeLedger.size,
+                    activeWindowKey = state.durableState.monitor.reporting.activeWindowKey,
+                ),
+            ),
             groundingMetadata = GroundingMetadata(
                 requirement = step.groundingRequirement,
                 source = GroundingSource.DURABLE_WORK_STEP_POLICY,

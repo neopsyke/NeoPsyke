@@ -32,6 +32,7 @@ private data class DurableWorkRunSession(
     val lastResultSummary: String = "",
     val allowFollowUp: Boolean = true,
     val requeueReason: String? = null,
+    val wakeReasons: List<WakeReason> = emptyList(),
 )
 
 class DurableWorkRuntime(
@@ -108,26 +109,34 @@ class DurableWorkRuntime(
 
             // Lease check: if already leased, coalesce this wake
             if (activeLeases.containsKey(itemId)) {
-                coalescePendingWake(itemId, cue.reason)
+                coalescePendingWake(itemId, cue)
                 return@withItemLock null
             }
 
-            val step = state.nextRunnableStep() ?: return@withItemLock null
+            val preparedState = ensureWakeReadyState(itemId, state, cue.wakeReasonType, cue.reason)
+            val step = preparedState.nextRunnableStep() ?: return@withItemLock null
 
             // Acquire lease
             val leaseToken = acquireLease(itemId)
 
             val startedState = if (step.status == StepStatus.READY) {
-                applyEvent(state.id, WorkItemEvent.StepStarted(state.id, step.id)) ?: state
+                applyEvent(preparedState.id, WorkItemEvent.StepStarted(preparedState.id, step.id)) ?: preparedState
             } else {
-                state
+                preparedState
             }
             val startedStep = startedState.workItem.plan.steps.firstOrNull { it.id == step.id } ?: step
-            val rootInputId = buildWorkItemRootInputId(state.id, step.id)
+            val rootInputId = buildWorkItemRootInputId(preparedState.id, step.id)
+            val wakeReasons = listOf(
+                WakeReason(
+                    type = cue.wakeReasonType ?: inferWakeReasonType(cue.reason),
+                    detail = cue.wakeReasonDetail ?: cue.reason.ifBlank { null },
+                )
+            )
             sessionsByRootInputId[rootInputId] = DurableWorkRunSession(
-                workItemId = state.id,
+                workItemId = preparedState.id,
                 stepId = step.id,
                 rootInputId = rootInputId,
+                wakeReasons = wakeReasons,
             )
 
             // Record activation event and journal boundary
@@ -136,6 +145,7 @@ class DurableWorkRuntime(
                 stepId = step.id,
                 leaseToken = leaseToken,
                 planRevision = startedState.workItem.planRevision,
+                wakeReasons = wakeReasons,
             ))
             activationJournal.append(ActivationJournalEntry(
                 workItemId = itemId,
@@ -158,6 +168,7 @@ class DurableWorkRuntime(
                 step = startedStep,
                 rootInputId = rootInputId,
                 wakeReason = cue.reason,
+                wakeReasons = wakeReasons,
             )
             activationJournal.append(ActivationJournalEntry(
                 workItemId = itemId,
@@ -369,6 +380,18 @@ class DurableWorkRuntime(
         val leaseToken = state.workItem.activeLease ?: activeLeases[session.workItemId].orEmpty()
 
         writeWorkspaceCycleArtifacts(state, session)
+        recordDeliveryOutcome(state, session)
+        session.wakeReasons.firstOrNull()?.type?.takeIf { it in REVIEW_WAKE_REASON_TYPES }?.let { wakeReasonType ->
+            applyEvent(
+                session.workItemId,
+                WorkItemEvent.ReviewRecorded(
+                    workItemId = session.workItemId,
+                    wakeReasonType = wakeReasonType,
+                    outcome = session.lastResultSummary.ifBlank { "review_completed" },
+                    summary = state.workItem.operatorSummary.ifBlank { null },
+                )
+            )
+        }
         applyEvent(
             session.workItemId,
             WorkItemEvent.WorkCycleCompleted(
@@ -406,6 +429,8 @@ class DurableWorkRuntime(
                     workItemId = refreshed.id,
                     stepId = runnable.id,
                     reason = session.requeueReason,
+                    wakeReasonType = WakeReasonType.COALESCED_WAKE,
+                    wakeReasonDetail = session.requeueReason,
                 )
             )
         }
@@ -465,6 +490,8 @@ class DurableWorkRuntime(
                         completionCriteria = request.completionCriteria ?: "User confirms the work item is met.",
                         cronExpression = cronExpression.ifBlank { null },
                         contactChannel = request.contactChannel?.trim()?.ifBlank { null },
+                        operatorSummary = request.operatorSummary?.trim()?.ifBlank { null },
+                        kind = request.workItemKind ?: WorkItemKind.RECURRENT_TASK,
                         planSteps = request.planSteps,
                     )
                     if (workItemId.isBlank()) {
@@ -494,6 +521,75 @@ class DurableWorkRuntime(
                         "status=${state.workItem.status} next_step=${step?.description ?: "none"}",
                         workItemId = workItemId,
                     )
+                }
+            }
+
+            DurableWorkOperation.REVIEW -> {
+                val workItemId = request.workItemId.orEmpty()
+                val state = states[workItemId]
+                if (state == null) {
+                    DurableWorkOperationResult(false, "Work item not found.")
+                } else {
+                    val reason = request.reason?.trim().orEmpty().ifBlank { "manual_review" }
+                    val wakeReasonType = if (request.reviewSource == ReviewRequestSource.ID) {
+                        WakeReasonType.ID_REVIEW
+                    } else {
+                        WakeReasonType.MANUAL_REVIEW
+                    }
+                    if (request.reviewSource == ReviewRequestSource.ID) {
+                        applyEvent(
+                            workItemId,
+                            WorkItemEvent.IdReviewRequested(
+                                workItemId = workItemId,
+                                reason = reason,
+                            )
+                        )
+                    }
+                    val eligibleState = if (request.reviewSource == ReviewRequestSource.ID && !isEligibleForIdReview(state)) {
+                        applyEvent(
+                            workItemId,
+                            WorkItemEvent.IdReviewDeferred(
+                                workItemId = workItemId,
+                                reason = "not reviewable in current state",
+                            )
+                        )
+                        null
+                    } else {
+                        ensureWakeReadyState(workItemId, state, wakeReasonType, reason)
+                    }
+                    val step = eligibleState?.nextRunnableStep()
+                    if (step == null) {
+                        if (request.reviewSource == ReviewRequestSource.ID) {
+                            applyEvent(
+                                workItemId,
+                                WorkItemEvent.IdReviewDeferred(
+                                    workItemId = workItemId,
+                                    reason = "no runnable responsibility step available",
+                                )
+                            )
+                        }
+                        DurableWorkOperationResult(false, "Work item has no runnable step.")
+                    } else {
+                        if (request.reviewSource == ReviewRequestSource.ID) {
+                            applyEvent(
+                                workItemId,
+                                WorkItemEvent.IdReviewAccepted(
+                                    workItemId = workItemId,
+                                    reason = reason,
+                                )
+                            )
+                        }
+                        cueEmitter(
+                            DurableWorkCue(
+                                workItemId = workItemId,
+                                stepId = step.id,
+                                reason = reason,
+                                wakeReasonType = wakeReasonType,
+                                wakeReasonDetail = reason,
+                            )
+                        )
+                        DurableWorkOperationResult(true, "Work item review requested.", workItemId)
+                    }
                 }
             }
 
@@ -554,6 +650,22 @@ class DurableWorkRuntime(
                 } else {
                     applyEvent(workItemId, WorkItemEvent.Completed(workItemId))
                     DurableWorkOperationResult(true, "Work item marked completed.", workItemId)
+                }
+            }
+
+            DurableWorkOperation.RETIRE -> {
+                val workItemId = request.workItemId.orEmpty()
+                if (!states.containsKey(workItemId)) {
+                    DurableWorkOperationResult(false, "Work item not found.")
+                } else {
+                    applyEvent(
+                        workItemId,
+                        WorkItemEvent.Retired(
+                            workItemId = workItemId,
+                            reason = request.reason ?: "Retired by request",
+                        )
+                    )
+                    DurableWorkOperationResult(true, "Work item retired.", workItemId)
                 }
             }
 
@@ -662,6 +774,7 @@ class DurableWorkRuntime(
                                 title = request.title?.trim()?.ifBlank { null },
                                 completionCriteria = request.completionCriteria?.trim()?.ifBlank { null },
                                 contactChannel = request.contactChannel?.trim()?.ifBlank { null },
+                                operatorSummary = request.operatorSummary?.trim()?.ifBlank { null },
                                 reason = request.reason?.trim()?.ifBlank { null },
                             )
                         )
@@ -699,6 +812,29 @@ class DurableWorkRuntime(
             .sortedByDescending { it.workItem.priority.ordinal }
             .map { WorkItemProjectionBuilder.build(it) }
 
+    override fun reviewableResponsibilities(limit: Int): List<ReviewableResponsibility> =
+        states.values
+            .asSequence()
+            .filter { !it.isTerminal() && it.workItem.kind == WorkItemKind.RESPONSIBILITY }
+            .filter { it.workItem.status != WorkItemStatus.SUSPENDED }
+            .filter { it.workItem.reviewPolicy.enabled && it.workItem.reviewPolicy.idReviewEligible }
+            .sortedWith(
+                compareByDescending<WorkItemState> { it.workItem.priority.ordinal }
+                    .thenBy { it.workItem.nextReviewAt ?: Instant.MAX }
+            )
+            .take(limit)
+            .map { state ->
+                ReviewableResponsibility(
+                    workItemId = state.id,
+                    title = state.workItem.title,
+                    operatorSummary = state.workItem.operatorSummary.ifBlank { state.workItem.instruction },
+                    nextReviewAt = state.workItem.nextReviewAt,
+                    lastReviewAt = state.workItem.lastReviewAt,
+                    priority = state.workItem.priority,
+                )
+            }
+            .toList()
+
     override fun activeWorkItems(): List<WorkItemCommitment> = activeWorkItemsSnapshot
 
     fun createWorkItem(
@@ -708,6 +844,8 @@ class DurableWorkRuntime(
         completionCriteria: String = "User confirms the work item is met.",
         cronExpression: String? = null,
         contactChannel: String? = null,
+        operatorSummary: String? = null,
+        kind: WorkItemKind = WorkItemKind.RECURRENT_TASK,
         planSteps: List<ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload>? = null,
     ): String {
         val preBuiltPlan = when {
@@ -749,6 +887,7 @@ class DurableWorkRuntime(
         val workspacePath = store.createWorkspace(workItemId)
         val created = WorkItemEvent.Created(
             workItemId = workItemId,
+            kind = kind,
             title = title,
             instruction = instruction,
             priority = priority,
@@ -761,6 +900,28 @@ class DurableWorkRuntime(
             } else {
                 state.copy(workItem = state.workItem.copy(cronExpression = cronExpression))
             }
+        }.let { state ->
+            state.copy(
+                workItem = state.workItem.copy(
+                    kind = kind,
+                    operatorSummary = operatorSummary.orEmpty(),
+                    reviewPolicy = if (kind == WorkItemKind.RESPONSIBILITY) {
+                        ReviewPolicy(
+                            enabled = true,
+                            reviewIntervalMs = config.monitoring.overdueResponsibilityReviewIntervalMs,
+                            maxSkippedReviews = 3,
+                            idReviewEligible = true,
+                        )
+                    } else {
+                        state.workItem.reviewPolicy
+                    },
+                    nextReviewAt = if (kind == WorkItemKind.RESPONSIBILITY) {
+                        Instant.now().plusMillis(config.monitoring.overdueResponsibilityReviewIntervalMs)
+                    } else {
+                        state.workItem.nextReviewAt
+                    },
+                )
+            )
         }
         states[workItemId] = initial
         refreshAmbientSnapshots()
@@ -769,6 +930,9 @@ class DurableWorkRuntime(
 
         if (!cronExpression.isNullOrBlank()) {
             timerScheduler?.registerCron(workItemId, cronExpression)
+        }
+        if (initial.workItem.reviewPolicy.enabled && initial.workItem.nextReviewAt != null) {
+            timerScheduler?.register(workItemId, initial.workItem.nextReviewAt)
         }
         if (preBuiltPlan != null) {
             applyEvent(workItemId, WorkItemEvent.PlanGenerated(workItemId, preBuiltPlan))
@@ -990,6 +1154,13 @@ class DurableWorkRuntime(
         }
 
         dispatchCommands(commands)
+        if (event is WorkItemEvent.ReviewRecorded &&
+            updatedState.workItem.reviewPolicy.enabled &&
+            updatedState.workItem.nextReviewAt != null &&
+            !updatedState.isTerminal()
+        ) {
+            timerScheduler?.register(workItemId, updatedState.workItem.nextReviewAt)
+        }
         if (updatedState.isTerminal()) {
             instrumentation.emit(AgentEvents.durableWorkCompleted(workItemId))
             logger.info { "Work item $workItemId is terminal (${updatedState.workItem.status})" }
@@ -1084,7 +1255,15 @@ class DurableWorkRuntime(
             if (!recovered.isTerminal()) {
                 val step = recovered.nextRunnableStep()
                 if (step != null) {
-                    cueEmitter(DurableWorkCue(entry.workItemId, step.id, "activation_recovered"))
+                    cueEmitter(
+                        DurableWorkCue(
+                            workItemId = entry.workItemId,
+                            stepId = step.id,
+                            reason = "activation_recovered",
+                            wakeReasonType = WakeReasonType.RECOVERY,
+                            wakeReasonDetail = "restart_recovery",
+                        )
+                    )
                 }
             }
         }
@@ -1098,6 +1277,8 @@ class DurableWorkRuntime(
                 workItemId = state.id,
                 stepId = step.id,
                 reason = "work_item_restored_ready",
+                wakeReasonType = WakeReasonType.WORK_ITEM_RESTORED_READY,
+                wakeReasonDetail = "work_item_restored_ready",
             )
         )
     }
@@ -1109,6 +1290,9 @@ class DurableWorkRuntime(
         }
         if (workItem.status == WorkItemStatus.SUSPENDED && workItem.suspendedUntil != null) {
             timerScheduler?.register(state.id, workItem.suspendedUntil)
+        }
+        if (workItem.reviewPolicy.enabled && workItem.nextReviewAt != null && !state.isTerminal()) {
+            timerScheduler?.register(state.id, workItem.nextReviewAt)
         }
         workItem.plan.steps
             .filter { it.status == StepStatus.BLOCKED && it.waitCondition != null }
@@ -1140,6 +1324,31 @@ class DurableWorkRuntime(
                 applyEvent(workItemId, WorkItemEvent.Resumed(workItemId, scheduledAt))
             }
         }
+        if (state.workItem.reviewPolicy.enabled &&
+            state.workItem.nextReviewAt != null &&
+            state.workItem.nextReviewAt.toEpochMilli() <= scheduledAtMs &&
+            state.workItem.status != WorkItemStatus.SUSPENDED &&
+            !state.isTerminal()
+        ) {
+            val reviewReadyState = ensureWakeReadyState(
+                workItemId = workItemId,
+                state = state,
+                wakeReasonType = WakeReasonType.OVERDUE_CHECK,
+                reason = "review_due",
+            )
+            val step = reviewReadyState.nextRunnableStep()
+            if (step != null) {
+                cueEmitter(
+                    DurableWorkCue(
+                        workItemId = workItemId,
+                        stepId = step.id,
+                        reason = "review_due",
+                        wakeReasonType = WakeReasonType.OVERDUE_CHECK,
+                        wakeReasonDetail = "review_due",
+                    )
+                )
+            }
+        }
 
         val timerSteps = state.workItem.plan.steps.filter { step ->
             step.status == StepStatus.BLOCKED &&
@@ -1156,10 +1365,24 @@ class DurableWorkRuntime(
         }
         // Cron wake for ACTIVE work items: emit work-ready cue so the Ego picks up the step
         if (!state.workItem.cronExpression.isNullOrBlank() && state.workItem.status == WorkItemStatus.ACTIVE) {
-            val step = state.nextRunnableStep()
+            val cronReadyState = ensureWakeReadyState(
+                workItemId = workItemId,
+                state = state,
+                wakeReasonType = WakeReasonType.CRON_DUE,
+                reason = "cron_wake_active",
+            )
+            val step = cronReadyState.nextRunnableStep()
             if (step != null) {
                 logger.info { "Cron wake emitting work-ready cue: workItem=$workItemId step=${step.id}" }
-                cueEmitter(DurableWorkCue(workItemId = workItemId, stepId = step.id, reason = "cron_wake_active"))
+                cueEmitter(
+                    DurableWorkCue(
+                        workItemId = workItemId,
+                        stepId = step.id,
+                        reason = "cron_wake_active",
+                        wakeReasonType = WakeReasonType.CRON_DUE,
+                        wakeReasonDetail = "cron_wake_active",
+                    )
+                )
             } else {
                 logger.info { "Cron wake for ACTIVE workItem=$workItemId but no runnable step found" }
             }
@@ -1184,6 +1407,107 @@ class DurableWorkRuntime(
                 resolutionStatus = resolution.status,
             )
         )
+    }
+
+    private fun recordDeliveryOutcome(state: WorkItemState, session: DurableWorkRunSession) {
+        val summary = session.lastResultSummary.trim()
+        val fingerprint = summary.ifBlank { null }?.hashCode()?.toString()
+        val lastFingerprint = state.durableState.delivery.lastDeliveredDeltaSignature
+        val duplicate = fingerprint != null && fingerprint == lastFingerprint
+        if (summary.isBlank()) {
+            applyEvent(
+                state.id,
+                WorkItemEvent.DeliverySuppressed(
+                    workItemId = state.id,
+                    reason = DeliverySuppressionReason.NO_MEANINGFUL_CHANGE,
+                )
+            )
+            applyEvent(
+                state.id,
+                WorkItemEvent.DeliveryDecisionRecorded(
+                    workItemId = state.id,
+                    decision = DeliveryDecision.SUPPRESS_AS_NO_CHANGE,
+                    suppressionReason = DeliverySuppressionReason.NO_MEANINGFUL_CHANGE,
+                )
+            )
+            return
+        }
+
+        if (duplicate) {
+            applyEvent(
+                state.id,
+                WorkItemEvent.DeliverySuppressed(
+                    workItemId = state.id,
+                    reason = DeliverySuppressionReason.DUPLICATE_DELTA,
+                    summary = summary,
+                )
+            )
+            applyEvent(
+                state.id,
+                WorkItemEvent.DeliveryDecisionRecorded(
+                    workItemId = state.id,
+                    decision = DeliveryDecision.SUPPRESS_AS_DUPLICATE,
+                    suppressionReason = DeliverySuppressionReason.DUPLICATE_DELTA,
+                    fingerprint = fingerprint,
+                    summary = summary,
+                )
+            )
+            return
+        }
+
+        applyEvent(
+            state.id,
+            WorkItemEvent.MeaningfulChangeDetected(
+                workItemId = state.id,
+                itemKey = session.stepId,
+                changeClass = ChangeClass.NOTEWORTHY,
+                summary = summary,
+            )
+        )
+
+        when (state.workItem.deliveryPolicy) {
+            DeliveryPolicy.IMMEDIATE,
+            DeliveryPolicy.ONLY_ON_CHANGE -> {
+                applyEvent(
+                    state.id,
+                    WorkItemEvent.DeliveryDecisionRecorded(
+                        workItemId = state.id,
+                        decision = DeliveryDecision.NOTIFY_NOW,
+                        fingerprint = fingerprint,
+                        summary = summary,
+                    )
+                )
+                applyEvent(state.id, WorkItemEvent.DeliverySent(state.id, summary))
+            }
+            DeliveryPolicy.DIGEST -> {
+                val activeWindowKey = state.durableState.delivery.activeDigestWindow?.windowKey
+                    ?: "digest-${state.id}-${System.currentTimeMillis().toString(36)}"
+                if (state.durableState.delivery.activeDigestWindow == null) {
+                    applyEvent(state.id, WorkItemEvent.ReportWindowOpened(state.id, activeWindowKey))
+                }
+                applyEvent(
+                    state.id,
+                    WorkItemEvent.DeliveryDecisionRecorded(
+                        workItemId = state.id,
+                        decision = DeliveryDecision.QUEUE_FOR_DIGEST,
+                        fingerprint = fingerprint,
+                        summary = summary,
+                    )
+                )
+            }
+            DeliveryPolicy.MANUAL_REVIEW -> {
+                applyEvent(
+                    state.id,
+                    WorkItemEvent.DeliveryDecisionRecorded(
+                        workItemId = state.id,
+                        decision = DeliveryDecision.MANUAL_REVIEW_ONLY,
+                        suppressionReason = DeliverySuppressionReason.MANUAL_REVIEW_POLICY,
+                        fingerprint = fingerprint,
+                        summary = summary,
+                    )
+                )
+            }
+        }
     }
 
     private fun writeWorkspaceCycleArtifacts(state: WorkItemState, session: DurableWorkRunSession) {
@@ -1412,6 +1736,261 @@ class DurableWorkRuntime(
                 )
             )
         }
+        updated = when (event) {
+            is WorkItemEvent.DeliverySent -> {
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        delivery = updated.durableState.delivery.copy(
+                            lastDeliveryAt = event.timestamp,
+                            lastReportedSummary = event.summary,
+                            lastDeliveredDeltaSignature = event.summary.hashCode().toString(),
+                            lastSuppressionReason = null,
+                        ),
+                    )
+                )
+            }
+            is WorkItemEvent.DeliveryDecisionRecorded -> {
+                val delivery = updated.durableState.delivery
+                val summary = event.summary?.trim().orEmpty()
+                val nextWindow = when (event.decision) {
+                    DeliveryDecision.QUEUE_FOR_DIGEST -> {
+                        val existing = delivery.activeDigestWindow ?: DigestWindow(
+                            windowKey = "digest-${updated.id}",
+                            openedAt = event.timestamp,
+                        )
+                        existing.copy(
+                            itemKeys = (existing.itemKeys + listOfNotNull(summary.ifBlank { null }))
+                                .takeLast(config.monitoring.reportWindowSize)
+                        )
+                    }
+                    else -> delivery.activeDigestWindow
+                }
+                val nextPending = when (event.decision) {
+                    DeliveryDecision.QUEUE_FOR_DIGEST -> {
+                        (delivery.pendingEntries + PendingDeliveryEntry(
+                            summary = summary,
+                            fingerprint = event.fingerprint ?: summary.hashCode().toString(),
+                            itemKeys = listOf(updated.id),
+                            meaningful = true,
+                            wakeReasonType = sessionsByRootInputId.values.firstOrNull { it.workItemId == updated.id }
+                                ?.wakeReasons?.firstOrNull()?.type,
+                        )).takeLast(config.maxPendingDigestEntries)
+                    }
+                    else -> delivery.pendingEntries
+                }
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        delivery = delivery.copy(
+                            pendingEntries = nextPending,
+                            activeDigestWindow = nextWindow,
+                            lastDecision = event.decision,
+                            lastSuppressionReason = event.suppressionReason,
+                            lastDeliveredDeltaSignature = event.fingerprint ?: delivery.lastDeliveredDeltaSignature,
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.DeliverySuppressed -> {
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        delivery = updated.durableState.delivery.copy(
+                            lastSuppressionReason = event.reason,
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.ReportWindowOpened -> {
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        delivery = updated.durableState.delivery.copy(
+                            activeDigestWindow = DigestWindow(
+                                windowKey = event.windowKey,
+                                openedAt = event.timestamp,
+                            ),
+                            lastDigestWindowAt = event.timestamp,
+                        ),
+                        monitor = updated.durableState.monitor.copy(
+                            reporting = updated.durableState.monitor.reporting.copy(
+                                activeWindowKey = event.windowKey,
+                                openedAt = event.timestamp,
+                                closedAt = null,
+                            )
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.ReportWindowClosed -> {
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        delivery = updated.durableState.delivery.copy(
+                            activeDigestWindow = updated.durableState.delivery.activeDigestWindow
+                                ?.copy(closedAt = event.timestamp),
+                        ),
+                        monitor = updated.durableState.monitor.copy(
+                            reporting = updated.durableState.monitor.reporting.copy(
+                                activeWindowKey = event.windowKey,
+                                closedAt = event.timestamp,
+                            )
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.MeaningfulChangeDetected -> {
+                val monitor = updated.durableState.monitor
+                val change = ChangeRecord(
+                    itemKey = event.itemKey,
+                    changeClass = event.changeClass,
+                    observedAt = event.timestamp,
+                    reportEligible = true,
+                    summary = event.summary,
+                )
+                updated.copy(
+                    workItem = updated.workItem.copy(lastMeaningfulChangeAt = event.timestamp),
+                    durableState = updated.durableState.copy(
+                        monitor = monitor.copy(
+                            changeLedger = (monitor.changeLedger + change)
+                                .takeLast(config.monitoring.maxRetainedChangeRecords),
+                            lastMeaningfulChangeAt = event.timestamp,
+                        ),
+                        delivery = updated.durableState.delivery.copy(
+                            lastMeaningfulChangeAt = event.timestamp,
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.SeenItemRecorded -> {
+                val monitor = updated.durableState.monitor
+                val record = SeenItemRecord(
+                    stableItemKey = event.itemKey,
+                    firstSeenAt = event.timestamp,
+                    lastSeenAt = event.timestamp,
+                    lastFingerprint = event.fingerprint,
+                )
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        monitor = monitor.copy(
+                            seenItems = (monitor.seenItems + record)
+                                .groupBy { it.stableItemKey }
+                                .map { (_, records) -> records.last() }
+                                .takeLast(config.monitoring.maxRetainedSeenItems),
+                            dedupeKeys = monitor.dedupeKeys + event.itemKey,
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.SeenItemUpdated -> {
+                val monitor = updated.durableState.monitor
+                val seen = monitor.seenItems.filterNot { it.stableItemKey == event.itemKey } + SeenItemRecord(
+                    stableItemKey = event.itemKey,
+                    firstSeenAt = monitor.seenItems.firstOrNull { it.stableItemKey == event.itemKey }?.firstSeenAt
+                        ?: event.timestamp,
+                    lastSeenAt = event.timestamp,
+                    lastFingerprint = event.fingerprint,
+                    lifecycleStatus = SeenItemLifecycleStatus.CHANGED,
+                )
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        monitor = monitor.copy(
+                            seenItems = seen.takeLast(config.monitoring.maxRetainedSeenItems),
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.MonitorScanStarted -> {
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        monitor = updated.durableState.monitor.copy(
+                            sources = upsertSourceState(
+                                updated.durableState.monitor.sources,
+                                MonitorSourceState(
+                                    sourceKey = event.sourceKey,
+                                    lastScanAt = event.timestamp,
+                                )
+                            )
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.MonitorScanCompleted -> {
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        monitor = updated.durableState.monitor.copy(
+                            sources = upsertSourceState(
+                                updated.durableState.monitor.sources,
+                                MonitorSourceState(
+                                    sourceKey = event.sourceKey,
+                                    lastScanAt = event.timestamp,
+                                    lastSuccessfulScanAt = event.timestamp,
+                                    lastScanSummary = event.scanSummary,
+                                )
+                            )
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.MonitorCursorAdvanced -> {
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        monitor = updated.durableState.monitor.copy(
+                            sources = upsertSourceState(
+                                updated.durableState.monitor.sources,
+                                MonitorSourceState(
+                                    sourceKey = event.sourceKey,
+                                    cursorOrCheckpoint = event.cursor,
+                                )
+                            )
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.ReviewRecorded -> {
+                val review = updated.durableState.monitor.review
+                val intervalMs = updated.workItem.reviewPolicy.reviewIntervalMs
+                updated.copy(
+                    workItem = updated.workItem.copy(
+                        lastReviewAt = event.timestamp,
+                        nextReviewAt = intervalMs?.let { event.timestamp.plusMillis(it) },
+                    ),
+                    durableState = updated.durableState.copy(
+                        monitor = updated.durableState.monitor.copy(
+                            review = review.copy(
+                                lastReviewAt = event.timestamp,
+                                nextReviewDueAt = intervalMs?.let { event.timestamp.plusMillis(it) },
+                                skippedReviewCount = 0,
+                                latestReviewReason = event.outcome,
+                                history = (review.history + ReviewRecord(
+                                    reviewedAt = event.timestamp,
+                                    wakeReasonType = event.wakeReasonType,
+                                    outcome = event.outcome,
+                                    summary = event.summary,
+                                )).takeLast(config.monitoring.maxRetainedReviewHistory),
+                            )
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.IdReviewRequested -> updated
+            is WorkItemEvent.IdReviewAccepted -> updated
+            is WorkItemEvent.IdReviewDeferred -> {
+                val review = updated.durableState.monitor.review
+                updated.copy(
+                    durableState = updated.durableState.copy(
+                        monitor = updated.durableState.monitor.copy(
+                            review = review.copy(
+                                skippedReviewCount = review.skippedReviewCount + 1,
+                                latestReviewReason = event.reason,
+                            )
+                        )
+                    )
+                )
+            }
+            is WorkItemEvent.Retired -> {
+                updated.copy(
+                    workItem = updated.workItem.copy(status = WorkItemStatus.RETIRED)
+                )
+            }
+            else -> updated
+        }
         var projectedHealth = projectHealth(updated)
         if (updated.workItem.health != WorkItemHealth.HEALTHY &&
             projectedHealth == WorkItemHealth.HEALTHY
@@ -1485,26 +2064,46 @@ class DurableWorkRuntime(
                     states[workItemId] = cleared
                     val step = cleared.nextRunnableStep()
                     if (step != null && !cleared.isTerminal()) {
-                        cueEmitter(DurableWorkCue(workItemId, step.id, "coalesced_wakes: ${pendingReasons.joinToString(",")}"))
+                        cueEmitter(
+                            DurableWorkCue(
+                                workItemId = workItemId,
+                                stepId = step.id,
+                                reason = "coalesced_wakes: ${pendingReasons.joinToString(",") { it.renderHumanReadable() }}",
+                                wakeReasonType = WakeReasonType.COALESCED_WAKE,
+                                wakeReasonDetail = pendingReasons.joinToString(",") { it.renderHumanReadable() },
+                            )
+                        )
                     }
                 }
             }
         }
     }
 
-    private fun coalescePendingWake(workItemId: String, reason: String) {
+    private fun coalescePendingWake(workItemId: String, cue: DurableWorkCue) {
         val state = states[workItemId] ?: return
         val pendingReasons = state.workItem.pendingWakeReasons
         if (pendingReasons.size >= config.maxPendingWakeReasonsPerItem) {
-            logger.warn { "Max pending wake reasons reached for $workItemId, dropping: $reason" }
+            logger.warn { "Max pending wake reasons reached for $workItemId, dropping: ${cue.reason}" }
             return
         }
+        val wakeReason = WakeReason(
+            type = cue.wakeReasonType ?: inferWakeReasonType(cue.reason),
+            detail = cue.wakeReasonDetail ?: cue.reason.ifBlank { null },
+        )
         val updated = state.copy(
-            workItem = state.workItem.copy(pendingWakeReasons = pendingReasons + reason)
+            workItem = state.workItem.copy(
+                pendingWakeReasons = pendingReasons + wakeReason
+            )
         )
         states[workItemId] = updated
-        applyEvent(workItemId, WorkItemEvent.WakeCoalesced(workItemId, reason))
-        logger.debug { "Wake coalesced for $workItemId: $reason (${pendingReasons.size + 1} pending)" }
+        applyEvent(
+            workItemId,
+            WorkItemEvent.WakeCoalesced(
+                workItemId = workItemId,
+                wakeReason = wakeReason
+            )
+        )
+        logger.debug { "Wake coalesced for $workItemId: ${cue.reason} (${pendingReasons.size + 1} pending)" }
     }
 
     // ── Health projection ────────────────────────────────────────────────
@@ -1518,13 +2117,91 @@ class DurableWorkRuntime(
             WorkItemStatus.BLOCKED -> WorkItemHealth.BLOCKED
             else -> {
                 val failureWindow = state.workItem.failureWindow
-                if (failureWindow.failureCount >= failureWindow.maxFailuresInWindow) {
+                if (isResponsibilityReviewOverdue(state)) {
+                    WorkItemHealth.NEEDS_ATTENTION
+                } else if (failureWindow.failureCount >= failureWindow.maxFailuresInWindow) {
                     WorkItemHealth.STALLED
                 } else {
                     WorkItemHealth.HEALTHY
                 }
             }
         }
+
+    private fun ensureWakeReadyState(
+        workItemId: String,
+        state: WorkItemState,
+        wakeReasonType: WakeReasonType?,
+        reason: String,
+    ): WorkItemState {
+        if (!shouldRearmResponsibilityCycle(state, wakeReasonType)) return state
+        return applyEvent(
+            workItemId,
+            WorkItemEvent.ResponsibilityCycleRearmed(
+                workItemId = workItemId,
+                reason = reason,
+            )
+        ) ?: states[workItemId] ?: state
+    }
+
+    private fun shouldRearmResponsibilityCycle(
+        state: WorkItemState,
+        wakeReasonType: WakeReasonType?,
+    ): Boolean =
+        state.workItem.kind == WorkItemKind.RESPONSIBILITY &&
+            !state.isTerminal() &&
+            state.workItem.status != WorkItemStatus.SUSPENDED &&
+            state.nextRunnableStep() == null &&
+            wakeReasonType in RESPONSIBILITY_REARM_WAKE_REASON_TYPES &&
+            state.workItem.plan.steps.isNotEmpty() &&
+            state.workItem.plan.steps.all {
+                it.status in setOf(StepStatus.DONE, StepStatus.SKIPPED, StepStatus.FAILED)
+            }
+
+    private fun isEligibleForIdReview(state: WorkItemState): Boolean =
+        !state.isTerminal() &&
+            state.workItem.kind == WorkItemKind.RESPONSIBILITY &&
+            state.workItem.status != WorkItemStatus.SUSPENDED &&
+            state.workItem.reviewPolicy.enabled &&
+            state.workItem.reviewPolicy.idReviewEligible
+
+    private fun isResponsibilityReviewOverdue(state: WorkItemState): Boolean =
+        state.workItem.kind == WorkItemKind.RESPONSIBILITY &&
+            !state.isTerminal() &&
+            state.workItem.status != WorkItemStatus.SUSPENDED &&
+            state.workItem.nextReviewAt?.isBefore(Instant.now()) == true
+
+    private fun inferWakeReasonType(reason: String): WakeReasonType =
+        when {
+            reason.contains("review", ignoreCase = true) -> WakeReasonType.MANUAL_REVIEW
+            reason.contains("recovered", ignoreCase = true) -> WakeReasonType.RECOVERY
+            reason.contains("cron", ignoreCase = true) -> WakeReasonType.CRON_DUE
+            reason.contains("timer", ignoreCase = true) -> WakeReasonType.TIMER_DUE
+            reason.contains("change", ignoreCase = true) -> WakeReasonType.MONITOR_CHANGE_DETECTED
+            reason.contains("unblocked", ignoreCase = true) -> WakeReasonType.WAIT_RESOLVED
+            reason.contains("retry", ignoreCase = true) -> WakeReasonType.STEP_RETRY
+            reason.contains("completed", ignoreCase = true) -> WakeReasonType.STEP_COMPLETED
+            else -> WakeReasonType.PLAN_READY
+        }
+
+    private fun upsertSourceState(
+        sources: List<MonitorSourceState>,
+        update: MonitorSourceState,
+    ): List<MonitorSourceState> {
+        val existing = sources.firstOrNull { it.sourceKey == update.sourceKey }
+        val merged = if (existing == null) {
+            update
+        } else {
+            existing.copy(
+                sourceKind = update.sourceKind.ifBlank { existing.sourceKind },
+                cursorOrCheckpoint = update.cursorOrCheckpoint ?: existing.cursorOrCheckpoint,
+                lastScanAt = update.lastScanAt ?: existing.lastScanAt,
+                lastSuccessfulScanAt = update.lastSuccessfulScanAt ?: existing.lastSuccessfulScanAt,
+                lastScanSummary = update.lastScanSummary ?: existing.lastScanSummary,
+            )
+        }
+        return (sources.filterNot { it.sourceKey == update.sourceKey } + merged)
+            .takeLast(config.monitoring.reportWindowSize)
+    }
 
     // ── Per-item synchronization ────────────────────────────────────────
 
@@ -1562,11 +2239,23 @@ class DurableWorkRuntime(
         private const val EFFECT_INTENT_SEGMENT_LIMIT: Int = 4
         private const val EFFECT_INTENT_DUPLICATE_REASON_CODE: String = "durable_work_effect_duplicate"
         private const val EFFECT_INTENT_GATE_SOURCE: String = "durable_work_effect_ledger"
+        private val REVIEW_WAKE_REASON_TYPES: Set<WakeReasonType> = setOf(
+            WakeReasonType.MANUAL_REVIEW,
+            WakeReasonType.ID_REVIEW,
+            WakeReasonType.OVERDUE_CHECK,
+        )
+        private val RESPONSIBILITY_REARM_WAKE_REASON_TYPES: Set<WakeReasonType> = setOf(
+            WakeReasonType.MANUAL_REVIEW,
+            WakeReasonType.ID_REVIEW,
+            WakeReasonType.OVERDUE_CHECK,
+            WakeReasonType.CRON_DUE,
+        )
         private val TERMINAL_OR_ESCALATED_STATUSES: Set<WorkItemStatus> = setOf(
             WorkItemStatus.COMPLETED,
             WorkItemStatus.FAILED,
             WorkItemStatus.STALLED,
             WorkItemStatus.NEEDS_ATTENTION,
+            WorkItemStatus.RETIRED,
         )
     }
 

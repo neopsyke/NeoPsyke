@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.ego.planner.model
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import ai.neopsyke.agent.durablework.WorkItemKind
 import ai.neopsyke.agent.durablework.WorkItemPriority
 
 /**
@@ -9,6 +10,8 @@ import ai.neopsyke.agent.durablework.WorkItemPriority
  */
 data class SerializedDurableWorkCommand(
     val command: String,
+    @param:JsonProperty("work_item_kind")
+    val workItemKind: String? = null,
     @param:JsonProperty("work_item_reference")
     val workItemReference: SerializedWorkItemReference? = null,
     @param:JsonProperty("work_item_id")
@@ -22,6 +25,8 @@ data class SerializedDurableWorkCommand(
     val cronExpression: String? = null,
     @param:JsonProperty("contact_channel")
     val contactChannel: String? = null,
+    @param:JsonProperty("operator_summary")
+    val operatorSummary: String? = null,
     val reason: String? = null,
     @param:JsonProperty("plan_steps")
     val planSteps: List<DurableWorkPlanStepPayload>? = null,
@@ -37,12 +42,14 @@ data class SerializedDurableWorkCommand(
                     null
                 } else {
                     DurableWorkCommand.Create(
+                        workItemKind = WorkItemKind.fromSerialized(workItemKind),
                         title = normalizedTitle,
                         instruction = normalizedInstruction,
                         priority = parsePriority(priority) ?: WorkItemPriority.MEDIUM,
                         completionCriteria = completionCriteria?.trim().orEmpty(),
                         cronExpression = cronExpression?.trim()?.ifBlank { null },
                         contactChannel = contactChannel?.trim()?.ifBlank { null },
+                        operatorSummary = operatorSummary?.trim()?.ifBlank { null },
                         planSteps = planSteps?.takeIf { it.isNotEmpty() },
                     )
                 }
@@ -51,7 +58,9 @@ data class SerializedDurableWorkCommand(
             "status" -> reference?.let { DurableWorkCommand.Status(it) }
             "pause" -> reference?.let { DurableWorkCommand.Pause(it) }
             "resume" -> reference?.let { DurableWorkCommand.Resume(it) }
+            "review" -> reference?.let { DurableWorkCommand.Review(it, reason?.trim()?.ifBlank { null }) }
             "complete" -> reference?.let { DurableWorkCommand.Complete(it) }
+            "retire" -> reference?.let { DurableWorkCommand.Retire(it, reason?.trim()?.ifBlank { null }) }
             "delete" -> reference?.let { DurableWorkCommand.Delete(it) }
             "delete_all" -> DurableWorkCommand.DeleteAll
             "update" -> reference?.let {
@@ -63,6 +72,7 @@ data class SerializedDurableWorkCommand(
                     completionCriteria = completionCriteria?.trim()?.ifBlank { null },
                     cronExpression = cronExpression?.trim()?.ifBlank { null },
                     contactChannel = contactChannel?.trim()?.ifBlank { null },
+                    operatorSummary = operatorSummary?.trim()?.ifBlank { null },
                 )
             }
             "revise_plan" -> reference?.let { DurableWorkCommand.RevisePlan(reference = it, reason = reason?.trim()?.ifBlank { null }, planSteps = planSteps?.takeIf { s -> s.isNotEmpty() }) }
@@ -79,19 +89,33 @@ data class SerializedDurableWorkCommand(
             return when (command) {
                 is DurableWorkCommand.Create -> SerializedDurableWorkCommand(
                     command = command.operationName,
+                    workItemKind = command.workItemKind.name,
                     title = command.title,
                     instruction = command.instruction,
                     priority = command.priority.name,
                     completionCriteria = command.completionCriteria,
                     cronExpression = command.cronExpression,
                     contactChannel = command.contactChannel,
+                    operatorSummary = command.operatorSummary,
                     planSteps = command.planSteps,
                 )
                 is DurableWorkCommand.List -> SerializedDurableWorkCommand(command = command.operationName)
                 is DurableWorkCommand.Status -> fromReferenceCommand(command.operationName, command.reference)
                 is DurableWorkCommand.Pause -> fromReferenceCommand(command.operationName, command.reference)
                 is DurableWorkCommand.Resume -> fromReferenceCommand(command.operationName, command.reference)
+                is DurableWorkCommand.Review -> SerializedDurableWorkCommand(
+                    command = command.operationName,
+                    workItemReference = SerializedWorkItemReference.fromWorkItemReference(command.reference),
+                    workItemId = resolvedWorkItemId(command.reference),
+                    reason = command.reason,
+                )
                 is DurableWorkCommand.Complete -> fromReferenceCommand(command.operationName, command.reference)
+                is DurableWorkCommand.Retire -> SerializedDurableWorkCommand(
+                    command = command.operationName,
+                    workItemReference = SerializedWorkItemReference.fromWorkItemReference(command.reference),
+                    workItemId = resolvedWorkItemId(command.reference),
+                    reason = command.reason,
+                )
                 is DurableWorkCommand.Delete -> fromReferenceCommand(command.operationName, command.reference)
                 is DurableWorkCommand.DeleteAll -> SerializedDurableWorkCommand(command = command.operationName)
                 is DurableWorkCommand.Update -> SerializedDurableWorkCommand(
@@ -104,6 +128,7 @@ data class SerializedDurableWorkCommand(
                     completionCriteria = command.completionCriteria,
                     cronExpression = command.cronExpression,
                     contactChannel = command.contactChannel,
+                    operatorSummary = command.operatorSummary,
                 )
                 is DurableWorkCommand.RevisePlan -> SerializedDurableWorkCommand(
                     command = command.operationName,

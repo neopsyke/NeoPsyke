@@ -3,6 +3,7 @@ package ai.neopsyke.agent.cortex.sensory
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.config.InterlocutorResolver
+import ai.neopsyke.agent.durablework.WakeReasonType
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.ActionExecutionStatus
@@ -73,6 +74,8 @@ data class DurableWorkCue(
     val workItemId: String,
     val stepId: String,
     val reason: String,
+    val wakeReasonType: WakeReasonType? = null,
+    val wakeReasonDetail: String? = null,
 ) {
     fun toStimulus(): StimulusEnvelope =
         StimulusEnvelope(
@@ -96,6 +99,8 @@ data class DurableWorkCue(
                 METADATA_WORK_ITEM_ID to workItemId,
                 METADATA_STEP_ID to stepId,
                 METADATA_REASON to reason,
+                METADATA_WAKE_REASON_TYPE to wakeReasonType?.name.orEmpty(),
+                METADATA_WAKE_REASON_DETAIL to wakeReasonDetail.orEmpty(),
             ),
         )
 
@@ -108,7 +113,17 @@ data class DurableWorkCue(
             val workItemId = stimulus.metadata[METADATA_WORK_ITEM_ID] ?: return null
             val stepId = stimulus.metadata[METADATA_STEP_ID] ?: return null
             val reason = stimulus.metadata[METADATA_REASON].orEmpty()
-            return DurableWorkCue(workItemId = workItemId, stepId = stepId, reason = reason)
+            val wakeReasonType = stimulus.metadata[METADATA_WAKE_REASON_TYPE]
+                ?.takeIf { it.isNotBlank() }
+                ?.let { raw -> runCatching { WakeReasonType.valueOf(raw) }.getOrNull() }
+            val wakeReasonDetail = stimulus.metadata[METADATA_WAKE_REASON_DETAIL]?.ifBlank { null }
+            return DurableWorkCue(
+                workItemId = workItemId,
+                stepId = stepId,
+                reason = reason,
+                wakeReasonType = wakeReasonType,
+                wakeReasonDetail = wakeReasonDetail,
+            )
         }
     }
 }
@@ -239,6 +254,8 @@ object CognitiveCueMetadata {
     const val METADATA_WORK_ITEM_ID: String = "goal_id"
     const val METADATA_STEP_ID: String = "step_id"
     const val METADATA_REASON: String = "reason"
+    const val METADATA_WAKE_REASON_TYPE: String = "wake_reason_type"
+    const val METADATA_WAKE_REASON_DETAIL: String = "wake_reason_detail"
     const val METADATA_ROOT_IMPULSE_ID: String = "root_impulse_id"
     const val METADATA_ROOT_INPUT_ID: String = "root_input_id"
     const val METADATA_ACTION_TYPE: String = "action_type"
@@ -268,6 +285,8 @@ private const val METADATA_CUE_TYPE: String = CognitiveCueMetadata.METADATA_CUE_
 private const val METADATA_WORK_ITEM_ID: String = CognitiveCueMetadata.METADATA_WORK_ITEM_ID
 private const val METADATA_STEP_ID: String = CognitiveCueMetadata.METADATA_STEP_ID
 private const val METADATA_REASON: String = CognitiveCueMetadata.METADATA_REASON
+private const val METADATA_WAKE_REASON_TYPE: String = CognitiveCueMetadata.METADATA_WAKE_REASON_TYPE
+private const val METADATA_WAKE_REASON_DETAIL: String = CognitiveCueMetadata.METADATA_WAKE_REASON_DETAIL
 private const val METADATA_ROOT_IMPULSE_ID: String = CognitiveCueMetadata.METADATA_ROOT_IMPULSE_ID
 private const val METADATA_ROOT_INPUT_ID: String = CognitiveCueMetadata.METADATA_ROOT_INPUT_ID
 private const val METADATA_ACTION_TYPE: String = CognitiveCueMetadata.METADATA_ACTION_TYPE

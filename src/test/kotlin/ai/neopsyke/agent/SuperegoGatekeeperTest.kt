@@ -4,7 +4,11 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
 import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.CognitiveThreadSecurityContext
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.llm.ChatRole
 import ai.neopsyke.llm.ChatModelClient
@@ -341,6 +345,51 @@ class SuperegoGatekeeperTest {
         assertEquals(1, llm.calls.size)
         assertTrue(llm.lastMessages.last().content.contains("Action origin:"))
         assertTrue(llm.lastMessages.last().content.contains("source=id"))
+    }
+
+    @Test
+    fun `gatekeeper allows id-origin durable work review actions to proceed`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig(),
+            actionRegistry = testRegistry()
+        )
+        val durableWorkAction = PendingAction(
+            id = 702,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.DURABLE_WORK_OPERATION,
+            payload = """{"command":"review","work_item_id":"resp-1"}""",
+            summary = "review responsibility",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            conversationContext = ConversationContext(
+                sessionId = "id-review",
+                interlocutor = Interlocutor.named("Id"),
+                security = ConversationSecurityContexts.internalAutomation(
+                    provider = "id",
+                    channelId = "id-review",
+                )
+            ),
+            origin = ActionOrigin(
+                source = OriginSource.ID,
+                needId = "be-useful",
+                rootImpulseId = "imp-4"
+            )
+        )
+        val idContext = snapshot.copy(
+            origin = durableWorkAction.origin,
+            conversationContext = durableWorkAction.conversationContext,
+            threadSecurityContext = CognitiveThreadSecurityContext.fromConversation(
+                durableWorkAction.conversationContext.security
+            ),
+        )
+
+        val decision = gatekeeper.review(durableWorkAction, idContext)
+
+        assertTrue(decision.allow)
+        assertEquals(1, llm.calls.size)
     }
 
     @Test

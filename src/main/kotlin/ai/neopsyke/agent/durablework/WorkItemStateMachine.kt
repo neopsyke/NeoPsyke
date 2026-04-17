@@ -23,7 +23,11 @@ data class WorkItemState(
             ?: readySteps().firstOrNull()
 
     fun isTerminal(): Boolean =
-        workItem.status == WorkItemStatus.COMPLETED || workItem.status == WorkItemStatus.FAILED
+        workItem.status in setOf(
+            WorkItemStatus.COMPLETED,
+            WorkItemStatus.FAILED,
+            WorkItemStatus.RETIRED,
+        )
 }
 
 /**
@@ -58,6 +62,8 @@ object WorkItemStateMachine {
             is WorkItemEvent.Resumed -> handleResumed(state, event, commands)
             is WorkItemEvent.CronCycleStarted -> handleCronCycleStarted(state, event, commands)
             is WorkItemEvent.Completed -> handleCompleted(state, event, commands)
+            is WorkItemEvent.ResponsibilityCycleRearmed -> handleResponsibilityCycleRearmed(state, event, commands)
+            is WorkItemEvent.Retired -> handleRetired(state, event, commands)
             is WorkItemEvent.PriorityChanged -> handlePriorityChanged(state, event, commands)
             is WorkItemEvent.Failed -> handleFailed(state, event, commands)
             is WorkItemEvent.Updated -> handleUpdated(state, event)
@@ -73,7 +79,13 @@ object WorkItemStateMachine {
             )
             is WorkItemEvent.WakeCoalesced -> state
             is WorkItemEvent.ActivationStarted -> state.copy(
-                workItem = state.workItem.copy(activationCount = state.workItem.activationCount + 1)
+                workItem = state.workItem.copy(activationCount = state.workItem.activationCount + 1),
+                durableState = state.durableState.copy(
+                    runtime = state.durableState.runtime.copy(
+                        wakeSequence = event.wakeReasons.size,
+                        lastWakeReasons = event.wakeReasons,
+                    )
+                )
             )
             is WorkItemEvent.ActivationFinished -> state.copy(
                 workItem = state.workItem.copy(activeLease = null)
@@ -95,6 +107,21 @@ object WorkItemStateMachine {
             )
             is WorkItemEvent.DeliveryDeferred -> state
             is WorkItemEvent.DeliverySent -> state
+            is WorkItemEvent.DeliveryDecisionRecorded -> state
+            is WorkItemEvent.MonitorScanStarted -> state
+            is WorkItemEvent.MonitorScanCompleted -> state
+            is WorkItemEvent.MonitorCursorAdvanced -> state
+            is WorkItemEvent.SeenItemRecorded -> state
+            is WorkItemEvent.SeenItemUpdated -> state
+            is WorkItemEvent.MeaningfulChangeDetected -> state
+            is WorkItemEvent.ReportWindowOpened -> state
+            is WorkItemEvent.ReportWindowClosed -> state
+            is WorkItemEvent.DeliverySuppressed -> state
+            is WorkItemEvent.ReviewRecorded -> state
+            is WorkItemEvent.IdReviewRequested -> state
+            is WorkItemEvent.IdReviewAccepted -> state
+            is WorkItemEvent.IdReviewDeferred -> state
+            is WorkItemEvent.EventSegmentRolled -> state
             // Effect intent lifecycle (bookkeeping, no state transition)
             is WorkItemEvent.EffectIntentRecorded -> state
             is WorkItemEvent.EffectConfirmed -> state
@@ -112,6 +139,7 @@ object WorkItemStateMachine {
         WorkItemState(
             workItem = WorkItem(
                 id = event.workItemId,
+                kind = event.kind,
                 title = event.title,
                 instruction = event.instruction,
                 status = WorkItemStatus.PLANNING,
@@ -138,6 +166,7 @@ object WorkItemStateMachine {
                 title = event.title,
                 instruction = event.instruction,
                 status = WorkItemStatus.PLANNING,
+                kind = event.kind,
                 priority = event.priority,
                 completionCriteria = event.completionCriteria,
                 contactChannel = event.contactChannel,
@@ -185,6 +214,7 @@ object WorkItemStateMachine {
         event.title?.let { workItem = workItem.copy(title = it) }
         event.completionCriteria?.let { workItem = workItem.copy(completionCriteria = it) }
         event.contactChannel?.let { workItem = workItem.copy(contactChannel = it) }
+        event.operatorSummary?.let { workItem = workItem.copy(operatorSummary = it) }
         return state.copy(workItem = workItem)
     }
 
@@ -245,7 +275,11 @@ object WorkItemStateMachine {
             val failed = updateStep(state, event.stepId) { it.copy(status = StepStatus.FAILED) }
             val withSkipped = skipDependentSteps(failed, event.stepId, "dependency '${event.stepId}' failed")
             commands += WorkItemCommand.NotifyUser(state.id, "Step '${step.description}' failed: ${event.reason}")
-            val terminal = if (isWorkItemFailed(withSkipped)) {
+            val terminal = if (state.workItem.kind == WorkItemKind.RESPONSIBILITY) {
+                withSkipped.copy(
+                    workItem = withSkipped.workItem.copy(status = WorkItemStatus.NEEDS_ATTENTION)
+                )
+            } else if (isWorkItemFailed(withSkipped)) {
                 withSkipped.copy(workItem = withSkipped.workItem.copy(status = WorkItemStatus.FAILED))
             } else {
                 withSkipped
@@ -383,7 +417,12 @@ object WorkItemStateMachine {
                 commands += WorkItemCommand.NotifyUser(state.id, "Step '${step.description}' timed out")
                 commands += WorkItemCommand.ClearWaitCondition(state.id, event.stepId)
                 commands += WorkItemCommand.PersistWorkItem(state.id)
-                skipDependentSteps(failed, event.stepId, "dependency '${event.stepId}' timed out")
+                val skipped = skipDependentSteps(failed, event.stepId, "dependency '${event.stepId}' timed out")
+                if (state.workItem.kind == WorkItemKind.RESPONSIBILITY) {
+                    skipped.copy(workItem = skipped.workItem.copy(status = WorkItemStatus.NEEDS_ATTENTION))
+                } else {
+                    skipped
+                }
             }
             TimeoutAction.RETRY -> {
                 commands += WorkItemCommand.ClearWaitCondition(state.id, event.stepId)
@@ -450,6 +489,36 @@ object WorkItemStateMachine {
         commands += WorkItemCommand.PersistWorkItem(state.id)
         return state.copy(
             workItem = state.workItem.copy(status = WorkItemStatus.COMPLETED)
+        )
+    }
+
+    private fun handleResponsibilityCycleRearmed(
+        state: WorkItemState,
+        event: WorkItemEvent.ResponsibilityCycleRearmed,
+        commands: MutableList<WorkItemCommand>,
+    ): WorkItemState {
+        val resetSteps = resetResponsibilityCycleSteps(state.workItem.plan.steps)
+        commands += WorkItemCommand.PersistWorkItem(state.id)
+        return state.copy(
+            workItem = state.workItem.copy(
+                plan = state.workItem.plan.copy(steps = resetSteps),
+                status = WorkItemStatus.ACTIVE,
+            ),
+            producedKeys = emptySet(),
+        )
+    }
+
+    private fun handleRetired(
+        state: WorkItemState,
+        event: WorkItemEvent.Retired,
+        commands: MutableList<WorkItemCommand>,
+    ): WorkItemState {
+        commands += WorkItemCommand.PersistWorkItem(state.id)
+        return state.copy(
+            workItem = state.workItem.copy(
+                status = WorkItemStatus.RETIRED,
+                operatorSummary = event.reason,
+            )
         )
     }
 
@@ -581,14 +650,28 @@ object WorkItemStateMachine {
     }
 
     private fun isWorkItemComplete(state: WorkItemState): Boolean =
-        state.workItem.plan.steps.all { it.status in setOf(StepStatus.DONE, StepStatus.SKIPPED) }
+        state.workItem.kind != WorkItemKind.RESPONSIBILITY &&
+            state.workItem.plan.steps.all { it.status in setOf(StepStatus.DONE, StepStatus.SKIPPED) }
 
     private fun isWorkItemFailed(state: WorkItemState): Boolean {
+        if (state.workItem.kind == WorkItemKind.RESPONSIBILITY) return false
         val remaining = state.workItem.plan.steps.filter {
             it.status !in setOf(StepStatus.DONE, StepStatus.SKIPPED, StepStatus.FAILED)
         }
         return remaining.isEmpty() && state.workItem.plan.steps.any { it.status == StepStatus.FAILED }
     }
+
+    private fun resetResponsibilityCycleSteps(steps: List<PlanStep>): List<PlanStep> =
+        steps.map { step ->
+            step.copy(
+                status = if (step.requires.isEmpty()) StepStatus.READY else StepStatus.PENDING,
+                waitCondition = null,
+                attempts = 0,
+                lastAttemptAt = null,
+                completedAt = null,
+                notes = "",
+            )
+        }
 
     private fun allRemainingStepsBlocked(state: WorkItemState): Boolean =
         state.workItem.plan.steps

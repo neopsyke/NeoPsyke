@@ -27,7 +27,11 @@ private val logger = KotlinLogging.logger {}
  *     artifacts/         # step outputs
  * ```
  */
-class WorkItemStore(private val workspaceRoot: Path) {
+class WorkItemStore(
+    private val workspaceRoot: Path,
+    private val maxEventLogSegmentBytes: Long = DEFAULT_MAX_EVENT_LOG_SEGMENT_BYTES,
+    private val maxArchivedEventSegments: Int = DEFAULT_MAX_ARCHIVED_EVENT_SEGMENTS,
+) {
 
     private val mapper = jacksonObjectMapper()
         .registerModule(JavaTimeModule())
@@ -50,7 +54,11 @@ class WorkItemStore(private val workspaceRoot: Path) {
         val goalStatePath = dir.resolve(GOAL_FILE)
         val snapshotPath = dir.resolve(SNAPSHOT_FILE)
         val eventsPath = dir.resolve(EVENTS_FILE)
-        val eventLog = WorkItemEventLog(eventsPath)
+        val eventLog = WorkItemEventLog(
+            path = eventsPath,
+            maxSegmentBytes = maxEventLogSegmentBytes,
+            maxArchivedSegments = maxArchivedEventSegments,
+        )
 
         val (baseState, replayFrom) = when {
             Files.exists(goalStatePath) -> {
@@ -134,7 +142,11 @@ class WorkItemStore(private val workspaceRoot: Path) {
     }
 
     fun workItemEventLog(workItemId: String): WorkItemEventLog =
-        WorkItemEventLog(workspaceRoot.resolve(workItemId).resolve(EVENTS_FILE))
+        WorkItemEventLog(
+            path = workspaceRoot.resolve(workItemId).resolve(EVENTS_FILE),
+            maxSegmentBytes = maxEventLogSegmentBytes,
+            maxArchivedSegments = maxArchivedEventSegments,
+        )
 
     fun workItemDir(workItemId: String): Path = workspaceRoot.resolve(workItemId)
 
@@ -167,6 +179,8 @@ class WorkItemStore(private val workspaceRoot: Path) {
         const val EVENTS_FILE = "goal-events.jsonl"
         const val SNAPSHOT_FILE = "goal-snapshot.json"
         const val WORKSPACE_DIR = "workspace"
+        const val DEFAULT_MAX_EVENT_LOG_SEGMENT_BYTES: Long = 1_000_000
+        const val DEFAULT_MAX_ARCHIVED_EVENT_SEGMENTS: Int = 8
     }
 }
 
@@ -176,7 +190,7 @@ class WorkItemStore(private val workspaceRoot: Path) {
  */
 internal data class WorkItemSnapshot(
     val workItemId: String = "",
-    val kind: String = WorkItemKind.LONG_TERM_GOAL.name,
+    val kind: String = WorkItemKind.RECURRENT_TASK.name,
     val title: String = "",
     val objective: String = "",
     val instruction: String = "",
@@ -185,31 +199,43 @@ internal data class WorkItemSnapshot(
     val priority: String = "",
     val completionCriteria: String = "",
     val deliveryPolicy: String = DeliveryPolicy.IMMEDIATE.name,
+    val reviewPolicy: ReviewPolicy = ReviewPolicy(),
+    val operatorSummary: String = "",
+    val lastMeaningfulChangeAt: String? = null,
+    val lastReviewAt: String? = null,
+    val nextReviewAt: String? = null,
     val planRevision: Int = 1,
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = CURRENT_WORK_ITEM_SCHEMA_VERSION,
     val createdAt: String = "",
     val lastWorkedAt: String? = null,
     val suspendedUntil: String? = null,
     val cronExpression: String? = null,
     val contactChannel: String? = null,
     val metadata: Map<String, String> = emptyMap(),
+    val pendingWakeReasons: List<WakeReason> = emptyList(),
     val plan: WorkItemPlan? = null,
     val producedKeys: Set<String> = emptySet(),
     val eventCount: Int = 0,
+    val durableState: DurableWorkState = DurableWorkState(),
 ) {
     fun toState(workspacePath: Path): WorkItemState = WorkItemState(
         workItem = WorkItem(
             id = workItemId,
-            kind = runCatching { WorkItemKind.valueOf(kind) }.getOrDefault(WorkItemKind.LONG_TERM_GOAL),
+            kind = WorkItemKind.fromSerialized(kind),
             title = title,
             objective = objective,
             instruction = instruction,
-            status = WorkItemStatus.valueOf(status),
+            status = runCatching { WorkItemStatus.valueOf(status) }.getOrDefault(WorkItemStatus.CREATED),
             health = runCatching { WorkItemHealth.valueOf(health) }.getOrDefault(WorkItemHealth.HEALTHY),
             priority = WorkItemPriority.valueOf(priority),
             plan = plan ?: WorkItemPlan.empty(),
             completionCriteria = completionCriteria,
             deliveryPolicy = runCatching { DeliveryPolicy.valueOf(deliveryPolicy) }.getOrDefault(DeliveryPolicy.IMMEDIATE),
+            reviewPolicy = reviewPolicy,
+            operatorSummary = operatorSummary,
+            lastMeaningfulChangeAt = lastMeaningfulChangeAt?.let { java.time.Instant.parse(it) },
+            lastReviewAt = lastReviewAt?.let { java.time.Instant.parse(it) },
+            nextReviewAt = nextReviewAt?.let { java.time.Instant.parse(it) },
             planRevision = planRevision,
             schemaVersion = schemaVersion,
             createdAt = java.time.Instant.parse(createdAt),
@@ -219,9 +245,11 @@ internal data class WorkItemSnapshot(
             contactChannel = contactChannel,
             workspacePath = workspacePath,
             metadata = metadata,
+            pendingWakeReasons = pendingWakeReasons,
         ),
         producedKeys = producedKeys,
         eventCount = eventCount,
+        durableState = durableState,
     )
 
     companion object {
@@ -236,6 +264,11 @@ internal data class WorkItemSnapshot(
             priority = state.workItem.priority.name,
             completionCriteria = state.workItem.completionCriteria,
             deliveryPolicy = state.workItem.deliveryPolicy.name,
+            reviewPolicy = state.workItem.reviewPolicy,
+            operatorSummary = state.workItem.operatorSummary,
+            lastMeaningfulChangeAt = state.workItem.lastMeaningfulChangeAt?.toString(),
+            lastReviewAt = state.workItem.lastReviewAt?.toString(),
+            nextReviewAt = state.workItem.nextReviewAt?.toString(),
             planRevision = state.workItem.planRevision,
             schemaVersion = state.workItem.schemaVersion,
             createdAt = state.workItem.createdAt.toString(),
@@ -244,9 +277,11 @@ internal data class WorkItemSnapshot(
             cronExpression = state.workItem.cronExpression,
             contactChannel = state.workItem.contactChannel,
             metadata = state.workItem.metadata,
+            pendingWakeReasons = state.workItem.pendingWakeReasons,
             plan = state.workItem.plan,
             producedKeys = state.producedKeys,
             eventCount = state.eventCount,
+            durableState = state.durableState,
         )
     }
 }

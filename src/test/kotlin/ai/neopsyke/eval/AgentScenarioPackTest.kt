@@ -82,6 +82,8 @@ import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.time.Instant
 import java.util.ArrayDeque
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -784,6 +786,144 @@ class AgentScenarioPackTest {
     }
 
     @Test
+    fun scenario_responsibility_creation_requires_multiturn_intake() = runBlocking {
+        val root = Files.createTempDirectory("neopsyke-scenario-responsibility-create")
+        var manager: DurableWorkRuntime? = null
+        var actionControlStore: SqliteActionControlStore? = null
+        try {
+            val plannerLlm = StubChatModelClient().apply {
+                enqueueRawResponseForCallSite(
+                    "input_intent_router",
+                    """{"route":"durable_work","durable_work_target":"responsibility","reasoning":"ongoing responsibility"}"""
+                )
+                enqueueRawResponseForCallSite(
+                    "durable_work_responsibility",
+                    """
+                    {
+                      "operation":"clarify",
+                      "work_item_kind":"RESPONSIBILITY",
+                      "work_item_reference":null,
+                      "title":"Apartment search",
+                      "instruction":null,
+                      "completion_criteria":null,
+                      "priority":"medium",
+                      "cron_expression":null,
+                      "contact_channel":"dashboard",
+                      "operator_summary":"Keep watching Berlin apartments",
+                      "plan_steps":null,
+                      "assistant_response":null,
+                      "clarification_question":"What neighborhoods and budget should I use?",
+                      "responsibility_summary":"Watch for strong apartment matches in Berlin.",
+                      "known_preferences":["Berlin"],
+                      "known_constraints":["Need budget"],
+                      "known_signals_of_success":["Useful shortlist"],
+                      "review_cadence_hint":"daily",
+                      "delivery_hint":"dashboard",
+                      "open_questions":["Need budget"],
+                      "ready_to_create":false,
+                      "reason":"missing budget"
+                    }
+                    """.trimIndent()
+                )
+                enqueueRawResponseForCallSite(
+                    "input_intent_router",
+                    """{"route":"durable_work","durable_work_target":"responsibility","reasoning":"continue responsibility intake"}"""
+                )
+                enqueueRawResponseForCallSite(
+                    "durable_work_responsibility",
+                    """
+                    {
+                      "operation":"create",
+                      "work_item_kind":"RESPONSIBILITY",
+                      "work_item_reference":null,
+                      "title":"Apartment search",
+                      "instruction":"Monitor Berlin apartment listings, prioritize Prenzlauer Berg and Friedrichshain, stay under 2200 EUR, and surface only materially better matches.",
+                      "completion_criteria":"User confirms the responsibility is fulfilled or retired.",
+                      "priority":"high",
+                      "cron_expression":"0 9 * * *",
+                      "contact_channel":"dashboard",
+                      "operator_summary":"Own Berlin apartment monitoring with budget and neighborhood constraints.",
+                      "plan_steps":[
+                        {"id":"scan","description":"Scan fresh apartment listings","acceptance_criteria":"Fresh listings reviewed","grounding_requirement":"required","requires":[],"produces":["matches"],"max_attempts":3},
+                        {"id":"summarize","description":"Summarize only materially better matches","acceptance_criteria":"Digest prepared","grounding_requirement":"not_required","requires":["matches"],"produces":[],"max_attempts":3}
+                      ],
+                      "assistant_response":null,
+                      "clarification_question":null,
+                      "responsibility_summary":"Watch for strong apartment matches in Berlin.",
+                      "known_preferences":["Prenzlauer Berg","Friedrichshain"],
+                      "known_constraints":["Budget under 2200 EUR"],
+                      "known_signals_of_success":["Useful shortlist"],
+                      "review_cadence_hint":"daily",
+                      "delivery_hint":"dashboard",
+                      "open_questions":[],
+                      "ready_to_create":true,
+                      "reason":"enough detail collected"
+                    }
+                    """.trimIndent()
+                )
+            }
+            val instrumentation = RecordingInstrumentation()
+            val outputs = mutableListOf<String>()
+            val config = AgentConfig(
+                planner = PlannerConfig(maxLoopStepsPerInput = 6, maxContinuationPasses = 2),
+                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, allowRuntimePlanFallback = true),
+            )
+            manager = DurableWorkRuntime(
+                config = config.durableWork,
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+                instrumentation = instrumentation,
+            )
+            manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            val actionControlDb = root.resolve("action-control.db")
+            actionControlStore = SqliteActionControlStore(actionControlDb.toString())
+            val motorCortex = buildMotorCortex(
+                output = { outputs.add(it) },
+                config = config,
+                durableWorkGateway = manager,
+            )
+            val agent = buildTestEgo(
+                planner = buildTestHierarchicalPlanner(plannerLlm, config, instrumentation),
+                superego = Superego(
+                    modelClient = StubChatModelClient().apply {
+                        enqueueRawResponse("""{"allow":true}""")
+                        enqueueRawResponse("""{"allow":true}""")
+                    },
+                    config = config,
+                    instrumentation = instrumentation
+                ),
+                motorCortex = motorCortex,
+                config = config,
+                instrumentation = instrumentation,
+                durableWorkGateway = manager,
+                actionControlService = DefaultActionControlService(
+                    config = config.actionControl.copy(dbPath = actionControlDb.toString()),
+                    store = actionControlStore,
+                ) { action, authorization ->
+                    motorCortex.execute(action, config.searchResultCount, authorization)
+                },
+            )
+
+            runAgentWithInput(
+                agent,
+                "Help me keep an eye on apartments in Berlin.\nUse Prenzlauer Berg or Friedrichshain and stay under 2200 EUR.\nexit\n"
+            )
+
+            assertEquals(listOf("ego> What neighborhoods and budget should I use?"), outputs)
+            val staged = actionControlStore.listStagedActions(limit = 10)
+                .firstOrNull { it.actionType == ActionType.DURABLE_WORK_OPERATION }
+            assertNotNull(staged)
+            assertTrue(staged.payload.contains(""""work_item_kind":"RESPONSIBILITY""""))
+            assertTrue(staged.payload.contains("Own Berlin apartment monitoring with budget and neighborhood constraints."))
+            assertTrue(plannerLlm.calls.any { it.options.metadata.callSite == "durable_work_responsibility" })
+        } finally {
+            actionControlStore?.close()
+            manager?.stop()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun scenario_llm_driven_daily_cron_goal_creation() = runBlocking {
         val root = Files.createTempDirectory("neopsyke-scenario-daily-goal")
         var manager: DurableWorkRuntime? = null
@@ -1040,6 +1180,170 @@ class AgentScenarioPackTest {
         val gateEvents = instrumentation.events.filter { it.type == "grounding_gate_review" }
         assertTrue(gateEvents.any { it.data["allow"] == true && it.data["grounding_required"] == false },
             "Expected grounding_gate_review with allow=true and grounding_required=false: $gateEvents")
+    }
+
+    @Test
+    fun scenario_id_impulse_review_selects_responsibility_through_runtime() {
+        val instrumentation = RecordingInstrumentation()
+        val root = Files.createTempDirectory("neopsyke-scenario-id-review")
+        try {
+            val config = AgentConfig(
+                planner = PlannerConfig(maxLoopStepsPerInput = 8, maxContinuationPasses = 1),
+                durableWork = DurableWorkConfig(enabled = true, workspaceRoot = root, allowRuntimePlanFallback = true),
+            )
+            val source = QueueSignalSource()
+            val sensoryCortex = SensoryCortex(config, source)
+            val emittedReviewCues = CopyOnWriteArrayList<DurableWorkCue>()
+            val forwardDurableWorkCues = AtomicBoolean(false)
+            val manager = DurableWorkRuntime(
+                config = config.durableWork,
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+                instrumentation = instrumentation,
+                cueEmitter = { cue ->
+                    emittedReviewCues += cue
+                    if (forwardDurableWorkCues.get()) {
+                        sensoryCortex.offerDurableWorkCue(cue)
+                    }
+                },
+            )
+            manager.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            val responsibilityId = manager.createWorkItem(
+                instruction = "Own apartment hunting and review the market over time",
+                title = "Apartment responsibility",
+                kind = ai.neopsyke.agent.durablework.WorkItemKind.RESPONSIBILITY,
+                operatorSummary = "Review the apartment market and surface materially better options.",
+                planSteps = listOf(
+                    ai.neopsyke.agent.ego.planner.model.DurableWorkPlanStepPayload(
+                        id = "scan",
+                        description = "Review current apartment listings",
+                        acceptanceCriteria = "Listings reviewed",
+                    )
+                ),
+            )
+            manager.applyEventExternal(responsibilityId, ai.neopsyke.agent.durablework.WorkItemEvent.StepStarted(responsibilityId, "scan"))
+            manager.applyEventExternal(responsibilityId, ai.neopsyke.agent.durablework.WorkItemEvent.StepAcceptancePassed(responsibilityId, "scan"))
+            emittedReviewCues.clear()
+            forwardDurableWorkCues.set(true)
+
+            val planner = object : Ego.Planner {
+                override fun decide(trigger: EgoTrigger, context: PlannerContext): EgoDecision =
+                    when (trigger) {
+                        is EgoTrigger.IncomingInput -> EgoDecision.Noop("ignore user input in scenario")
+                        is EgoTrigger.IncomingImpulse -> EgoDecision.FormIntention(
+                            urgency = Urgency.MEDIUM,
+                            intentionKind = IntentionKind.PREPARE,
+                            commitModePreference = CommitMode.POLICY_AUTONOMOUS,
+                            actionType = ActionType.DURABLE_WORK_OPERATION,
+                            payload = """{"command":"review","work_item_id":"$responsibilityId","reason":"be useful"}""",
+                            summary = "Review existing responsibility",
+                        )
+                        is EgoTrigger.DurableWork -> EgoDecision.Noop("durable work cue observed")
+                        is EgoTrigger.ActionFeedback -> EgoDecision.Noop("ignore feedback")
+                        is EgoTrigger.Continuation -> EgoDecision.Noop("ignore continuation")
+                    }
+            }
+            val agent = buildTestEgo(
+                planner = planner,
+                superego = Superego(
+                    modelClient = StubChatModelClient().apply { enqueueRawResponse("""{"allow":true}""") },
+                    config = config,
+                    instrumentation = instrumentation
+                ),
+                motorCortex = buildMotorCortex(output = {}, config = config, durableWorkGateway = manager),
+                config = config,
+                instrumentation = instrumentation,
+                sensoryCortex = sensoryCortex,
+                durableWorkGateway = manager,
+            )
+            val idModule = Id(
+                config = IdConfig(
+                    enabled = true,
+                    pulseIntervalMs = 1000,
+                    triggerThreshold = 0.0,
+                    maxConsecutiveDenials = 5,
+                    backoffPulses = 10,
+                    maxInFlightPulses = 20,
+                    maxPendingImpulses = 1,
+                    needs = mapOf(
+                        "be-useful" to NeedConfig(
+                            description = "test",
+                            growthRate = 0.1,
+                            cooldownPulses = 0,
+                            prompt = "be useful",
+                            responseCurve = ResponseCurveConfig(type = "linear")
+                        )
+                    )
+                ),
+                instrumentation = instrumentation,
+                scope = CoroutineScope(Dispatchers.Unconfined),
+                enqueueImpulse = { false },
+                hasPendingWork = { false },
+            )
+            agent.setId(idModule)
+            val queued = agent.enqueueImpulse(
+                PendingImpulse(
+                    id = 1,
+                    needId = "be-useful",
+                    prompt = "Try something useful.",
+                    tension = 0.9,
+                    rawValue = 0.9,
+                    rootImpulseId = "scenario-id-review-root",
+                    conversationContext = idModule.conversationContext,
+                ),
+                maxPendingImpulses = 1
+            )
+            assertTrue(queued)
+
+            source.offer(
+                CognitiveSignal.StimulusReceived(
+                    ai.neopsyke.agent.model.StimulusEnvelope(
+                        id = ai.neopsyke.agent.model.RootInputIds.next(),
+                        family = ai.neopsyke.agent.model.StimulusFamily.CUE,
+                        source = "id",
+                        content = ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY,
+                        receivedAt = Instant.now(),
+                        conversationContext = idModule.conversationContext,
+                        trustLevel = ai.neopsyke.agent.model.StimulusTrustLevel.TRUSTED_INTERNAL,
+                        provenance = ai.neopsyke.agent.model.Provenances.trustedSystemSignal(
+                            provider = "id",
+                            sourceRef = "scenario-id-review-root",
+                        ),
+                        metadata = mapOf(
+                            ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata.METADATA_CUE_TYPE to
+                                ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY,
+                            ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata.METADATA_ROOT_IMPULSE_ID to
+                                "scenario-id-review-root",
+                        ),
+                    )
+                )
+            )
+            source.offer(RuntimeControlSignal.ExitRequested("test"))
+            kotlinx.coroutines.runBlocking { agent.runInteractive() }
+
+            assertTrue(
+                emittedReviewCues.any {
+                    it.workItemId == responsibilityId &&
+                        it.wakeReasonType == ai.neopsyke.agent.durablework.WakeReasonType.ID_REVIEW
+                },
+                "Expected an ID_REVIEW cue for $responsibilityId, got=${emittedReviewCues.map { "${it.workItemId}:${it.wakeReasonType}" }}"
+            )
+            val state = manager.workItemStatus(responsibilityId)
+            assertNotNull(state)
+            assertTrue(state.durableState.monitor.review.history.isNotEmpty())
+            assertEquals(
+                ai.neopsyke.agent.durablework.WakeReasonType.ID_REVIEW,
+                state.durableState.monitor.review.history.last().wakeReasonType
+            )
+            assertTrue(
+                instrumentation.events.any {
+                    it.type == "id_impulse_completed" && it.data["success"] == true
+                }
+            )
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
     }
 
     // --- AC 26: Volatile-fact grounding enforcement ---

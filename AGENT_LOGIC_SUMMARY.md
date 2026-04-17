@@ -554,14 +554,23 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 
 **Boundary** — Ego uses gateway only for:
 - `pendingWorkSummary()` during Id-driven impulses.
+- `reviewableResponsibilities()` to build the bounded responsibility-review slate for "be useful" planning.
 - `nextWorkFromCue(DurableWorkCue)` when durable work is ready.
 - Durable-work-origin action lifecycle callbacks + `finalizeDurableWorkCycle(rootInputId)`.
 
 **Event-sourced state machine** (`WorkItemStateMachine`):
 - Pure function: `transition(state, event) → (newState, commands)`.
-- `WorkItemStatus`: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`, `STALLED`, `NEEDS_ATTENTION`.
-- Events: Created, PlanGenerated, PlanRevised, StepStarted, StepActionExecuted, StepAcceptancePassed/Failed, StepBlocked/Unblocked, WaitConditionSatisfied/TimedOut, Suspended, Resumed, CronCycleStarted, Completed, Failed, PriorityChanged, Updated, lease/activation lifecycle events, effect-intent lifecycle events.
+- `WorkItemStatus`: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`, `STALLED`, `NEEDS_ATTENTION`, `RETIRED`.
+- `WorkItemKind`: `RECURRENT_TASK` and `RESPONSIBILITY`. The runtime keeps `DurableWork` as the architectural umbrella but the user-facing planner surface splits by kind.
+- Responsibility cycles are open-ended. Exhausting the current plan does not auto-complete or auto-fail a responsibility; review-eligible wakes can rearm the next cycle, while exhausted/error states surface as `NEEDS_ATTENTION` instead of terminal failure.
+- Events: Created, PlanGenerated, PlanRevised, StepStarted, StepActionExecuted, StepAcceptancePassed/Failed, StepBlocked/Unblocked, WaitConditionSatisfied/TimedOut, Suspended, Resumed, CronCycleStarted, Completed, Retired, Failed, PriorityChanged, Updated, lease/activation lifecycle events, delivery/monitor/review lifecycle events, effect-intent lifecycle events.
 - Commands (side effects): EmitWorkReady, ScheduleWakeTimer, CancelWakeTimer, RegisterWaitCondition, ClearWaitCondition, PersistWorkItem, NotifyUser.
+
+**Phase-2 runtime-owned state**:
+- `DurableWorkState` now persists typed delivery, monitor, review, and runtime wake metadata instead of relying on prompt memory.
+- Delivery state tracks pending digest entries, digest windows, last decision, last suppression reason, and the last delivered delta fingerprint.
+- Monitor state tracks source cursors, bounded seen-item records, bounded change history, and review history.
+- Responsibilities carry review policy, `lastReviewAt`, and `nextReviewAt`; recurrent tasks do not pay that extra intake/review overhead by default.
 
 **PlanStep**:
 - `StepStatus`: PENDING → READY → IN_PROGRESS → DONE/BLOCKED/SKIPPED/FAILED.
@@ -572,21 +581,36 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `TimerScheduler`: registers cron expressions or absolute timestamps.
 - Cron-backed work items do not emit initial work-ready on creation; first execution waits for cron wake.
 - Cron cycle restart: when tick arrives after COMPLETED/FAILED, resets plan-step state + clears produced keys.
+- Responsibility review timers are runtime-owned: creation and review completion register `nextReviewAt`, and paused work does not emit overdue review wakes.
+- Review requests are typed. Manual operator reviews emit `MANUAL_REVIEW`; Id-origin "be useful" reviews emit `ID_REVIEW` and record explicit Id-review request/accept/defer events before the wake is coalesced or scheduled.
+- `computeNextWakeAt()` considers `nextReviewAt`, so dashboards/operators see review due dates as the next wake when no earlier cron/wait wake exists.
 - `WaitConditionMonitor`: polls async operations, fires satisfaction events.
 - Work step roots stable per `work:<workItemId>:<stepId>` for thread/scratchpad continuity across wait/resume.
+- Wake handoff is typed. `DurableWorkCue` carries a `WakeReasonType` and detail, and `ActivationStarted` persists the typed wake-reason list into runtime state.
 
 **Durable work activations** use trusted internal automation `ConversationContext`.
+- `WorkContextLoader.buildWorkUnit()` builds an `ActivationContext` with typed wake reasons, review/delivery hints, and runtime facts for the current activation.
 - Channel routing: `WorkContextLoader.buildWorkUnit()` always sets `provider = "durable-work-runtime"` with an empty `channelId` (surface = `AUTOMATION`). `workItem.contactChannel` is carried as a preferred-channel hint in `channel.attributes["preferred_channel"]`, never as a transport address.
 - Delivery: `RoutedConversationOutputGateway.deliver()` trusts the incoming `channelId` only when `surface == DIRECT` (authenticated inbound chat). For `AUTOMATION` contexts it always routes through `DefaultUserContactChannelResolver`, which honors the preferred-channel hint first, then falls back to `channelPriority`/`defaultChannel`, and only returns targets present in `UserContactChannelStatusProvider.availableChannels()` (config-backed, ACK-verified).
 - `contactChannel` is set via `WorkPlanBuilder` on create/update operations from the `contact_channel` planner payload field. Canonical durable-work channel names are user-facing keys from `availableChannels()` (`dashboard`, `telegram`), not transport providers (`webapp`). The planner prompt enumerates currently-available channels and instructs the LLM to map user intent semantically or set null.
 - `ContactChannelPolicy` gates the `durable_work_operation` plugin: only owner-initiated actions (`principal.role == OWNER && origin.source == USER`) may alter `contactChannel`; requested values outside `availableChannels()` are stripped at execute time so other fields (title, cron, instruction) still apply, and a clarification note is appended to the action outcome so the next planning turn can forward it to the user via the normal `contact_user` flow.
-- Context isolation: goal step execution is conversation-independent (a cron-backed goal may fire minutes or months after setup). `Ego.processGoalWork` strips `shortTermContextSummary`, `recentDialogue`, `sessionScratchpadDigest`, and `ambientContext` from the planner context. Long-term recall, lessons, and episodic recall are preserved — they carry durable user preferences and prior execution history.
+- Context isolation: durable-work step execution is conversation-independent (a recurrent task or responsibility review may fire minutes or months after setup). `Ego.processGoalWork` strips `shortTermContextSummary`, `recentDialogue`, `sessionScratchpadDigest`, and `ambientContext` from the planner context. Long-term recall, lessons, and episodic recall are preserved — they carry durable user preferences and prior execution history.
 - Memory recall does not receive ambient context. Recall cues are derived from the trigger (step description for durable work, explicit queries for continuations) and episodic vector cues.
 - Scratchpads created when work is actually processed, not when cue ingested.
 - Durable-work-origin `WAITING` without async handles → contract violation.
 - Activation journal records `STARTED`, `STEP_SELECTED`, `CONTEXT_MATERIALIZED`, `NEXT_WAKE_SCHEDULED`, `FINISHED`, `RECOVERED`.
 - Mutating durable-work actions are guarded by `WorkEffectLedger` (`effectIntentId = workItemId + planRevision + stepId + logicalEffectKey`) and duplicate confirmed effects are blocked before dispatch.
-- Persist: `goal-events.jsonl`, `goal.json`, `goal-snapshot.json`, workspace artifacts.
+- Event history uses segmented JSONL rollover for long-lived workloads; overflow segments are appended into `goal-events.archive.jsonl`, and replay/restoration reads the archive plus retained segments plus the current segment.
+- Persist: `goal-events.jsonl`, `goal-events.archive.jsonl`, `goal.json`, `goal-snapshot.json`, workspace artifacts.
+
+**Planner split and operator surface**:
+- `InputIntentRouter` remains the only semantic router. When it returns `durable_work`, it now also returns a typed durable-work target: `GENERIC`, `RECURRENT_TASK`, or `RESPONSIBILITY`.
+- `InputPlanner` keeps the same route → grounding → L2 dispatch order and then dispatches deterministically to the matching durable-work planner profile.
+- LLM lane config now exposes `durable_work_generic`, `durable_work_recurrent_task`, and `durable_work_responsibility`; the responsibility lane can use a larger intake prompt budget than the generic/recurrent paths.
+- `WorkPlanBuilder` keeps one canonical `durable_work_operation` action boundary but now supports `review` and `retire` in addition to the phase-1 lifecycle operations.
+- Responsibility creation uses a bounded thread-scoped intake draft; the draft stays inside Ego until `CREATE` succeeds and never persists into runtime state as a live work item.
+- Id remains impulse-only. Ego injects a bounded reviewable-responsibility slate into the impulse planner context and can translate one selected responsibility back into a typed durable-work `review` operation.
+- Successful `durable_work_operation` executions report `TASK_PROGRESS`, so Id lifecycle tracking can treat accepted durable-work review/progress actions as satisfying "be useful" work.
 
 ---
 
@@ -604,7 +628,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `website_fetch` — Fetch URL content. Effect: OBSERVE. Capability: GATHERS_EVIDENCE.
 - `reflect_internal` — Internal durable-memory action. Effect: OBSERVE. Direct+autonomous commit.
 - `reflect_evidence` — Evidence-bound reflection. Effect: OBSERVE.
-- `durable_work_operation` — Durable work lifecycle (create/status/list/pause/resume/delete/revise/reprioritize). Effect: CONTROL_PLANE. Create supports optional `cron_expression`.
+- `durable_work_operation` — Durable work lifecycle for recurrent tasks and responsibilities (`create`, `update`, `status`, `list`, `review`, `pause`, `resume`, `reprioritize`, `complete`, `retire`, `delete`, `delete_all`, `revise_plan`). Effect: CONTROL_PLANE. Create supports optional `cron_expression`.
 - `email_send` — Microsoft Graph adapter. Disabled unless env config present.
 - `gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events` — Native Google read-only.
 

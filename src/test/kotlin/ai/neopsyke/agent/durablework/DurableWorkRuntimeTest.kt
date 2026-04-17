@@ -175,6 +175,244 @@ class DurableWorkRuntimeTest {
     }
 
     @Test
+    fun `responsibility review remains reviewable and emits manual review wake`() {
+        val root = Files.createTempDirectory("psyke-pm-responsibility-review")
+        try {
+            val signals = CopyOnWriteArrayList<DurableWorkCue>()
+            val manager = DurableWorkRuntime(
+                config = testConfig(root),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Keep tracking better Berlin apartments over time",
+                title = "Apartment search",
+                operatorSummary = "Own apartment hunting and surface materially better options.",
+                kind = WorkItemKind.RESPONSIBILITY,
+            )
+
+            val state = manager.workItemStatus(id)
+            assertNotNull(state)
+            assertEquals(WorkItemKind.RESPONSIBILITY, state.workItem.kind)
+            assertTrue(state.workItem.reviewPolicy.enabled)
+            assertNotNull(state.workItem.nextReviewAt)
+
+            val reviewable = manager.reviewableResponsibilities(limit = 8)
+            assertEquals(listOf(id), reviewable.map { it.workItemId })
+
+            val result = manager.executeOperation(
+                DurableWorkOperationRequest(
+                    operation = DurableWorkOperation.REVIEW,
+                    workItemId = id,
+                    reason = "manual audit",
+                )
+            )
+
+            assertTrue(result.success)
+            val cue = signals.last()
+            assertEquals(id, cue.workItemId)
+            assertEquals(WakeReasonType.MANUAL_REVIEW, cue.wakeReasonType)
+            assertEquals("manual audit", cue.wakeReasonDetail)
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `retired responsibility leaves the reviewable slate`() {
+        val root = Files.createTempDirectory("psyke-pm-responsibility-retire")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Own weekly project triage",
+                title = "Project triage",
+                kind = WorkItemKind.RESPONSIBILITY,
+            )
+            assertEquals(listOf(id), manager.reviewableResponsibilities(limit = 8).map { it.workItemId })
+
+            val result = manager.executeOperation(
+                DurableWorkOperationRequest(
+                    operation = DurableWorkOperation.RETIRE,
+                    workItemId = id,
+                    reason = "superseded",
+                )
+            )
+
+            assertTrue(result.success)
+            val state = manager.workItemStatus(id)
+            assertNotNull(state)
+            assertEquals(WorkItemStatus.RETIRED, state.workItem.status)
+            assertTrue(manager.reviewableResponsibilities(limit = 8).isEmpty())
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `responsibility remains ongoing after a review cycle and id review rearms it`() {
+        val root = Files.createTempDirectory("psyke-pm-responsibility-rearm")
+        try {
+            val signals = CopyOnWriteArrayList<DurableWorkCue>()
+            val manager = DurableWorkRuntime(
+                config = testConfig(root),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Own the apartment search over time",
+                title = "Apartment responsibility",
+                kind = WorkItemKind.RESPONSIBILITY,
+                planSteps = listOf(
+                    DurableWorkPlanStepPayload(
+                        id = "scan",
+                        description = "Scan the current apartment market",
+                        acceptanceCriteria = "Current listings reviewed",
+                    )
+                ),
+            )
+
+            manager.applyEventExternal(id, WorkItemEvent.StepStarted(id, "scan"))
+            manager.applyEventExternal(id, WorkItemEvent.StepAcceptancePassed(id, "scan"))
+
+            val afterCycle = manager.workItemStatus(id)
+            assertNotNull(afterCycle)
+            assertEquals(WorkItemStatus.ACTIVE, afterCycle.workItem.status)
+            assertNull(afterCycle.nextRunnableStep())
+            assertEquals(listOf(id), manager.reviewableResponsibilities(limit = 8).map { it.workItemId })
+
+            val result = manager.executeOperation(
+                DurableWorkOperationRequest(
+                    operation = DurableWorkOperation.REVIEW,
+                    workItemId = id,
+                    reason = "be useful",
+                    reviewSource = ReviewRequestSource.ID,
+                )
+            )
+
+            assertTrue(result.success)
+            val cue = signals.last()
+            assertEquals(WakeReasonType.ID_REVIEW, cue.wakeReasonType)
+            assertEquals("scan", cue.stepId)
+            val rearmed = manager.workItemStatus(id)
+            assertNotNull(rearmed)
+            assertEquals(WorkItemStatus.ACTIVE, rearmed.workItem.status)
+            assertEquals(listOf(StepStatus.READY), rearmed.workItem.plan.steps.map { it.status })
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `paused responsibility does not emit overdue review wake`() {
+        val root = Files.createTempDirectory("psyke-pm-responsibility-pause-review")
+        try {
+            val signals = CopyOnWriteArrayList<DurableWorkCue>()
+            val manager = DurableWorkRuntime(
+                config = testConfig(root).copy(
+                    monitoring = MonitoringConfig(overdueResponsibilityReviewIntervalMs = 50)
+                ),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+                cueEmitter = { cue -> signals += cue },
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem(
+                instruction = "Keep an eye on repository health over time",
+                title = "Repository watch",
+                kind = WorkItemKind.RESPONSIBILITY,
+            )
+            val state = manager.workItemStatus(id)
+            assertNotNull(state)
+            val reviewAt = assertNotNull(state.workItem.nextReviewAt)
+
+            manager.executeOperation(
+                DurableWorkOperationRequest(
+                    operation = DurableWorkOperation.PAUSE,
+                    workItemId = id,
+                    reason = "paused for testing",
+                )
+            )
+
+            val onTimerWake = DurableWorkRuntime::class.java.getDeclaredMethod(
+                "onTimerWake", String::class.java, Long::class.javaPrimitiveType
+            )
+            onTimerWake.isAccessible = true
+            onTimerWake.invoke(manager, id, reviewAt.toEpochMilli())
+
+            assertTrue(signals.none { it.workItemId == id && it.reason == "review_due" })
+            assertTrue(manager.reviewableResponsibilities(limit = 8).isEmpty())
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `delivery decision events preserve digest queue and suppression state`() {
+        val root = Files.createTempDirectory("psyke-pm-delivery-state")
+        try {
+            val manager = DurableWorkRuntime(
+                config = testConfig(root),
+                store = WorkItemStore(root),
+                planner = DeterministicWorkPlanBuilder(),
+            )
+            manager.start(testScope())
+
+            val id = manager.createWorkItem("Track notable changes")
+            manager.applyEventExternal(id, WorkItemEvent.ReportWindowOpened(id, "digest-window-1"))
+            manager.applyEventExternal(
+                id,
+                WorkItemEvent.DeliveryDecisionRecorded(
+                    workItemId = id,
+                    decision = DeliveryDecision.QUEUE_FOR_DIGEST,
+                    fingerprint = "fp-1",
+                    summary = "delta one",
+                )
+            )
+            manager.applyEventExternal(
+                id,
+                WorkItemEvent.DeliverySuppressed(
+                    workItemId = id,
+                    reason = DeliverySuppressionReason.NO_MEANINGFUL_CHANGE,
+                    summary = "quiet cycle",
+                )
+            )
+
+            val state = manager.workItemStatus(id)
+            assertNotNull(state)
+            assertEquals(DeliveryDecision.QUEUE_FOR_DIGEST, state.durableState.delivery.lastDecision)
+            assertEquals(DeliverySuppressionReason.NO_MEANINGFUL_CHANGE, state.durableState.delivery.lastSuppressionReason)
+            assertEquals("digest-window-1", state.durableState.delivery.activeDigestWindow?.windowKey)
+            assertEquals(listOf("delta one"), state.durableState.delivery.activeDigestWindow?.itemKeys)
+            assertEquals(listOf("delta one"), state.durableState.delivery.pendingEntries.map { it.summary })
+
+            manager.stop()
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `nextWorkFromCue creates goal session and returns work unit`() {
         val root = Files.createTempDirectory("psyke-pm-work")
         try {
@@ -220,7 +458,7 @@ class DurableWorkRuntimeTest {
             // Verify the pending wake reason was captured
             val state = manager.workItemStatus(id)
             assertNotNull(state)
-            assertTrue(state.workItem.pendingWakeReasons.contains("resume"))
+            assertTrue(state.workItem.pendingWakeReasons.any { it.detail == "resume" })
 
             manager.stop()
         } finally {

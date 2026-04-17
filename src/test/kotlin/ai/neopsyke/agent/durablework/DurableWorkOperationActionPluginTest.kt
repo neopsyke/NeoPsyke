@@ -14,6 +14,7 @@ import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
@@ -341,6 +342,56 @@ class DurableWorkOperationActionPluginTest {
         )
 
         assertEquals("dashboard", capturedRequest?.contactChannel)
+    }
+
+    @Test
+    fun `id-origin review command is marked as id review`() = runBlocking {
+        var capturedRequest: DurableWorkOperationRequest? = null
+        val gateway = object : DurableWorkGateway by NoopDurableWorkGateway {
+            override fun executeOperation(request: DurableWorkOperationRequest): DurableWorkOperationResult {
+                capturedRequest = request
+                return DurableWorkOperationResult(true, "review requested", "resp-1")
+            }
+        }
+        val plugin = pluginWithGateway(gateway)
+
+        plugin.execute(
+            PendingAction(
+                id = 3L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.DURABLE_WORK_OPERATION,
+                payload = """{"command":"review","work_item_id":"resp-1","reason":"be useful"}""",
+                summary = "review responsibility",
+                origin = ActionOrigin.id("be-useful", "impulse-1"),
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            ),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals(ReviewRequestSource.ID, capturedRequest?.reviewSource)
+    }
+
+    @Test
+    fun `successful durable work operations report task progress`() = runBlocking {
+        val gateway = object : DurableWorkGateway by NoopDurableWorkGateway {
+            override fun executeOperation(request: DurableWorkOperationRequest): DurableWorkOperationResult =
+                DurableWorkOperationResult(true, "review requested", "resp-1")
+        }
+        val plugin = pluginWithGateway(gateway)
+
+        val outcome = plugin.execute(
+            PendingAction(
+                id = 4L,
+                urgency = Urgency.MEDIUM,
+                type = ActionType.DURABLE_WORK_OPERATION,
+                payload = """{"command":"review","work_item_id":"resp-1","reason":"be useful"}""",
+                summary = "review responsibility",
+                groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            ),
+            ActionExecutionContext(searchResultCount = 0),
+        )
+
+        assertEquals(setOf(ActionEffect.TASK_PROGRESS), outcome.effects)
     }
 
     private fun pluginWithGateway(gateway: DurableWorkGateway) = DurableWorkOperationActionPlugin(

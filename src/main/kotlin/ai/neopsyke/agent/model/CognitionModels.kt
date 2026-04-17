@@ -78,6 +78,7 @@ data class DurableWorkPlanStepSnapshot(
 
 data class DurableWorkItemSnapshot(
     val workItemId: String,
+    val kind: ai.neopsyke.agent.durablework.WorkItemKind = ai.neopsyke.agent.durablework.WorkItemKind.RECURRENT_TASK,
     val title: String,
     val instruction: String,
     val completionCriteria: String,
@@ -123,6 +124,8 @@ data class PlannerContext(
     val goalWorkSummary: String = "",
     val goalIndex: Map<Int, String> = emptyMap(),
     val goalSnapshots: Map<String, DurableWorkItemSnapshot> = emptyMap(),
+    val reviewableResponsibilitySummary: String = "",
+    val reviewableResponsibilityIndex: Map<Int, String> = emptyMap(),
     val groundingMetadata: GroundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
 )
 

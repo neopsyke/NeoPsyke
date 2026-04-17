@@ -1,5 +1,11 @@
 package ai.neopsyke.agent.ego.planner.model
 
+enum class DurableWorkRouteTarget {
+    GENERIC,
+    RECURRENT_TASK,
+    RESPONSIBILITY,
+}
+
 /**
  * Typed routing result from InputIntentRouter.
  * Each variant selects the L2 sub-planner that handles the input.
@@ -12,7 +18,10 @@ sealed interface InputRoute {
 
     data class MultiStepTask(val reasoning: String) : InputRoute
 
-    data class DurableWork(val reasoning: String) : InputRoute
+    data class DurableWork(
+        val reasoning: String,
+        val target: DurableWorkRouteTarget = DurableWorkRouteTarget.GENERIC,
+    ) : InputRoute
 
     data class ClarificationNeeded(val question: String) : InputRoute
 

@@ -20,12 +20,15 @@ import ai.neopsyke.agent.ego.planner.model.WorkItemReference
 import ai.neopsyke.agent.ego.planner.model.SerializedDurableWorkCommand
 import ai.neopsyke.agent.durablework.DurableWorkOperation
 import ai.neopsyke.agent.durablework.DurableWorkOperationRequest
+import ai.neopsyke.agent.durablework.ReviewRequestSource
 import ai.neopsyke.agent.model.ActionEffectClass
+import ai.neopsyke.agent.model.ActionEffect
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.InstructionTrust
+import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
 import mu.KotlinLogging
@@ -43,10 +46,10 @@ class DurableWorkOperationActionPlugin(
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.DURABLE_WORK_OPERATION,
         dispatchable = context.config.durableWork.enabled,
-        plannerDescription = "durable_work_operation: create, update, status, list, pause, resume, reprioritize, complete, delete, delete_all, or revise_plan persistent goals, including recurring cron-backed reminders.",
+        plannerDescription = "durable_work_operation: create, update, status, list, review, pause, resume, reprioritize, complete, retire, delete, delete_all, or revise_plan recurrent tasks and responsibilities.",
         payloadGuidance = "Strict JSON using the typed DurableWorkCommand contract: command, optional goal_reference, and command-specific fields.",
         payloadSchemaExample = """
-            {"command":"create","title":"Weather reminder","instruction":"Check the current weather and remind me every time this goal runs.","priority":"HIGH","completion_criteria":"A weather reminder is delivered for the current scheduled run.","cron_expression":"*/5 * * * *"}
+            {"command":"create","work_item_kind":"RECURRENT_TASK","title":"Weather reminder","instruction":"Check the current weather and remind me every time this recurrent task runs.","priority":"HIGH","completion_criteria":"A weather reminder is delivered for the current scheduled run.","cron_expression":"*/5 * * * *"}
         """.trimIndent(),
         requiresFollowUpThought = false,
         followUpPrefix = "Goal operation completed.",
@@ -76,7 +79,7 @@ class DurableWorkOperationActionPlugin(
                 ruleId = "durable_work_operation_invalid_payload",
                 reason = "DURABLE_WORK_OPERATION payload must follow the typed DurableWorkCommand contract with a command field.",
             )
-        return if (toRequest(command) == null) {
+        return if (toRequest(command, null) == null) {
             ActionDeterministicReview(
                 allow = false,
                 ruleId = "durable_work_operation_invalid_command",
@@ -126,7 +129,7 @@ class DurableWorkOperationActionPlugin(
                 executionStatus = ActionExecutionStatus.FAILED,
             )
         val (command, rejectionNote) = applyChannelPolicy(parsed, action)
-        val request = toRequest(command)
+        val request = toRequest(command, action)
             ?: return ActionOutcome(
                 statusSummary = "Goal operation payload is missing required typed fields.",
                 executionStatus = ActionExecutionStatus.FAILED,
@@ -141,6 +144,7 @@ class DurableWorkOperationActionPlugin(
         return ActionOutcome(
             statusSummary = summary,
             executionStatus = if (result.success) ActionExecutionStatus.SUCCESS else ActionExecutionStatus.FAILED,
+            effects = if (result.success) setOf(ActionEffect.TASK_PROGRESS) else emptySet(),
         )
     }
 
@@ -211,16 +215,18 @@ class DurableWorkOperationActionPlugin(
             mapper.readValue<SerializedDurableWorkCommand>(raw).toDurableWorkCommand()
         }.getOrNull()
 
-    private fun toRequest(command: DurableWorkCommand): DurableWorkOperationRequest? {
+    private fun toRequest(command: DurableWorkCommand, action: PendingAction?): DurableWorkOperationRequest? {
         return when (command) {
             is DurableWorkCommand.Create -> DurableWorkOperationRequest(
                 operation = DurableWorkOperation.CREATE,
+                workItemKind = command.workItemKind,
                 title = command.title,
                 instruction = command.instruction,
                 priority = command.priority,
                 completionCriteria = command.completionCriteria,
                 cronExpression = command.cronExpression,
                 contactChannel = command.contactChannel,
+                operatorSummary = command.operatorSummary,
                 planSteps = command.planSteps,
             )
             is DurableWorkCommand.List -> DurableWorkOperationRequest(operation = DurableWorkOperation.LIST)
@@ -236,9 +242,24 @@ class DurableWorkOperationActionPlugin(
                 operation = DurableWorkOperation.RESUME,
                 workItemId = resolvedWorkItemId(command.reference) ?: return null,
             )
+            is DurableWorkCommand.Review -> DurableWorkOperationRequest(
+                operation = DurableWorkOperation.REVIEW,
+                workItemId = resolvedWorkItemId(command.reference) ?: return null,
+                reason = command.reason,
+                reviewSource = if (action?.origin?.source == OriginSource.ID) {
+                    ReviewRequestSource.ID
+                } else {
+                    ReviewRequestSource.MANUAL
+                },
+            )
             is DurableWorkCommand.Complete -> DurableWorkOperationRequest(
                 operation = DurableWorkOperation.COMPLETE,
                 workItemId = resolvedWorkItemId(command.reference) ?: return null,
+            )
+            is DurableWorkCommand.Retire -> DurableWorkOperationRequest(
+                operation = DurableWorkOperation.RETIRE,
+                workItemId = resolvedWorkItemId(command.reference) ?: return null,
+                reason = command.reason,
             )
             is DurableWorkCommand.Delete -> DurableWorkOperationRequest(
                 operation = DurableWorkOperation.DELETE,
@@ -254,6 +275,7 @@ class DurableWorkOperationActionPlugin(
                 completionCriteria = command.completionCriteria,
                 cronExpression = command.cronExpression,
                 contactChannel = command.contactChannel,
+                operatorSummary = command.operatorSummary,
             )
             is DurableWorkCommand.RevisePlan -> DurableWorkOperationRequest(
                 operation = DurableWorkOperation.REVISE_PLAN,
