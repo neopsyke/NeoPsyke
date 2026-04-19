@@ -3,7 +3,7 @@ package ai.neopsyke.agent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
-import ai.neopsyke.agent.cortex.sensory.DurableWorkCue
+import ai.neopsyke.agent.cortex.sensory.AssignmentCue
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
 import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
@@ -243,7 +243,7 @@ class SensoryCortexTest {
     }
 
     @Test
-    fun `perceptual appraiser distinguishes id cues from goal-runtime cues`() {
+    fun `perceptual appraiser distinguishes id cues from assignment-runtime cues`() {
         val idCue = StimulusEnvelope(
             id = RootInputIds.next(),
             family = StimulusFamily.CUE,
@@ -253,19 +253,19 @@ class SensoryCortexTest {
             trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
             metadata = mapOf(CognitiveCueMetadata.METADATA_CUE_TYPE to CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY),
         )
-        val goalCue = DurableWorkCue(
-            workItemId = "goal-1",
+        val assignmentCue = AssignmentCue(
+            workItemId = "assignment-1",
             stepId = "step-1",
             reason = "resume",
         ).toStimulus()
 
         val appraiser = PerceptualAppraiser()
         val idPercept = appraiser.appraise(idCue)
-        val goalPercept = appraiser.appraise(goalCue)
+        val assignmentPercept = appraiser.appraise(assignmentCue)
 
         assertEquals(PerceptFamily.DRIVE_ACTIVATION, idPercept.family)
-        assertEquals(PerceptFamily.STATE_CHANGE, goalPercept.family)
-        assertEquals(goalCue.id, goalPercept.rootStimulusId)
+        assertEquals(PerceptFamily.STATE_CHANGE, assignmentPercept.family)
+        assertEquals(assignmentCue.id, assignmentPercept.rootStimulusId)
     }
 
     @Test

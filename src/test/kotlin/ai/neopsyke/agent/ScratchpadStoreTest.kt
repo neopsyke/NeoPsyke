@@ -10,7 +10,7 @@ import ai.neopsyke.agent.model.GroundingSource
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
 import ai.neopsyke.agent.model.Provenances
-import ai.neopsyke.agent.durablework.DurableWorkActivation
+import ai.neopsyke.agent.assignments.AssignmentActivation
 import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
@@ -224,13 +224,13 @@ class ScratchpadStoreTest {
     }
 
     @Test
-    fun `goal work creates thread-scoped workspace`() {
+    fun `assignment work creates thread-scoped workspace`() {
         val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 1))
         val root = "work:alpha:step-1"
 
-        val created = store.ensureForGoalWork(
-            DurableWorkActivation(
-                workItemId = "goal-alpha",
+        val created = store.ensureForAssignment(
+            AssignmentActivation(
+                workItemId = "assignment-alpha",
                 stepId = "step-1",
                 rootInputId = root,
                 stepDescription = "Verify pricing",
@@ -238,14 +238,14 @@ class ScratchpadStoreTest {
                 workingContext = "Previous attempt found conflicting pages",
                 conversationContext = ConversationContext.default(),
                 wakeReason = "timer",
-                groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.DURABLE_WORK_STEP_POLICY),
+                groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.ASSIGNMENT_STEP_POLICY),
             )
         )
 
         val summary = store.promptSummary(root, maxTokens = 400)
         assertTrue(created)
-        assertTrue(summary.contains("Goal step"))
-        assertTrue(summary.contains("Goal context"))
+        assertTrue(summary.contains("Assignment step"))
+        assertTrue(summary.contains("Assignment context"))
     }
 
     @Test
@@ -382,7 +382,7 @@ class ScratchpadStoreTest {
         val store = ScratchpadStore(ScratchpadConfig(enabled = true, activationMinPlanSteps = 3))
         val root = "root-evolving"
         store.ensureForInput(
-            PendingInput(id = 1, content = "help with goal", rootInputId = root, receivedAtMs = 300L)
+            PendingInput(id = 1, content = "help with assignment", rootInputId = root, receivedAtMs = 300L)
         )
 
         val firstActivation = store.recordPlan(root, "Quick check", listOf("Look it up"))
@@ -436,7 +436,7 @@ class ScratchpadStoreTest {
     // ── Digest tests ──
 
     @Test
-    fun `captureDigest produces entry with goal and section index`() {
+    fun `captureDigest produces entry with assignment and section index`() {
         val store = ScratchpadStore(
             ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
         )
@@ -462,7 +462,7 @@ class ScratchpadStoreTest {
         val entry = store.captureDigest(root, "session-1")
 
         assertTrue(entry != null)
-        assertEquals("Find pricing", entry.goal)
+        assertEquals("Find pricing", entry.assignment)
         assertTrue(entry.sectionIndex.size >= 3) // Request, Plan, web_search_result
         assertTrue(entry.keyEvidence.isNotEmpty())
         assertTrue(entry.sectionIndex.any { it.startsWith("Plan") })
@@ -595,7 +595,7 @@ class ScratchpadStoreTest {
             ScratchpadConfig(enabled = true, activationMinPlanSteps = 1, digestMaxEntries = 4)
         )
         store.ensureForInput(
-            PendingInput(id = 1, content = "active migration goal", rootInputId = "root-active", receivedAtMs = 10L)
+            PendingInput(id = 1, content = "active migration assignment", rootInputId = "root-active", receivedAtMs = 10L)
         )
         store.ensureForInput(
             PendingInput(id = 2, content = "resolved docs refresh", rootInputId = "root-digest", receivedAtMs = 20L)
@@ -605,7 +605,7 @@ class ScratchpadStoreTest {
         val activeWorkItems = store.activeGoalSignals()
         val resolvedGoals = store.recentResolvedGoalSignals()
 
-        assertTrue(activeWorkItems.contains("active migration goal"))
+        assertTrue(activeWorkItems.contains("active migration assignment"))
         assertTrue(resolvedGoals.any { it.contains("resolved docs refresh") })
     }
 }

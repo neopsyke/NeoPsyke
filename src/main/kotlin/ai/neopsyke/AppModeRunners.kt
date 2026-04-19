@@ -10,14 +10,14 @@ import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
-import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
+import ai.neopsyke.agent.ego.planner.input.DirectResponder
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
-import ai.neopsyke.agent.ego.planner.input.WorkPlanBuilder
+import ai.neopsyke.agent.ego.planner.input.AssignmentCommandBuilder
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
 import ai.neopsyke.agent.ego.planner.lane.ProgressionPlanner
-import ai.neopsyke.agent.ego.planner.lane.DurableWorkLanePlanner
+import ai.neopsyke.agent.ego.planner.lane.AssignmentLanePlanner
 import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
 import ai.neopsyke.agent.ego.planner.lane.InputPlanner
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
@@ -1182,22 +1182,22 @@ internal object AppModeRunners {
                                                         runtime.engine
                                                     }
                                                     val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine)
-                                                    if (cliOptions?.clearDurableWork == true) {
-                                                        executeDurableWorkClear(config, instrumentation)
+                                                    if (cliOptions?.clearAssignment == true) {
+                                                        executeAssignmentClear(config, instrumentation)
                                                     }
-                                                    val durableWorkRuntime = if (config.durableWork.enabled) {
-                                                        ai.neopsyke.agent.durablework.DurableWorkRuntime(
-                                                            config = config.durableWork,
-                                                            store = ai.neopsyke.agent.durablework.WorkItemStore(config.durableWork.workspaceRoot),
-                                                            planner = ai.neopsyke.agent.durablework.DeterministicWorkPlanBuilder(),
-                                                            verifier = ai.neopsyke.agent.durablework.LlmWorkStepVerifier(plannerClient, config),
+                                                    val assignmentRuntime = if (config.assignment.enabled) {
+                                                        ai.neopsyke.agent.assignments.AssignmentRuntime(
+                                                            config = config.assignment,
+                                                            store = ai.neopsyke.agent.assignments.WorkItemStore(config.assignment.workspaceRoot),
+                                                            planner = ai.neopsyke.agent.assignments.DeterministicAssignmentPlanBuilder(),
+                                                            verifier = ai.neopsyke.agent.assignments.LlmWorkStepVerifier(plannerClient, config),
                                                             instrumentation = instrumentation,
-                                                            cueEmitter = sensoryCortex::offerDurableWorkCue,
+                                                            cueEmitter = sensoryCortex::offerAssignmentCue,
                                                         ).also { it.start(agentScope) }
                                                     } else {
                                                         null
                                                     }
-                                                    dashboardServer?.durableWorkRuntime = durableWorkRuntime
+                                                    dashboardServer?.assignmentRuntime = assignmentRuntime
                                                     var plannerNoopCount = 0
                                                     var plannerOutputRepairedCount = 0
                                                     val plannerLaneClientResolver = buildPlannerLaneModelClientResolver(
@@ -1293,8 +1293,8 @@ internal object AppModeRunners {
                                                         logbookSummarizer = logbookSummarizer,
                                                         webSearchActionHandler = webSearchActionHandler,
                                                         fetchTool = activeFetchTool,
-                                                        durableWorkGateway = durableWorkRuntime
-                                                            ?: ai.neopsyke.agent.durablework.NoopDurableWorkGateway,
+                                                        assignmentGateway = assignmentRuntime
+                                                            ?: ai.neopsyke.agent.assignments.NoopAssignmentGateway,
                                                         actionControlServiceFactory = { motorCortex ->
                                                             val rawService = actionControlStore?.let { store ->
                                                                 DefaultActionControlService(
@@ -1445,7 +1445,7 @@ internal object AppModeRunners {
                                                             shutdownGuard.close()
                                                         }
                                                         } } finally {
-                                                            durableWorkRuntime?.stop()
+                                                            assignmentRuntime?.stop()
                                                             approvalRuntime?.close()
                                                             egoDispatcher.close()
                                                         }
@@ -1753,17 +1753,17 @@ internal object AppModeRunners {
                                                     runtime.engine
                                                 }
                                                 val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine2)
-                                                if (cliOptions.clearDurableWork) {
-                                                    executeDurableWorkClear(config, instrumentation)
+                                                if (cliOptions.clearAssignment) {
+                                                    executeAssignmentClear(config, instrumentation)
                                                 }
-                                                val durableWorkRuntime = if (config.durableWork.enabled) {
-                                                    ai.neopsyke.agent.durablework.DurableWorkRuntime(
-                                                        config = config.durableWork,
-                                                        store = ai.neopsyke.agent.durablework.WorkItemStore(config.durableWork.workspaceRoot),
-                                                        planner = ai.neopsyke.agent.durablework.DeterministicWorkPlanBuilder(),
-                                                        verifier = ai.neopsyke.agent.durablework.LlmWorkStepVerifier(plannerClient, config),
+                                                val assignmentRuntime = if (config.assignment.enabled) {
+                                                    ai.neopsyke.agent.assignments.AssignmentRuntime(
+                                                        config = config.assignment,
+                                                        store = ai.neopsyke.agent.assignments.WorkItemStore(config.assignment.workspaceRoot),
+                                                        planner = ai.neopsyke.agent.assignments.DeterministicAssignmentPlanBuilder(),
+                                                        verifier = ai.neopsyke.agent.assignments.LlmWorkStepVerifier(plannerClient, config),
                                                         instrumentation = instrumentation,
-                                                        cueEmitter = sensoryCortex::offerDurableWorkCue,
+                                                        cueEmitter = sensoryCortex::offerAssignmentCue,
                                                     ).also { it.start(agentScope) }
                                                 } else {
                                                     null
@@ -1841,8 +1841,8 @@ internal object AppModeRunners {
                                                     logbookSummarizer = logbookSummarizer,
                                                     webSearchActionHandler = webSearchActionHandler,
                                                     fetchTool = activeFetchTool,
-                                                    durableWorkGateway = durableWorkRuntime
-                                                        ?: ai.neopsyke.agent.durablework.NoopDurableWorkGateway,
+                                                    assignmentGateway = assignmentRuntime
+                                                        ?: ai.neopsyke.agent.assignments.NoopAssignmentGateway,
                                                     actionControlServiceFactory = { motorCortex ->
                                                         val rawService = actionControlStore?.let { store ->
                                                             DefaultActionControlService(
@@ -1973,7 +1973,7 @@ internal object AppModeRunners {
                                                     exitProcess(exitCode)
 
                                                     } } finally {
-                                                        durableWorkRuntime?.stop()
+                                                        assignmentRuntime?.stop()
                                                         egoDispatcher.close()
                                                     }
                                                 }
@@ -2637,35 +2637,35 @@ internal object AppModeRunners {
         }
     }
 
-    private fun executeDurableWorkClear(
+    private fun executeAssignmentClear(
         config: AgentConfig,
         instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
     ) {
-        val goalsRoot = config.durableWork.workspaceRoot
-        if (!java.nio.file.Files.isDirectory(goalsRoot)) {
-            output.info("Goals workspace does not exist; nothing to clear.")
+        val assignmentsRoot = config.assignment.workspaceRoot
+        if (!java.nio.file.Files.isDirectory(assignmentsRoot)) {
+            output.info("Assignments workspace does not exist; nothing to clear.")
             return
         }
         try {
             var deleted = 0
-            java.nio.file.Files.list(goalsRoot).use { stream ->
-                stream.filter { java.nio.file.Files.isDirectory(it) }.forEach { goalDir ->
-                    java.nio.file.Files.walk(goalDir)
+            java.nio.file.Files.list(assignmentsRoot).use { stream ->
+                stream.filter { java.nio.file.Files.isDirectory(it) }.forEach { assignmentDir ->
+                    java.nio.file.Files.walk(assignmentDir)
                         .sorted(Comparator.reverseOrder())
                         .forEach { java.nio.file.Files.deleteIfExists(it) }
                     deleted++
                 }
             }
-            output.info("Goals cleared ($deleted goal(s) removed).")
-            logger.info { "CLI --clear-goals: $deleted goal workspace(s) removed from $goalsRoot." }
+            output.info("Assignments cleared ($deleted assignment(s) removed).")
+            logger.info { "CLI --clear-assignments: $deleted assignment workspace(s) removed from $assignmentsRoot." }
             instrumentation.emit(
                 ai.neopsyke.instrumentation.AgentEvents.warning(
-                    "Goals cleared via CLI: $deleted goal(s) removed."
+                    "Assignments cleared via CLI: $deleted assignment(s) removed."
                 )
             )
         } catch (ex: Exception) {
-            output.error("Failed to clear goals: ${ex.message}")
-            logger.warn(ex) { "CLI --clear-goals: failed to clear goals workspace at $goalsRoot." }
+            output.error("Failed to clear assignments: ${ex.message}")
+            logger.warn(ex) { "CLI --clear-assignments: failed to clear assignments workspace at $assignmentsRoot." }
         }
     }
 
@@ -2935,10 +2935,10 @@ private fun buildHierarchicalPlanner(
 
     val router = InputIntentRouter(runtime, config, instrumentation)
     val groundingClassifier = GroundingClassifier(runtime, config, instrumentation)
-    val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
+    val directResponse = DirectResponder(runtime, config, instrumentation)
     val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
     val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
-    val goalPlanner = WorkPlanBuilder(runtime, config, instrumentation, planRefiner)
+    val assignmentCommandBuilder = AssignmentCommandBuilder(runtime, config, instrumentation, planRefiner)
 
     val inputPlanner = InputPlanner(
         runtime = runtime,
@@ -2949,11 +2949,11 @@ private fun buildHierarchicalPlanner(
         directResponsePlanner = directResponse,
         generalActionPlanner = generalAction,
         taskDecompositionPlanner = taskDecomp,
-        goalPlanner = goalPlanner,
+        assignmentCommandBuilder = assignmentCommandBuilder,
     )
 
     val progressionPlanner = ProgressionPlanner(runtime, config, instrumentation)
-    val durableWorkLanePlannerLane = DurableWorkLanePlanner(runtime, config, instrumentation)
+    val assignmentLanePlannerLane = AssignmentLanePlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
 
     val planner = HierarchicalEgoPlanner(
@@ -2961,7 +2961,7 @@ private fun buildHierarchicalPlanner(
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
         progressionPlanner = progressionPlanner,
-        durableWorkLanePlanner = durableWorkLanePlannerLane,
+        assignmentLanePlanner = assignmentLanePlannerLane,
         impulsePlanner = impulsePlannerLane,
     )
 

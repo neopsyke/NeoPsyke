@@ -8,39 +8,39 @@ Each section covers terms that appear together in the same area of the agent.
 ## Structural Modules
 
 - **Id** — Autonomous drive module that generates internal motivation. Runs an independent pulse loop, grows needs over time, and fires impulses into the Ego when a need becomes urgent enough. Named after Freud's concept of unconscious drives. `ai.neopsyke.agent.id.Id`
-- **Ego** — Central planning and orchestration loop. Receives inputs, impulses, and goal work; decides what to do next (think, act, or defer); and coordinates memory, planner, and superego. The conscious executive of the agent. `ai.neopsyke.agent.ego.Ego`
+- **Ego** — Central planning and orchestration loop. Receives inputs, impulses, and assignment work; decides what to do next (think, act, or defer); and coordinates memory, planner, and superego. The conscious executive of the agent. `ai.neopsyke.agent.ego.Ego`
 - **Superego** — Governance layer that reviews every proposed action before execution. Applies deterministic policy checks and, when needed, an LLM-backed ethical review. Can allow, deny, or escalate. `ai.neopsyke.agent.superego.Superego`
-- **SensoryCortex** — Input processing boundary. Receives external stimuli (chat messages, Telegram updates, Id cues, goal cues), sanitizes them, resolves interlocutor identity, attaches security context, and emits them as typed cognitive signals for the Ego. `ai.neopsyke.agent.cortex.sensory.SensoryCortex`
+- **SensoryCortex** — Input processing boundary. Receives external stimuli (chat messages, Telegram updates, Id cues, assignment cues), sanitizes them, resolves interlocutor identity, attaches security context, and emits them as typed cognitive signals for the Ego. `ai.neopsyke.agent.cortex.sensory.SensoryCortex`
 - **MotorCortex** — Action execution boundary. Maintains a registry of action plugins (discovered at startup via `ServiceLoader`) and dispatches approved actions to the correct handler. The agent's interface to the outside world. `ai.neopsyke.agent.cortex.motor.MotorCortex`
 
 ---
 
 ## Input & Perception
 
-- **Stimulus** — Any raw external event arriving at the agent before processing: a user message, a Telegram update, an Id impulse cue, or a goal-runtime cue. A stimulus is data at rest — content that has not yet entered the runtime's typed event flow. Contrast with **Signal**, which is the runtime transport.
+- **Stimulus** — Any raw external event arriving at the agent before processing: a user message, a Telegram update, an Id impulse cue, or an assignment-runtime cue. A stimulus is data at rest — content that has not yet entered the runtime's typed event flow. Contrast with **Signal**, which is the runtime transport.
 - **Signal** — A typed event flowing through the runtime's sensory channel. Signals are the transport mechanism; they carry stimuli (or control commands) into the Ego. There are two disjoint planes:
   - **CognitiveSignal** — wraps a `StimulusEnvelope` so the Ego can perceive it (`StimulusReceived`), or indicates absence (`NoStimulus`). This is data in flight on the cognitive plane.
   - **RuntimeControlSignal** — lifecycle and control events (`ExitRequested`, `ShutdownRequested`, `SourceClosed`, `ConfigReloaded`). Not perceived by the Ego — controls the runtime itself.
   In summary: a **stimulus** is *what* arrived; a **signal** is *how* it travels through the runtime. Both are defined in `SensoryCortex.kt`.
 - **StimulusEnvelope** — The typed wrapper around a stimulus. Carries the content plus metadata: family (`LINGUISTIC`, `OBSERVATION`, `FEEDBACK`, `CUE`), trust level, provenance, and conversation context. `CognitiveArchitectureModels.kt`
-- **StimulusFamily** — Top-level classification of a raw stimulus: `LINGUISTIC` (user messages), `OBSERVATION` (environmental observations), `FEEDBACK` (action outcomes), `CUE` (internal system cues from Id or goal runtime). Determines how the percept is appraised. `CognitiveArchitectureModels.kt`
+- **StimulusFamily** — Top-level classification of a raw stimulus: `LINGUISTIC` (user messages), `OBSERVATION` (environmental observations), `FEEDBACK` (action outcomes), `CUE` (internal system cues from Id or assignment runtime). Determines how the percept is appraised. `CognitiveArchitectureModels.kt`
 - **StimulusTrustLevel** — Trust classification assigned at the sensory boundary: `TRUSTED_INTERNAL`, `DEFAULT`, `UNTRUSTED_EXTERNAL`. Used to derive provenance before cognition begins. `CognitiveArchitectureModels.kt`
 - **Percept** — The internal representation of a stimulus after appraisal. A stimulus of family `LINGUISTIC` becomes a percept of family `REQUEST`; a `CUE` from the Id becomes `DRIVE_ACTIVATION`. The percept is what the Ego actually reasons about. Every cognitive arrival must be appraised into a percept before entering thread update logic. `CognitiveArchitectureModels.kt`
-- **PerceptFamily** — Classification of a percept's meaning: `REQUEST` (user asking for something), `OBSERVATION` (environmental data), `FEEDBACK` (action result), `STATE_CHANGE` (goal runtime event), `DRIVE_ACTIVATION` (Id impulse). Determines cognitive thread kind and opportunity kind. `CognitiveArchitectureModels.kt`
+- **PerceptFamily** — Classification of a percept's meaning: `REQUEST` (user asking for something), `OBSERVATION` (environmental data), `FEEDBACK` (action result), `STATE_CHANGE` (assignment runtime event), `DRIVE_ACTIVATION` (Id impulse). Determines cognitive thread kind and opportunity kind. `CognitiveArchitectureModels.kt`
 - **PerceptualAppraiser** — Stateless mapper that converts a `StimulusEnvelope` into a `Percept` by mapping stimulus family to percept family and preserving provenance. Called by `SensoryCortex.nextSignal()` on every stimulus. `SensoryCortex.kt`
-- **StimulusIngressCoordinator** — Routes appraised stimuli into the cognitive pipeline. Creates or updates cognitive threads, generates shaped opportunities, and enqueues work into the attention scheduler. Handles input, feedback, impulse wake, and goal work ingress paths. `StimulusIngressCoordinator.kt`
+- **StimulusIngressCoordinator** — Routes appraised stimuli into the cognitive pipeline. Creates or updates cognitive threads, generates shaped opportunities, and enqueues work into the attention scheduler. Handles input, feedback, impulse wake, and assignment work ingress paths. `StimulusIngressCoordinator.kt`
 - **AsyncSignalSource** — The coroutine-backed signal bus that feeds stimuli into the Ego loop. Dashboard chat messages and terminal commands are enqueued here. `AsyncSignalSource.kt`
 - **Interlocutor** — The identity of whoever the agent is talking to in a given session. Carries an `id` (name, hash, or JWT subject) and optional display `label`. The sentinel `Interlocutor.UNKNOWN` is used before identity resolution.
 - **ConversationContext** — End-to-end metadata that travels with every input, thought, and action through the pipeline. Contains `sessionId`, `interlocutor`, and `security` (principal, channel, trust). Required to be non-blank everywhere.
-- **GoalRuntimeCue** — A signal from the goal runtime to the Ego indicating that a goal step is ready for execution. Carries `goalId`, `stepId`, and `reason`. Enters cognition as a `CUE`-family stimulus with `TRUSTED_INTERNAL` trust.
+- **AssignmentCue** — A signal from the assignment runtime to the Ego indicating that an assignment step is ready for execution. Carries `workItemId`, `stepId`, and `reason`. Enters cognition as a `CUE`-family stimulus with `TRUSTED_INTERNAL` trust.
 - **ActionFeedbackCue** — A signal emitted by the MotorCortex after action execution. Carries root input id, action type, summary, feedback content, execution status, error category, and origin metadata. Re-enters cognition as a `FEEDBACK`-family stimulus through SensoryCortex.
 
 ---
 
 ## Cognitive Threads & Continuity
 
-- **CognitiveThread** — The live continuity owner for one root cognitive line. Tracks status, waits, resume points, security context, and thread identity. One thread exists per root input, impulse, or goal work activation. The primary unit of orchestration in the cognitive runtime. `CognitiveArchitectureModels.kt`
-- **CognitiveThreadKind** — What originated the thread: `CONVERSATION` (user input or feedback), `DRIVE` (Id impulse), `GOAL_DIRECTED` (goal work activation). Determines scheduling priority and allowed actions. `CognitiveArchitectureModels.kt`
+- **CognitiveThread** — The live continuity owner for one root cognitive line. Tracks status, waits, resume points, security context, and thread identity. One thread exists per root input, impulse, or assignment work activation. The primary unit of orchestration in the cognitive runtime. `CognitiveArchitectureModels.kt`
+- **CognitiveThreadKind** — What originated the thread: `CONVERSATION` (user input or feedback), `DRIVE` (Id impulse), `GOAL_DIRECTED` (assignment work activation). Determines scheduling priority and allowed actions. `CognitiveArchitectureModels.kt`
 - **CognitiveThreadStatus** — Lifecycle state: `ACTIVE` (processing), `WAITING` (suspended for async action), `BLOCKED` (cannot proceed), `RESOLVED` (successfully completed), `FAILED` (terminated with error). `CognitiveArchitectureModels.kt`
 - **CognitiveThreadStore** — In-memory store managing active and terminal cognitive threads. Binds percepts to threads, tracks wait/resume/terminal states, records opportunities and intentions, and provides synchronized snapshots for dashboard inspection. `CognitiveThreadStore.kt`
 - **CognitiveThreadSecurityContext** — Per-thread security state derived from the conversation security context at thread creation time. Accumulates data-trust degradation as external artifacts are observed during the thread's lifetime. Used by `CognitivePolicyShaper` to shape the action surface.
@@ -53,7 +53,7 @@ Each section covers terms that appear together in the same area of the agent.
 ## Opportunities & Intentions
 
 - **Opportunity** — An admissible next-move surface generated from a cognitive thread. Carries the set of allowed intentions, allowed commit modes, available and dispatchable actions, action definitions, security context, and policy metadata. Opportunities are shaped by `CognitivePolicyShaper` before the planner chooses, ensuring prohibited moves are absent before planner choice. `CognitiveArchitectureModels.kt`
-- **OpportunityKind** — What kind of cognitive move the opportunity represents: `RESPOND` (answer a user request), `INTEGRATE_FEEDBACK` (process action outcome), `EXECUTE` (perform a drive or goal action), `RESUME` (continue after suspension), `CLARIFY` (ask for more information), `FINALIZE` (wrap up a thread). Determines scheduling priority. `CognitiveArchitectureModels.kt`
+- **OpportunityKind** — What kind of cognitive move the opportunity represents: `RESPOND` (answer a user request), `INTEGRATE_FEEDBACK` (process action outcome), `EXECUTE` (perform a drive or assignment action), `RESUME` (continue after suspension), `CLARIFY` (ask for more information), `FINALIZE` (wrap up a thread). Determines scheduling priority. `CognitiveArchitectureModels.kt`
 - **Intention** — The Ego's explicit choice of what to do next, formed from an attended opportunity. Separates intent kind from commit mode. The object that progresses through review, staging, and execution. `CognitiveArchitectureModels.kt`
 - **IntentionKind** — What the Ego intends: `OBSERVE` (read-only), `PREPARE` (gather evidence), `STAGE` (create a staged action), `REQUEST_AUTHORIZATION` (ask for approval), `COMMIT` (execute immediately). `CognitiveArchitectureModels.kt`
 - **Continuation** — Typed queued resumable work inside the Ego. Current variants are `PlanStepContinuation`, `RetryAlternative`, and `ConvergeNow`. `QueueModels.kt`
@@ -85,8 +85,8 @@ Each section covers terms that appear together in the same area of the agent.
 
 - **Planner** — The LLM-backed decision function inside the Ego. Given a `PlannerContext`, returns an `EgoDecision`: propose an action, enqueue a continuation, produce a no-op, or enqueue a multi-step plan. `HierarchicalEgoPlanner`
 - **PlannerContext** — The full context bundle passed to the planner on each step: recent dialogue, queue snapshot, short-term and long-term memory, lessons, scratchpad, evidence hints, deliberation state, meta-guidance, security summaries, available actions, and optionally the Id state snapshot.
-- **PlanningBranch** — The current coarse branch selector inside `LlmEgoPlanner`. `GENERAL` is the default; `GOAL_CREATION` is a special branch for multi-step goal proposals. This is legacy terminology for the monolithic planner design; the planned typed hierarchical redesign replaces this idea with `PlannerLane` plus narrower typed routing structures.
-- **EgoDecision** — The planner's output. A sealed type with four variants: `FormIntention` (propose an action with intention kind and commit mode), `EnqueueContinuation` (queue typed resumable work), `Noop` (decline with reason), and `EnqueuePlan` (propose a multi-step goal).
+- **PlanningBranch** — The current coarse branch selector inside `LlmEgoPlanner`. `GENERAL` is the default; `GOAL_CREATION` is a special branch for multi-step plan proposals. This is legacy terminology for the monolithic planner design; the planned typed hierarchical redesign replaces this idea with `PlannerLane` plus narrower typed routing structures.
+- **EgoDecision** — The planner's output. A sealed type with four variants: `FormIntention` (propose an action with intention kind and commit mode), `EnqueueContinuation` (queue typed resumable work), `Noop` (decline with reason), and `EnqueuePlan` (propose a multi-step plan).
 - **DeliberationState** — Accumulated counters that track how the current reasoning episode is going. Injected into the planner context so it can adapt behavior under pressure. `CognitionModels.kt`
 - **DecisionPressure** — A `[0,1]` score that rises with each deliberation step. When high, it signals the planner to stop deliberating and commit to an answer. Also used to trigger forced terminal answers.
 - **StaleStreak** — Consecutive steps where the planner repeated the same type of decision without progress. Indicates the agent may be stuck.
@@ -97,10 +97,10 @@ Each section covers terms that appear together in the same area of the agent.
 - **MetaReasonerVerdict** — The meta-reasoner's assessment: `CONTINUE`, `CONTINUE_WITH_CONSTRAINTS`, `FINALIZE_NOW`, or `REQUEST_TOOL_THEN_FINALIZE`.
 - **AttentionScheduler** — Priority queue that decides what the Ego works on next. Opportunity work is scheduled first; after that the scheduler chooses between queued intentions and queued actions by urgency. `AttentionScheduler.kt`
 - **LoopTask** — The unit of work the Ego executes in one step: `AttendOpportunity`, `ProcessIntention`, or `PerformAction`. Pulled from the `AttentionScheduler`.
-- **ScheduledOpportunity** — A queued attention item pairing an `Opportunity` contract with its originating trigger (`Input`, `Impulse`, `Feedback`, or `GoalWork`). `QueueModels.kt`
-- **OpportunityTrigger** — Sealed type recording which runtime source produced a scheduled opportunity: `Input`, `Impulse`, `Feedback`, or `GoalWork`. `QueueModels.kt`
-- **AmbientContext** — Best-effort cached snapshot of active goals, recent scratchpad themes, useful recent actions, and open loops. Advisory only — biases recall and prompting toward relevant topics without blocking on state queries.
-- **EgoTrigger** — A sealed type representing what caused the Ego to run the current step. Five variants: `IncomingInput`, `Continuation`, `ActionFeedback`, `IncomingImpulse`, and `GoalWork`. `CognitionModels.kt`
+- **ScheduledOpportunity** — A queued attention item pairing an `Opportunity` contract with its originating trigger (`Input`, `Impulse`, `Feedback`, or `Assignment`). `QueueModels.kt`
+- **OpportunityTrigger** — Sealed type recording which runtime source produced a scheduled opportunity: `Input`, `Impulse`, `Feedback`, or `Assignment`. `QueueModels.kt`
+- **AmbientContext** — Best-effort cached snapshot of active assignments, recent scratchpad themes, useful recent actions, and open loops. Advisory only — biases recall and prompting toward relevant topics without blocking on state queries.
+- **EgoTrigger** — A sealed type representing what caused the Ego to run the current step. Five variants: `IncomingInput`, `Continuation`, `ActionFeedback`, `IncomingImpulse`, and `Assignment`. `CognitionModels.kt`
 - **ActionOrigin** — Provenance marker on continuations and actions, tracking which source initiated the work (`USER`, `ID`, `SYSTEM`, `GOAL`) and optionally the `needId` and `rootImpulseId` for Id-originated work. `QueueModels.kt`
 - **OriginSource** — Enum identifying the source of work: `USER`, `ID`, `SYSTEM`, `GOAL`. Part of `ActionOrigin`.
 - **DecisionVerifier** — Pre-superego gate that validates whether a proposed action is grounded and ready to commit. Assesses task intent (personal memory, external observation, etc.), volatility, evidence requirements, and dispatch eligibility. `DecisionVerifier.kt`
@@ -119,23 +119,23 @@ Each section covers terms that appear together in the same area of the agent.
 - **PlannerLane** — Proposed top-level planner lane in the typed hierarchical redesign. Replaces the old coarse `PlanningBranch` idea with more specific lane ownership by decision family.
 - **InputPlanner** — Proposed planner lane for `EgoTrigger.IncomingInput`. Owns fresh-input semantic routing before delegating to narrower input-specific planners.
 - **ProgressionPlanner** — Planner lane for both `EgoTrigger.Continuation` and `EgoTrigger.ActionFeedback`. Handles progression reasoning (what comes next) for continuations and action feedback. Merged from the former ContinuationPlanner and FeedbackPlanner.
-- **GoalWorkPlanner** — Proposed planner lane for `EgoTrigger.GoalWork`. Owns active goal-runtime work and step-level goal execution reasoning.
+- **AssignmentPlanner** — Proposed planner lane for `EgoTrigger.Assignment`. Owns active assignment-runtime work and step-level assignment execution reasoning.
 - **ImpulsePlanner** — Proposed planner lane for `EgoTrigger.IncomingImpulse`. Owns self-motivated / Id-origin planning.
 - **InputIntentRouter** — Proposed semantic router inside `InputPlanner`. Interprets fresh natural-language input and returns an `InputRoute` instead of directly generating an `EgoDecision`.
-- **InputRoute** — Typed routing result returned by `InputIntentRouter`. Variants are `DirectResponse`, `GeneralAction`, `MultiStepTask`, `Goal`, `ClarificationNeeded`, and `Noop`.
-- **DirectResponsePlanner** — Proposed input sub-planner used when the request can be answered directly from current context.
+- **InputRoute** — Typed routing result returned by `InputIntentRouter`. Variants are `DirectResponse`, `GeneralAction`, `MultiStepTask`, `Assignment`, `ClarificationNeeded`, and `Noop`.
+- **DirectResponder** — Proposed input sub-planner used when the request can be answered directly from current context.
 - **GeneralActionPlanner** — Proposed input sub-planner used when one explicit next action or intention is sufficient.
 - **TaskDecompositionPlanner** — Proposed input sub-planner used when a request requires multi-step decomposition into a typed plan.
-- **GoalPlanner** — Unified input sub-planner for goal creation and management. Merged from the former GoalCreationPlanner and GoalManagementPlanner.
+- **AssignmentCommandBuilder** — Unified input sub-planner for assignment creation and management. Merged from the former AssignmentCreationPlanner and AssignmentCommandBuilder.
 - **PlannerOutcome** — Proposed umbrella term for typed intermediate planner outputs in the hierarchical design before they are adapted into `EgoDecision`.
 - **ExecutionCandidate** — Proposed typed intermediate result representing one next action/intention candidate that can be adapted into `EgoDecision.FormIntention`.
 - **PlanDecomposition** — Proposed typed intermediate result representing a decomposed multi-step task rather than an unstructured plan string list.
 - **PlanStepDirective** — Proposed typed representation of one step inside a `PlanDecomposition`.
 - **ClarificationRequest** — Proposed typed planner result indicating that semantic resolution is insufficient and the agent should ask for clarification.
-- **GoalCommand** — Proposed typed semantic goal operation returned by planner layers before execution. Planned variants include `Create`, `List`, `Status`, `Pause`, `Resume`, `Complete`, `Delete`, `DeleteAll`, `Update`, `RevisePlan`, and `Reprioritize`.
-- **GoalReference** — Proposed typed goal-reference resolution result used by `GoalCommand`. Planned variants include `ByInternalId`, `ByResolvedEntity`, `Ambiguous`, and `Unresolved`.
+- **AssignmentCommand** — Proposed typed semantic assignment operation returned by planner layers before execution. Planned variants include `Create`, `List`, `Status`, `Pause`, `Resume`, `Complete`, `Delete`, `DeleteAll`, `Update`, `RevisePlan`, and `Reprioritize`.
+- **WorkItemReference** — Proposed typed assignment-reference resolution result used by `AssignmentCommand`. Planned variants include `ByInternalId`, `ByResolvedEntity`, `Ambiguous`, and `Unresolved`.
 - **ProgressionDecision** — Typed output family returned by `ProgressionPlanner`. Variants are `Execute`, `RefinePlan`, `Answer`, and `Fail`.
-- **GoalWorkDecision** — Proposed typed output family returned by `GoalWorkPlanner`. Initial planned variants are `ExecuteStep`, `DeferUntilCondition`, `MarkStepComplete`, `RequestClarification`, and `FailStep`.
+- **AssignmentDecision** — Proposed typed output family returned by `AssignmentPlanner`. Initial planned variants are `ExecuteStep`, `DeferUntilCondition`, `MarkStepComplete`, `RequestClarification`, and `FailStep`.
 - **ImpulseDecision** — Proposed typed output family returned by `ImpulsePlanner`. Initial planned variants are `Research`, `Reflect`, `ContactUser`, and `Noop`.
 - **Orchestrator-Worker** — A design pattern where a narrow orchestrator decomposes a task into bounded subtasks, delegates those subtasks to specialized workers, then synthesizes the result. The planner redesign spec treats this as a possible future pattern for evidence-heavy work, not as the first step of the planner refactor.
 - **Evaluator-Optimizer** — A design pattern where one component generates a candidate output and a separate evaluator critiques, gates, or requests regeneration without silently owning the full planning path. In the planner redesign spec, evaluator-optimizer work is explicitly deferred and treated as a future analyzer/meta-reasoner-adjacent concern rather than part of the immediate planner redesign.
@@ -223,24 +223,24 @@ Each section covers terms that appear together in the same area of the agent.
 
 ---
 
-## Goals
+## Assignments
 
-- **Goal** — A user-defined or agent-proposed multi-step objective. Has a status, priority, plan (list of steps), completion criteria, and optional cron schedule for recurring execution.
-- **GoalStatus** — Lifecycle state: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`.
-- **GoalPriority** — Importance level: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. Influences scheduling when competing with other work.
-- **GoalPlan** — An ordered list of `PlanStep` entries with generation and revision timestamps. The roadmap for achieving a goal.
-- **PlanStep** — A single step within a goal plan. Has a status, acceptance criteria, dependency edges (`requires`, `produces`), retry limits, and an optional `WaitCondition`.
+- **Assignment** — A user-defined or agent-proposed multi-step objective. Has a status, priority, plan (list of steps), completion criteria, and optional cron schedule for recurring execution.
+- **WorkItemStatus** — Lifecycle state: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`.
+- **WorkItemPriority** — Importance level: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. Influences scheduling when competing with other work.
+- **WorkItemPlan** — An ordered list of `PlanStep` entries with generation and revision timestamps. The roadmap for achieving an assignment.
+- **PlanStep** — A single step within an assignment plan. Has a status, acceptance criteria, dependency edges (`requires`, `produces`), retry limits, and an optional `WaitCondition`.
 - **StepStatus** — Lifecycle state of a plan step: `PENDING`, `READY`, `IN_PROGRESS`, `BLOCKED`, `DONE`, `FAILED`, `SKIPPED`.
 - **WaitCondition** — A condition that must be met before a step can proceed. Types: `TIMER`, `EXTERNAL_EVENT`, `CONDITION_CHECK`, `CRON`, `ASYNC_OPERATION`. Has a timeout and escalation behavior.
-- **GoalRunActivation** — A signal from the goal runtime to the Ego indicating that a goal step is ready for execution. Enters the Ego as an `EgoTrigger.GoalWork`.
-- **GoalsGateway** — The Ego-facing boundary interface for the goals runtime. Ego uses it only for: `pendingWorkSummary()`, `nextWorkFromCue(GoalRuntimeCue)`, goal-origin action lifecycle callbacks, and `finalizeGoalCycle(rootInputId)`. Feature-flagged behind `config.goals.enabled`; `NoopGoalsGateway` when disabled. `GoalsGateway.kt`
-- **GoalManager** — The internal orchestrator of the goals runtime. Manages goal creation, plan generation (via `GoalPlanner`), step verification (via `GoalStepVerifier`), async operation tracking, timer/cron scheduling, and event-sourced state transitions. `GoalManager.kt`
-- **GoalStateMachine** — Pure state-transition function: `transition(state, event) → (newState, commands)`. Implements the event-sourced goal lifecycle without side effects. Commands describe side effects (emit work-ready, schedule timers, persist state). `GoalStateMachine.kt`
-- **GoalPlanner** — Generates a `GoalPlan` (ordered list of `PlanStep` entries) from a goal's title, instruction, and completion criteria. Implementations: `DeterministicGoalPlanner` (single-step fallback) and `LlmGoalPlanner` (LLM-backed decomposition). `GoalPlanner.kt`
-- **GoalStepVerifier** — Evaluates whether a goal step's acceptance criteria have been met after action execution. Returns verdicts: `PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`. `GoalStepVerifier.kt`
-- **TimerScheduler** — Registers cron expressions or absolute timestamps for goal wake-ups. Fires `onTimerWake(goalId, scheduledAtMs)` to restart cron-backed goal cycles or resume suspended goals. `TimerScheduler.kt`
-- **WaitConditionMonitor** — Polls async operation providers and accepts externally-delivered completion events for blocked goal steps. Fires `WaitConditionSatisfied` or `WaitConditionTimedOut` events when conditions resolve or expire.
-- **AsyncOperationRegistry** — Generic provider adapter registry for long-running action handles. Restored by the goal runtime on startup so blocked steps can resume monitoring after restart.
+- **AssignmentActivation** — A signal from the assignment runtime to the Ego indicating that an assignment step is ready for execution. Enters the Ego as an `EgoTrigger.Assignment`.
+- **AssignmentGateway** — The Ego-facing boundary interface for the assignment runtime. Ego uses it only for: `pendingWorkSummary()`, `nextWorkFromCue(AssignmentCue)`, assignment-origin action lifecycle callbacks, and `finalizeAssignmentCycle(rootInputId)`. Feature-flagged behind `config.assignment.enabled`; `NoopAssignmentGateway` when disabled. `AssignmentGateway.kt`
+- **AssignmentRuntime** — The internal orchestrator of the assignment runtime. Manages assignment creation, plan generation (via `AssignmentCommandBuilder`), step verification (via `WorkStepVerifier`), async operation tracking, timer/cron scheduling, and event-sourced state transitions. `AssignmentRuntime.kt`
+- **WorkItemStateMachine** — Pure state-transition function: `transition(state, event) → (newState, commands)`. Implements the event-sourced assignment lifecycle without side effects. Commands describe side effects (emit work-ready, schedule timers, persist state). `WorkItemStateMachine.kt`
+- **AssignmentCommandBuilder** — Generates a `WorkItemPlan` (ordered list of `PlanStep` entries) from an assignment's title, instruction, and completion criteria. Implementations: `DeterministicAssignmentCommandBuilder` (single-step fallback) and `LlmAssignmentCommandBuilder` (LLM-backed decomposition). `AssignmentCommandBuilder.kt`
+- **WorkStepVerifier** — Evaluates whether an assignment step's acceptance criteria have been met after action execution. Returns verdicts: `PASS`, `RETRY`, `BLOCK`, `CONTINUE`, `FAIL`. `WorkStepVerifier.kt`
+- **TimerScheduler** — Registers cron expressions or absolute timestamps for assignment wake-ups. Fires `onTimerWake(workItemId, scheduledAtMs)` to restart cron-backed assignment cycles or resume suspended assignments. `TimerScheduler.kt`
+- **WaitConditionMonitor** — Polls async operation providers and accepts externally-delivered completion events for blocked assignment steps. Fires `WaitConditionSatisfied` or `WaitConditionTimedOut` events when conditions resolve or expire.
+- **AsyncOperationRegistry** — Generic provider adapter registry for long-running action handles. Restored by the assignment runtime on startup so blocked steps can resume monitoring after restart.
 
 ---
 

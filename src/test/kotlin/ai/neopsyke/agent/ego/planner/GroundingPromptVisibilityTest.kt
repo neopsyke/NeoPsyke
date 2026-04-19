@@ -19,7 +19,7 @@ import ai.neopsyke.agent.model.IntentionKind
 import ai.neopsyke.agent.model.PendingFeedback
 import ai.neopsyke.agent.model.ActionOrigin
 import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
-import ai.neopsyke.agent.durablework.DurableWorkActivation
+import ai.neopsyke.agent.assignments.AssignmentActivation
 import ai.neopsyke.agent.model.Percept
 import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.support.RecordingInstrumentation
@@ -152,20 +152,20 @@ class GroundingPromptVisibilityTest {
     }
 
     @Test
-    fun `GoalWork lane includes grounding section when REQUIRED`() {
+    fun `Assignment lane includes grounding section when REQUIRED`() {
         assertLaneIncludesGroundingPrompt(
             route = null,
             context = contextWith(GroundingRequirement.REQUIRED),
-            trigger = goalWorkTrigger(),
+            trigger = assignmentTrigger(),
         )
     }
 
     @Test
-    fun `GoalWork lane omits grounding section when NOT_REQUIRED`() {
+    fun `Assignment lane omits grounding section when NOT_REQUIRED`() {
         assertLaneOmitsGroundingPrompt(
             route = null,
             context = contextWith(GroundingRequirement.NOT_REQUIRED),
-            trigger = goalWorkTrigger(),
+            trigger = assignmentTrigger(),
         )
     }
 
@@ -280,9 +280,9 @@ class GroundingPromptVisibilityTest {
             )
         )
 
-    private fun goalWorkTrigger(): EgoTrigger.DurableWork =
-        EgoTrigger.DurableWork(
-            workUnit = DurableWorkActivation(
+    private fun assignmentTrigger(): EgoTrigger.Assignment =
+        EgoTrigger.Assignment(
+            workUnit = AssignmentActivation(
                 workItemId = "g1",
                 stepId = "s1",
                 rootInputId = "r1",
@@ -290,7 +290,7 @@ class GroundingPromptVisibilityTest {
                 acceptanceCriteria = "Fresh data",
                 workingContext = "",
                 conversationContext = ConversationContext.default(),
-            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.DURABLE_WORK_STEP_POLICY),
+            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.ASSIGNMENT_STEP_POLICY),
             )
         )
 }

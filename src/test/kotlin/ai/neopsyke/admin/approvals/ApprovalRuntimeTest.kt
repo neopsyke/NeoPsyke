@@ -547,9 +547,9 @@ class ApprovalRuntimeTest {
             id = "staged-no-telegram-evidence",
             rootInputId = "root-no-telegram-evidence",
             conversationContext = ConversationContext(
-                sessionId = "goal-session-no-evidence",
+                sessionId = "assignment-session-no-evidence",
                 interlocutor = Interlocutor.named("Goal"),
-                security = ConversationSecurityContexts.internalAutomation(provider = "goal", channelId = "goal"),
+                security = ConversationSecurityContexts.internalAutomation(provider = "assignment", channelId = "assignment"),
             ),
             origin = ActionOrigin.SYSTEM,
         )
@@ -722,9 +722,9 @@ class ApprovalRuntimeTest {
             id = "staged-telegram",
             rootInputId = "root-telegram",
             conversationContext = ConversationContext(
-                sessionId = "goal-session",
+                sessionId = "assignment-session",
                 interlocutor = Interlocutor.named("Goal"),
-                security = ConversationSecurityContexts.internalAutomation(provider = "goal", channelId = "goal"),
+                security = ConversationSecurityContexts.internalAutomation(provider = "assignment", channelId = "assignment"),
             ),
             origin = ActionOrigin.SYSTEM,
         )
@@ -899,7 +899,7 @@ class ApprovalRuntimeTest {
             // A new message with a different eventId should be forwarded, not consumed.
             val result = runtime.routeOwnerMessage(
                 OwnerMessageEnvelope(
-                    content = "Create a new goal for weather reports",
+                    content = "Create a new assignment for weather reports",
                     source = "chat:test",
                     priority = InputPriority.HIGH,
                     conversationContext = actionControl.currentStagedAction.conversationContext,
@@ -993,7 +993,7 @@ class ApprovalRuntimeTest {
             // Should be forwarded because the request is stale.
             val result = runtime.routeOwnerMessage(
                 OwnerMessageEnvelope(
-                    content = "Create a new goal",
+                    content = "Create a new assignment",
                     source = "chat:test",
                     priority = InputPriority.HIGH,
                     conversationContext = actionControl.currentStagedAction.conversationContext,

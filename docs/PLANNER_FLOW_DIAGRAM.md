@@ -1,20 +1,23 @@
 # Planner Flow Diagram
 
-Current planner architecture as of 2026-04-10.
+Current planner architecture as of 2026-04-18.
+
+This file describes the runtime planner flow implemented under
+`src/main/kotlin/ai/neopsyke/agent/ego/planner/**`.
 
 ## Signal-to-Planner Pipeline
 
-External events enter through `SensoryCortex`, get classified by
-`StimulusIngressCoordinator`, queued in `AttentionScheduler`, and dispatched
-by `Ego` to the planner. The planner returns an `EgoDecision` which the
-`DecisionDispatcher` converts into scheduled work (continuations, intentions, or
-actions).
+External events enter through `SensoryCortex`, are routed by
+`StimulusIngressCoordinator`, queued in `AttentionScheduler`, and dispatched by
+`Ego` to the planner. The planner returns an `EgoDecision`, which
+`DecisionDispatcher` turns into queued continuations, queued intentions, plan
+step continuations, or fallback explanation behavior.
 
 ```mermaid
 flowchart TB
     subgraph sources ["Signal Sources"]
         user["User input<br/>(dashboard / telegram)"]
-        timer["TimerScheduler<br/>(cron wake)"]
+        timer["TimerScheduler<br/>(assignment wake)"]
         id_mod["Id module<br/>(drive impulse)"]
         action_fb["Action execution<br/>(feedback cue)"]
         deferred["Queued continuation<br/>(from prior iteration)"]
@@ -22,8 +25,8 @@ flowchart TB
 
     subgraph ingress ["StimulusIngressCoordinator"]
         classify{"Classify signal"}
-        classify -->|GoalRuntimeCue| enq_goal["enqueueGoalWork"]
-        classify -->|IdImpulseCue| enq_impulse["bindImpulseWake"]
+        classify -->|Assignment cue| enq_assignment["enqueueAssignment"]
+        classify -->|Id impulse cue| enq_impulse["bindImpulseWake"]
         classify -->|ActionFeedbackCue| enq_feedback["enqueueFeedback"]
         classify -->|User input| enq_input["enqueueInput"]
     end
@@ -41,7 +44,7 @@ flowchart TB
     id_mod --> classify
     action_fb --> classify
 
-    enq_goal --> opp_q
+    enq_assignment --> opp_q
     enq_impulse --> opp_q
     enq_feedback --> opp_q
     enq_input --> opp_q
@@ -61,7 +64,7 @@ flowchart TB
         ego_opp -->|"OpportunityTrigger.Input"| proc_input["processInput()"]
         ego_opp -->|"OpportunityTrigger.Impulse"| proc_impulse["processImpulse()"]
         ego_opp -->|"OpportunityTrigger.Feedback"| proc_feedback["processActionFeedback()"]
-        ego_opp -->|"OpportunityTrigger.GoalWork"| proc_goal["processGoalWork()"]
+        ego_opp -->|"OpportunityTrigger.Assignment"| proc_assignment["processAssignment()"]
 
         ego_cont --> proc_deferred["processContinuation()"]
         ego_int --> ego_act
@@ -71,9 +74,8 @@ flowchart TB
 ## HierarchicalEgoPlanner (L0 Router)
 
 Each `Ego.process*()` method creates an `EgoTrigger` and calls
-`planner.decide(trigger, context)`. The `HierarchicalEgoPlanner` dispatches
-to one of five L1 lanes based on the trigger type. This is deterministic
-routing on typed runtime facts -- no text inspection.
+`planner.decide(trigger, context)`. `HierarchicalEgoPlanner` deterministically
+routes on the sealed trigger type. It does not inspect free text.
 
 ```mermaid
 flowchart TB
@@ -82,7 +84,7 @@ flowchart TB
     decide -->|"EgoTrigger.IncomingInput"| L1_input["InputPlanner<br/><b>L1</b>"]
     decide -->|"EgoTrigger.Continuation"| L1_progression["ProgressionPlanner<br/><b>L1</b>"]
     decide -->|"EgoTrigger.ActionFeedback"| L1_progression
-    decide -->|"EgoTrigger.GoalWork"| L1_goal["GoalWorkPlanner<br/><b>L1</b>"]
+    decide -->|"EgoTrigger.Assignment"| L1_assignment["AssignmentLanePlanner<br/><b>L1</b>"]
     decide -->|"EgoTrigger.IncomingImpulse"| L1_impulse["ImpulsePlanner<br/><b>L1</b>"]
 ```
 
@@ -90,53 +92,48 @@ flowchart TB
 
 | Trigger | Origin | L1 Lane | LaneId |
 |---------|--------|---------|--------|
-| `IncomingInput` | User (dashboard, telegram) | InputPlanner | `INPUT_INTENT_ROUTER` |
-| `Continuation` | Internal queue (prior iteration) | ProgressionPlanner | `PROGRESSION` |
-| `ActionFeedback` | Motor cortex (execution result) | ProgressionPlanner | `PROGRESSION` |
-| `GoalWork` | Goal cue (cron, step advance) | GoalWorkPlanner | `GOAL_WORK` |
-| `IncomingImpulse` | Id module (drive activation) | ImpulsePlanner | `IMPULSE` |
+| `IncomingInput` | User / external chat ingress | `InputPlanner` | `INPUT_INTENT_ROUTER` |
+| `Continuation` | Internal queue | `ProgressionPlanner` | `PROGRESSION` |
+| `ActionFeedback` | Motor/action result cue | `ProgressionPlanner` | `PROGRESSION` |
+| `Assignment` | Durable-work wake / step activation | `AssignmentLanePlanner` | `ASSIGNMENT` |
+| `IncomingImpulse` | Id drive activation | `ImpulsePlanner` | `IMPULSE` |
 
-## InputPlanner (L1) -- Two-Stage Routing
+## InputPlanner (L1) -- Router, Grounding, L2 Dispatch
 
-InputPlanner is the only L1 lane with a sub-routing stage. It runs two
-sequential LLM classifiers then dispatches to one of five L2 sub-planners.
+`InputPlanner` is the only L1 lane with an internal semantic routing stage. It:
+
+1. Calls `InputIntentRouter`
+2. Always calls `GroundingClassifier`
+3. Dispatches to the selected L2 planner or handles inline clarification/noop
 
 ```mermaid
 flowchart TB
     input["InputPlanner.plan()"]
 
     input --> router["InputIntentRouter<br/>(LLM classifier)"]
+    router --> route{"InputRoute"}
 
-    router --> route{"InputRoute?"}
+    route --> grounding["GroundingClassifier"]
 
-    route -->|DirectResponse| grounding
-    route -->|GeneralAction| grounding
-    route -->|MultiStepTask| grounding
-    route -->|GoalCreation| grounding_skip["Skip grounding<br/>(NOT_REQUIRED)"]
-    route -->|GoalManagement| grounding_skip
-    route -->|ClarificationNeeded| inline_clarify["Inline:<br/>FormIntention(CONTACT_USER)<br/>ask clarification question"]
-    route -->|Noop| inline_noop["Inline:<br/>EgoDecision.Noop"]
+    grounding --> grounded_ctx["GroundingMetadata propagated to<br/>PendingInput and PlannerContext"]
 
-    grounding["GroundingClassifier<br/>(LLM if ambiguous)"]
-    grounding --> grounded_ctx["Grounded context +<br/>metadata propagated"]
+    grounded_ctx --> dispatch{"Dispatch"}
 
-    grounding_skip --> grounded_ctx
-
-    grounded_ctx --> dispatch{"Dispatch to<br/>L2 sub-planner"}
-
-    dispatch -->|DirectResponse| L2_direct["DirectResponsePlanner"]
+    dispatch -->|DirectResponse| L2_direct["DirectResponder"]
     dispatch -->|GeneralAction| L2_general["GeneralActionPlanner"]
     dispatch -->|MultiStepTask| L2_task["TaskDecompositionPlanner"]
-    dispatch -->|Goal| L2_goal["GoalPlanner"]
+    dispatch -->|Assignment| L2_assignment["AssignmentCommandBuilder<br/>(generic / recurrent_task / responsibility)"]
 
-    L2_goal -->|"returns Noop?"| L2_general_fb["Fallback to<br/>GeneralActionPlanner"]
+    route -->|ClarificationNeeded| inline_clarify["Inline FormIntention<br/>(CONTACT_USER)"]
+    route -->|Noop| inline_noop["Inline Noop"]
+
+    L2_assignment -->|"returns Noop"| L2_general_fb["Fallback to<br/>GeneralActionPlanner"]
 
     L2_direct --> decision
     L2_general --> decision
     L2_task --> decision
-    L2_goal -->|"returns non-Noop"| decision
+    L2_assignment -->|"returns non-Noop"| decision
     L2_general_fb --> decision
-
     inline_clarify --> decision
     inline_noop --> decision
 
@@ -145,61 +142,74 @@ flowchart TB
 
 ### InputIntentRouter Routes
 
-The router is an LLM classifier that maps free-text user input to one of
-six typed routes. Dispatch from route to sub-planner is deterministic on
-the typed result.
+`InputIntentRouter` maps free-text user input to typed routes. The router may
+also set an assignment target for the `Assignment` route.
 
-| Route | L2 Sub-Planner | Grounding | Typical Decision |
-|-------|---------------|-----------|------------------|
-| `DirectResponse` | DirectResponsePlanner | LLM-classified | `EnqueueContinuation` or `FormIntention(CONTACT_USER)` |
-| `GeneralAction` | GeneralActionPlanner | LLM-classified | `FormIntention` (any action type) |
-| `MultiStepTask` | TaskDecompositionPlanner | LLM-classified | `EnqueuePlan` |
-| `Goal` | GoalPlanner | NOT_REQUIRED | `FormIntention(GOAL_OPERATION)` with typed GoalCommand |
-| `ClarificationNeeded` | (inline) | NOT_REQUIRED | `FormIntention(CONTACT_USER)` |
-| `Noop` | (inline) | NOT_REQUIRED | `EgoDecision.Noop` |
+| Route | Target / Meaning | L2 handling | Typical result |
+|-------|------------------|-------------|----------------|
+| `DirectResponse` | Answer directly from current context | `DirectResponder` | `FormIntention(CONTACT_USER)` or `Noop` |
+| `GeneralAction` | One explicit next action | `GeneralActionPlanner` | `FormIntention(...)` or `Noop` |
+| `MultiStepTask` | Ordered multi-stage task | `TaskDecompositionPlanner` | `EnqueuePlan` or `Noop` |
+| `Assignment` | Persistent work interaction | `AssignmentCommandBuilder` | `FormIntention(ASSIGNMENT_OPERATION)` or `FormIntention(CONTACT_USER)` or `Noop` |
+| `ClarificationNeeded` | Route ambiguity or missing user intent | inline | `FormIntention(CONTACT_USER)` |
+| `Noop` | No actionable intent | inline | `Noop` |
+
+For `Assignment`, `assignment_target` is one of:
+
+- `generic`
+- `recurrent_task`
+- `responsibility`
 
 ### GroundingClassifier
 
-Determines whether the input requires fresh external evidence before a
-response can be delivered.
+`GroundingClassifier` runs after route selection and before L2 dispatch.
 
-- **Deterministic NOT_REQUIRED**: Goal, ClarificationNeeded, Noop
-- **Requires LLM classification**: DirectResponse, GeneralAction, MultiStepTask
+- Deterministic `NOT_REQUIRED` prefilter:
+  - `InputRoute.Assignment`
+  - `InputRoute.ClarificationNeeded`
+  - `InputRoute.Noop`
+- LLM classification:
+  - `InputRoute.DirectResponse`
+  - `InputRoute.GeneralAction`
+  - `InputRoute.MultiStepTask`
 
-Result is propagated as `GroundingMetadata` on the input envelope and the
-planner context, consumed downstream by the grounding gate in
-`ActionReviewPipeline`.
+The result is propagated onto the grounded `PendingInput` and copied into
+`PlannerContext.groundingMetadata`.
 
 ## L1 Lane Decision Capabilities
 
-Each L1 lane parses an LLM response into one of the `EgoDecision` variants.
-Not all lanes support all decision types.
+Planner lanes do not currently emit `EgoDecision.EnqueueContinuation`
+themselves. That shape is introduced later by deliberation-pressure overrides.
 
-| EgoDecision | InputPlanner | Continuation | Feedback | GoalWork | Impulse |
-|-------------|:---:|:---:|:---:|:---:|:---:|
-| `EnqueueContinuation` | via L2 | yes | yes | yes | yes |
-| `FormIntention` (intend) | via L2 | yes | yes | yes | yes |
-| `EnqueuePlan` (plan) | via L2 | yes | yes | yes | **no** |
-| `Noop` (noop) | via L2 | yes | yes | yes | yes |
+| EgoDecision | InputPlanner | ProgressionPlanner | AssignmentLanePlanner | ImpulsePlanner |
+|-------------|:-----------:|:------------------:|:----------------------:|:-------------:|
+| `FormIntention` | via L2 | yes | yes | yes |
+| `EnqueuePlan` | via L2 | yes | yes | no |
+| `Noop` | via L2 | yes | yes | yes |
+| `EnqueueContinuation` | no | no | no | no |
+
+### L2 Input Sub-Planner Capabilities
+
+| L2 planner | Returns |
+|-----------|---------|
+| `DirectResponder` | `FormIntention(CONTACT_USER)` or `Noop` |
+| `GeneralActionPlanner` | `FormIntention(...)` or `Noop` |
+| `TaskDecompositionPlanner` | `EnqueuePlan` or `Noop` |
+| `AssignmentCommandBuilder` | `FormIntention(ASSIGNMENT_OPERATION)` or `FormIntention(CONTACT_USER)` or `Noop` |
 
 ## Post-Planner Pipeline
 
-After the planner returns an `EgoDecision`, the Ego applies meta-reasoning
-pressure and dispatches the decision.
+After `planner.decide(...)`, `Ego` lets `DeliberationEngine` apply pressure
+overrides, then passes the final `EgoDecision` to `DecisionDispatcher`.
 
 ```mermaid
 flowchart TB
     planner["Planner.decide()"] --> decision["EgoDecision"]
 
-    decision --> meta["DeliberationEngine<br/>maybeAssessAndUpdateGuidance()"]
-    meta -->|"Meta-reasoner fires"| assessment["MetaReasonerAssessment"]
-    meta -->|"Not due"| override
-
-    assessment --> override["maybeApplyPressureOverride()"]
-
-    override -->|"FINALIZE_NOW +<br/>non-FormIntention"| forced["Enqueue forced<br/>terminal CONTACT_USER<br/>(isForcedTerminal=true)"]
-    override -->|"REQUEST_TOOL_THEN_FINALIZE +<br/>non-FormIntention"| soft["Replace with<br/>EnqueueContinuation(HIGH)<br/>(soft hint)"]
-    override -->|"FormIntention or<br/>no override needed"| passthrough["Pass through unchanged"]
+    decision --> meta["DeliberationEngine<br/>pressure override path"]
+    meta -->|"FINALIZE_NOW + non-FormIntention"| forced["Forced terminal<br/>FormIntention(CONTACT_USER)"]
+    meta -->|"REQUEST_TOOL_THEN_FINALIZE + non-FormIntention"| soft["Synthetic<br/>EnqueueContinuation(HIGH)"]
+    meta -->|"No override"| passthrough["Pass through unchanged"]
 
     forced --> dispatch
     soft --> dispatch
@@ -207,27 +217,27 @@ flowchart TB
 
     dispatch["DecisionDispatcher.dispatch()"]
 
-    dispatch -->|EnqueueContinuation| enq_thought["enqueueContinuation()<br/>-> scheduler continuation queue"]
-    dispatch -->|FormIntention| form["Validate contract<br/>-> enqueue QueuedIntention"]
-    dispatch -->|EnqueuePlan| plan_steps["Decompose into<br/>plan-step continuations"]
-    dispatch -->|Noop| noop_enq["Re-enqueue as<br/>typed continuation<br/>(unless parseFailure)"]
+    dispatch -->|EnqueueContinuation| enq_thought["enqueueContinuation()<br/>continuation queue"]
+    dispatch -->|FormIntention| form["Validate contract<br/>enqueue QueuedIntention"]
+    dispatch -->|EnqueuePlan| plan_steps["Refine plan<br/>dedup / budget gates<br/>enqueue plan-step continuations"]
+    dispatch -->|Noop parseFailureShortCircuit=true| short_circuit["enqueueFallbackExplanation()"]
+    dispatch -->|Noop normal| noop_record["Record noop<br/>optional fallback explanation"]
 
     form --> next_loop["Next runLoop() iteration"]
     enq_thought --> next_loop
     plan_steps --> next_loop
-    noop_enq --> next_loop
 
     next_loop --> action_review["processAction() via<br/>ActionReviewPipeline"]
 
-    action_review --> grounding_gate["Grounding Gate<br/>(evidence check)"]
-    grounding_gate --> superego["Superego Review<br/>(authorization)"]
-    superego --> action_control["Action Control<br/>(staging / auto-commit)"]
+    action_review --> grounding_gate["Grounding Gate"]
+    grounding_gate --> superego["Superego Review"]
+    superego --> action_control["Action Control"]
     action_control --> execute["MotorCortex.execute()"]
 
-    execute --> feedback_cue["ActionFeedbackCue<br/>(back to scheduler)"]
+    execute --> feedback_cue["ActionFeedbackCue<br/>(back into scheduler)"]
 
-    subgraph safety_net ["Safety Net (post-task)"]
-        force_terminal["maybeForceTerminalAnswer()<br/>(backstop for extreme thresholds)"]
+    subgraph safety_net ["Safety Net"]
+        force_terminal["maybeForceTerminalAnswer()"]
     end
 
     next_loop -.-> force_terminal
@@ -242,9 +252,10 @@ sequenceDiagram
     participant SIC as StimulusIngress
     participant AS as AttentionScheduler
     participant Ego as Ego.runLoop()
-    participant HP as HierarchicalPlanner
-    participant L1 as L1 Lane
-    participant L2 as L2 Sub-Planner
+    participant HP as HierarchicalEgoPlanner
+    participant IP as InputPlanner
+    participant GC as GroundingClassifier
+    participant L2 as L2 Input Planner
     participant DE as DeliberationEngine
     participant DD as DecisionDispatcher
     participant ARP as ActionReviewPipeline
@@ -256,19 +267,20 @@ sequenceDiagram
     AS->>Ego: nextTask() -> AttendOpportunity
 
     Ego->>HP: decide(IncomingInput, context)
-    HP->>L1: InputPlanner.plan()
-    L1->>L1: InputIntentRouter.route() [LLM]
-    L1->>L1: GroundingClassifier.classify()
-    L1->>L2: e.g. DirectResponsePlanner.plan() [LLM]
-    L2-->>L1: EgoDecision
-    L1-->>HP: EgoDecision
+    HP->>IP: InputPlanner.plan()
+    IP->>IP: InputIntentRouter.route() [LLM]
+    IP->>GC: classify(route, trigger, context)
+    GC-->>IP: GroundingMetadata
+    IP->>L2: selected L2 planner [LLM]
+    L2-->>IP: EgoDecision
+    IP-->>HP: EgoDecision
     HP-->>Ego: EgoDecision
 
     Ego->>DE: maybeApplyPressureOverride()
-    DE-->>Ego: (possibly overridden) EgoDecision
+    DE-->>Ego: final EgoDecision
 
     Ego->>DD: dispatch(decision)
-    DD->>AS: enqueueIntention / enqueueContinuation / enqueueAction
+    DD->>AS: enqueue intention / enqueue continuation / enqueue plan steps / fallback
 
     Note over Ego,AS: runLoop continues draining scheduler
 
@@ -276,64 +288,64 @@ sequenceDiagram
 
     alt Intention -> Action
         Ego->>ARP: reviewAndExecute(action)
-        ARP->>ARP: Grounding Gate
-        ARP->>ARP: Superego Review [LLM]
-        ARP->>ARP: Action Control (stage/commit)
+        ARP->>ARP: grounding gate
+        ARP->>ARP: superego review
+        ARP->>ARP: action control
         ARP->>MC: execute(action)
         MC-->>ARP: ActionOutcome
-        ARP-->>Ego: cleanup if CONTACT_USER
     else Continuation
         Ego->>HP: decide(Continuation, context)
-        HP->>L1: ProgressionPlanner.plan() [LLM]
-        L1-->>HP: EgoDecision
+        HP->>HP: ProgressionPlanner.plan() [LLM]
         HP-->>Ego: EgoDecision
         Ego->>DD: dispatch(decision)
     end
 
     Note over Ego: Loop until scheduler empty or step limit reached
-    Ego->>DE: maybeForceTerminalAnswer() [safety net, each iteration]
 ```
 
 ## Circuit Breaker Coverage
 
-Each lane tracks consecutive parse failures per `rootInputId`. When the
-circuit opens, the lane returns `Noop(parseFailureShortCircuit = true)` which
-bypasses the normal noop re-enqueue and goes directly to fallback
-explanation.
+Only some planner lanes use the per-root parse-failure circuit breaker in
+`PlannerRuntime`.
 
-| LaneId | Circuit Breaker |
-|--------|:-:|
-| `INPUT_INTENT_ROUTER` | no (delegates to L2) |
+| LaneId | Circuit breaker |
+|--------|:---------------:|
+| `INPUT_INTENT_ROUTER` | no |
 | `DIRECT_RESPONSE` | no |
 | `GENERAL_ACTION` | yes |
 | `TASK_DECOMPOSITION` | no |
-| `GOAL` | no |
+| `ASSIGNMENT_GENERIC` | no |
+| `ASSIGNMENT_RECURRENT_TASK` | no |
+| `ASSIGNMENT_RESPONSIBILITY` | no |
 | `PROGRESSION` | yes |
-| `GOAL_WORK` | yes |
+| `ASSIGNMENT` | yes |
 | `IMPULSE` | yes |
 | `GROUNDING_CLASSIFIER` | no |
+| `PLAN_REFINER` | no |
+
+When a circuit-backed lane trips, it returns
+`Noop(parseFailureShortCircuit = true)`, which sends the flow directly to the
+fallback-explanation path instead of normal noop handling.
 
 ## File Index
 
 | Component | File |
 |-----------|------|
-| `Ego.Planner` interface | `agent/ego/Ego.kt:103-110` |
-| `HierarchicalEgoPlanner` | `agent/ego/planner/HierarchicalEgoPlanner.kt` |
-| `PlannerLane` interface | `agent/ego/planner/PlannerLane.kt` |
-| `LaneId` enum | `agent/ego/planner/LaneId.kt` |
-| `InputPlanner` | `agent/ego/planner/lane/InputPlanner.kt` |
-| `ProgressionPlanner` | `agent/ego/planner/lane/ProgressionPlanner.kt` |
-| `GoalWorkPlanner` | `agent/ego/planner/lane/GoalWorkPlanner.kt` |
-| `ImpulsePlanner` | `agent/ego/planner/lane/ImpulsePlanner.kt` |
-| `InputIntentRouter` | `agent/ego/planner/input/InputIntentRouter.kt` |
-| `GroundingClassifier` | `agent/ego/planner/input/GroundingClassifier.kt` |
-| `DirectResponsePlanner` | `agent/ego/planner/input/DirectResponsePlanner.kt` |
-| `GeneralActionPlanner` | `agent/ego/planner/input/GeneralActionPlanner.kt` |
-| `TaskDecompositionPlanner` | `agent/ego/planner/input/TaskDecompositionPlanner.kt` |
-| `GoalPlanner` | `agent/ego/planner/input/GoalPlanner.kt` |
-| `InputRoute` sealed interface | `agent/ego/planner/model/InputRoute.kt` |
-| `EgoTrigger` sealed interface | `agent/model/CognitionModels.kt:127-133` |
-| `EgoDecision` sealed interface | `agent/model/CognitionModels.kt:135-164` |
-| `DeliberationEngine` | `agent/ego/DeliberationEngine.kt` |
-| `DecisionDispatcher` | `agent/ego/DecisionDispatcher.kt` |
-| `ActionReviewPipeline` | `agent/ego/ActionReviewPipeline.kt` |
+| `HierarchicalEgoPlanner` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/HierarchicalEgoPlanner.kt` |
+| `PlannerLane` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/PlannerLane.kt` |
+| `LaneId` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/LaneId.kt` |
+| `InputPlanner` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/lane/InputPlanner.kt` |
+| `ProgressionPlanner` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/lane/ProgressionPlanner.kt` |
+| `AssignmentLanePlanner` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/lane/AssignmentLanePlanner.kt` |
+| `ImpulsePlanner` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/lane/ImpulsePlanner.kt` |
+| `InputIntentRouter` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/input/InputIntentRouter.kt` |
+| `GroundingClassifier` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/input/GroundingClassifier.kt` |
+| `DirectResponder` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/input/DirectResponder.kt` |
+| `GeneralActionPlanner` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/input/GeneralActionPlanner.kt` |
+| `TaskDecompositionPlanner` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/input/TaskDecompositionPlanner.kt` |
+| `AssignmentCommandBuilder` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/input/AssignmentCommandBuilder.kt` |
+| `InputRoute` | `src/main/kotlin/ai/neopsyke/agent/ego/planner/model/InputRoute.kt` |
+| `EgoTrigger` / `EgoDecision` | `src/main/kotlin/ai/neopsyke/agent/model/CognitionModels.kt` |
+| `DecisionDispatcher` | `src/main/kotlin/ai/neopsyke/agent/ego/DecisionDispatcher.kt` |
+| `DeliberationEngine` | `src/main/kotlin/ai/neopsyke/agent/ego/DeliberationEngine.kt` |
+| `ActionReviewPipeline` | `src/main/kotlin/ai/neopsyke/agent/ego/ActionReviewPipeline.kt` |

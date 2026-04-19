@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.ego
 
-import ai.neopsyke.agent.durablework.DurableWorkActivation
+import ai.neopsyke.agent.assignments.AssignmentActivation
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.CognitiveThreadKind
@@ -94,14 +94,14 @@ class CognitiveThreadStoreTest {
     }
 
     @Test
-    fun `impulse and goal work create typed threads`() {
+    fun `impulse and assignment work create typed threads`() {
         val store = CognitiveThreadStore()
         val automationContext = ConversationContext(
-            sessionId = "goal-session",
-            interlocutor = Interlocutor.named("goal-runtime"),
+            sessionId = "assignment-session",
+            interlocutor = Interlocutor.named("assignment-runtime"),
             security = ConversationSecurityContexts.internalAutomation(
-                provider = "goal-runtime",
-                channelId = "goal-session",
+                provider = "assignment-runtime",
+                channelId = "assignment-session",
             ),
         )
 
@@ -116,53 +116,53 @@ class CognitiveThreadStoreTest {
                 conversationContext = automationContext,
             )
         )
-        val goalThread = store.ensureForGoalWork(
-            DurableWorkActivation(
-                workItemId = "goal-1",
+        val assignmentThread = store.ensureForAssignment(
+            AssignmentActivation(
+                workItemId = "assignment-1",
                 stepId = "step-1",
-                rootInputId = "goal-root-1",
+                rootInputId = "assignment-root-1",
                 stepDescription = "Verify latest pricing",
                 acceptanceCriteria = "Provide verified pricing",
                 workingContext = "pricing",
                 conversationContext = automationContext,
                 wakeReason = "timer",
-            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.DURABLE_WORK_STEP_POLICY),
+            groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.ASSIGNMENT_STEP_POLICY),
             )
         )
 
         assertEquals(CognitiveThreadKind.DRIVE, impulseThread.kind)
-        assertEquals(CognitiveThreadKind.DURABLE_WORK_DIRECTED, goalThread.kind)
-        assertNotNull(store.thread("goal-root-1", automationContext))
+        assertEquals(CognitiveThreadKind.ASSIGNMENT_DIRECTED, assignmentThread.kind)
+        assertNotNull(store.thread("assignment-root-1", automationContext))
     }
 
     @Test
-    fun `goal continuation survives opportunity generation and thread status transitions`() {
+    fun `assignment continuation survives opportunity generation and thread status transitions`() {
         val store = CognitiveThreadStore()
         val automationContext = ConversationContext(
-            sessionId = "goal-session",
-            interlocutor = Interlocutor.named("goal-runtime"),
+            sessionId = "assignment-session",
+            interlocutor = Interlocutor.named("assignment-runtime"),
             security = ConversationSecurityContexts.internalAutomation(
-                provider = "goal-runtime",
-                channelId = "goal-session",
+                provider = "assignment-runtime",
+                channelId = "assignment-session",
             ),
         )
-        val work = DurableWorkActivation(
-            workItemId = "goal-1",
+        val work = AssignmentActivation(
+            workItemId = "assignment-1",
             stepId = "step-1",
-            rootInputId = "work:goal-1:step-1",
+            rootInputId = "work:assignment-1:step-1",
             stepDescription = "Verify latest pricing",
             acceptanceCriteria = "Provide verified pricing",
             workingContext = "pricing",
             conversationContext = automationContext,
             wakeReason = "timer",
-        groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.DURABLE_WORK_STEP_POLICY),
+        groundingMetadata = GroundingMetadata(requirement = GroundingRequirement.NOT_REQUIRED, source = GroundingSource.ASSIGNMENT_STEP_POLICY),
         )
 
-        store.bindGoalWork(work)
-        store.goalOpportunity(work)
+        store.bindAssignment(work)
+        store.assignmentOpportunity(work)
         store.markWaiting(work.rootInputId, automationContext, reason = "await_timer")
         val waiting = store.thread(work.rootInputId, automationContext)
-        val continuation = store.goalWork(work.rootInputId, automationContext)
+        val continuation = store.assignment(work.rootInputId, automationContext)
         store.markResolved(work.rootInputId, automationContext)
 
         assertEquals(work, continuation)

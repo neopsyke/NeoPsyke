@@ -228,7 +228,7 @@ class LlmLongTermMemoryAdvisor(
                 Prefer saving:
                 - stable user preferences or durable user facts when memory_subject=user
                 - stable self-observations, self-initiated learning interests, or internal drive patterns when memory_subject=self
-                - durable goal constraints or decisions
+                - durable assignment constraints or decisions
                 - important factual outcomes
                 Avoid saving transient chatter or redundant details.
                 Never save a fact that is already present in the "Long-term memory recall" block

@@ -3,7 +3,7 @@ package ai.neopsyke.agent.cortex.sensory
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.config.DefaultInterlocutorResolver
 import ai.neopsyke.agent.config.InterlocutorResolver
-import ai.neopsyke.agent.durablework.WakeReasonType
+import ai.neopsyke.agent.assignments.WakeReasonType
 import ai.neopsyke.agent.model.ConversationContext
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.ActionExecutionStatus
@@ -70,7 +70,7 @@ sealed interface RuntimeControlSignal : Signal {
     data class ConfigReloaded(val key: String) : RuntimeControlSignal
 }
 
-data class DurableWorkCue(
+data class AssignmentCue(
     val workItemId: String,
     val stepId: String,
     val reason: String,
@@ -82,7 +82,7 @@ data class DurableWorkCue(
             id = RootInputIds.next(),
             family = StimulusFamily.CUE,
             source = SOURCE,
-            content = "durable_work_runtime_work_ready",
+            content = "assignment_runtime_work_ready",
             receivedAt = Instant.now(),
             conversationContext = ConversationContext(
                 sessionId = ConversationContext.DEFAULT_SESSION_ID,
@@ -105,9 +105,9 @@ data class DurableWorkCue(
         )
 
     companion object {
-        private const val SOURCE: String = "durable-work-runtime"
+        private const val SOURCE: String = "assignment-runtime"
 
-        fun fromStimulus(stimulus: StimulusEnvelope): DurableWorkCue? {
+        fun fromStimulus(stimulus: StimulusEnvelope): AssignmentCue? {
             if (stimulus.family != StimulusFamily.CUE) return null
             if (stimulus.metadata[METADATA_CUE_TYPE] != CUE_TYPE_WORK_READY) return null
             val workItemId = stimulus.metadata[METADATA_WORK_ITEM_ID] ?: return null
@@ -117,7 +117,7 @@ data class DurableWorkCue(
                 ?.takeIf { it.isNotBlank() }
                 ?.let { raw -> runCatching { WakeReasonType.valueOf(raw) }.getOrNull() }
             val wakeReasonDetail = stimulus.metadata[METADATA_WAKE_REASON_DETAIL]?.ifBlank { null }
-            return DurableWorkCue(
+            return AssignmentCue(
                 workItemId = workItemId,
                 stepId = stepId,
                 reason = reason,
@@ -251,7 +251,7 @@ data class ActionFeedbackCue(
 
 object CognitiveCueMetadata {
     const val METADATA_CUE_TYPE: String = "cue_type"
-    const val METADATA_WORK_ITEM_ID: String = "goal_id"
+    const val METADATA_WORK_ITEM_ID: String = "assignment_id"
     const val METADATA_STEP_ID: String = "step_id"
     const val METADATA_REASON: String = "reason"
     const val METADATA_WAKE_REASON_TYPE: String = "wake_reason_type"
@@ -277,7 +277,7 @@ object CognitiveCueMetadata {
     const val METADATA_GROUNDING_SOURCE: String = "grounding_source"
 
     const val CUE_TYPE_ID_IMPULSE_READY: String = "id_impulse_ready"
-    const val CUE_TYPE_WORK_READY: String = "durable_work_runtime_work_ready"
+    const val CUE_TYPE_WORK_READY: String = "assignment_runtime_work_ready"
     const val CUE_TYPE_ACTION_FEEDBACK: String = "action_feedback"
 }
 
@@ -531,7 +531,7 @@ class SensoryCortex(
     fun offerActionFeedback(cue: ActionFeedbackCue): Boolean =
         offerSyntheticSignal(CognitiveSignal.FeedbackReceived(cue))
 
-    fun offerDurableWorkCue(cue: DurableWorkCue): Boolean =
+    fun offerAssignmentCue(cue: AssignmentCue): Boolean =
         offerSyntheticSignal(CognitiveSignal.StimulusReceived(cue.toStimulus()))
 
     fun hasPendingSyntheticSignals(): Boolean = syntheticSignalCount.get() > 0

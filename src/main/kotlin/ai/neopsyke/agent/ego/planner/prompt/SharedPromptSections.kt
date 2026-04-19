@@ -15,7 +15,7 @@ import java.util.Locale
  */
 object SharedPromptSections {
 
-    const val GOAL_WORKING_CONTEXT_MAX_CHARS: Int = 1_200
+    const val ASSIGNMENTING_CONTEXT_MAX_CHARS: Int = 1_200
 
     fun formatTriggerText(trigger: EgoTrigger): String =
         when (trigger) {
@@ -57,7 +57,7 @@ object SharedPromptSections {
                 val planInfo = continuation.planContext?.let { ctx ->
                     """
                     Active plan context:
-                    plan_workItem=${ctx.planGoal}
+                    plan_workItem=${ctx.planAssignment}
                     step=${ctx.stepIndex + 1}/${ctx.totalSteps}
                     step_description=${ctx.stepDescription}
                     Re-evaluate this step in light of current context. You may refine, skip, or act.
@@ -89,10 +89,10 @@ object SharedPromptSections {
                     .filter { it.isNotBlank() }
                 parts.joinToString("\n")
             }
-            is EgoTrigger.DurableWork -> {
+            is EgoTrigger.Assignment -> {
                 val wu = trigger.workUnit
                 buildString {
-                    append("GOAL_WORK(goal=, step=${wu.stepId}): ${wu.stepDescription}")
+                    append("ASSIGNMENT(assignment=, step=${wu.stepId}): ${wu.stepDescription}")
                     if (wu.runtimeFacts.isNotEmpty()) {
                         append("\nruntime_facts=")
                         append(wu.runtimeFacts.entries.joinToString(", ") { "${it.key}: ${it.value}" })
@@ -107,7 +107,7 @@ object SharedPromptSections {
                     }
                     if (wu.workingContext.isNotBlank()) {
                         append("\nworking_context=")
-                        append(wu.workingContext.take(GOAL_WORKING_CONTEXT_MAX_CHARS))
+                        append(wu.workingContext.take(ASSIGNMENTING_CONTEXT_MAX_CHARS))
                     }
                 }
             }
@@ -300,12 +300,12 @@ object SharedPromptSections {
         }
 
     fun activeWorkItemsSection(context: PlannerContext): PromptBudgetAllocator.Section? =
-        context.goalWorkSummary.takeIf { it.isNotBlank() }?.let {
+        context.assignmentSummary.takeIf { it.isNotBlank() }?.let {
             PromptBudgetAllocator.Section(
-                key = "planner_active_goals",
+                key = "planner_active_assignments",
                 role = ChatRole.USER,
                 band = PromptBudgetAllocator.Band.OPTIONAL,
-                content = "Active durable work items (resolve numbered references into typed work_item_reference fields for durable_work_operation):\n$it"
+                content = "Active assignment items (resolve numbered references into typed work_item_reference fields for assignment_operation):\n$it"
             )
         }
 
@@ -375,7 +375,7 @@ object SharedPromptSections {
                     context.reviewableResponsibilitySummary.takeIf { it.isNotBlank() }?.let {
                         append("\n\nReviewable responsibility slate:\n")
                         append(it)
-                        append("\nIf advancing an existing responsibility is the best useful move, you may choose action_type=durable_work_operation with a typed review command against one numbered responsibility.")
+                        append("\nIf advancing an existing responsibility is the best useful move, you may choose action_type=assignment_operation with a typed review command against one numbered responsibility.")
                     }
                 },
             )

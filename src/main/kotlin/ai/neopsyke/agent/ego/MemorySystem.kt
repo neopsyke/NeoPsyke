@@ -1003,13 +1003,13 @@ class MemorySystem(
             is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
-            is EgoTrigger.DurableWork -> "durable-work"
+            is EgoTrigger.Assignment -> "assignment"
         }
         var recallIntent = RecallIntent.GENERAL
         val cue = when (trigger) {
             is EgoTrigger.IncomingInput -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
             is EgoTrigger.ActionFeedback -> buildRecallCue(trigger, recentDialogue, episodicCues).trim()
-            is EgoTrigger.DurableWork -> trigger.workUnit.stepDescription.trim()
+            is EgoTrigger.Assignment -> trigger.workUnit.stepDescription.trim()
             is EgoTrigger.IncomingImpulse -> {
                 val baseCue = trigger.impulse.prompt.trim()
                 buildImpulseRecallCue(baseCue, trigger.impulse.needId)
@@ -1070,7 +1070,7 @@ class MemorySystem(
                 is EgoTrigger.Continuation -> trigger.continuation.rootInputId
                 is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
                 is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
-                is EgoTrigger.DurableWork -> trigger.workUnit.workItemId
+                is EgoTrigger.Assignment -> trigger.workUnit.workItemId
             }
             instrumentation.emit(
                 AgentEvents.memoryRecallResult(
@@ -1120,7 +1120,7 @@ class MemorySystem(
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent.trim()
             is EgoTrigger.Continuation -> ""
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt.trim()
-            is EgoTrigger.DurableWork -> trigger.workUnit.stepDescription.trim()
+            is EgoTrigger.Assignment -> trigger.workUnit.stepDescription.trim()
         }
         val recentUserTurn = recentDialogue
             .asReversed()
@@ -1217,7 +1217,7 @@ class MemorySystem(
             is EgoTrigger.IncomingInput -> null
             is EgoTrigger.ActionFeedback -> null
             is EgoTrigger.IncomingImpulse -> null
-            is EgoTrigger.DurableWork -> null
+            is EgoTrigger.Assignment -> null
             is EgoTrigger.Continuation -> {
                 val continuation = trigger.continuation
                 if (continuation.deniedActionType == null && continuation.denialReasonCode.isNullOrBlank()) {

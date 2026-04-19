@@ -46,7 +46,7 @@ data class ActionSecurityPolicyConfig(
                         directCommitEnabled = true,
                         autonomousCommitEnabled = true,
                     ),
-                    ActionType.DURABLE_WORK_OPERATION.id to ActionSecurityActionRule(
+                    ActionType.ASSIGNMENT_OPERATION.id to ActionSecurityActionRule(
                         directCommitEnabled = true,
                         autonomousCommitEnabled = true,
                         recurringRequiresApproval = true,
@@ -150,16 +150,16 @@ class ConfiguredActionAuthorizationPolicy(
                 WorkItemDeleteIntent.DELETE_ALL -> {
                     return stage(
                         commitMode = CommitMode.APPROVAL_BACKED,
-                        reason = "Deleting all goals always requires explicit owner reapproval.",
-                        reasonCode = "POLICY_GOAL_DELETE_ALL_STAGE_REQUIRED",
+                        reason = "Deleting all assignments always requires explicit owner reapproval.",
+                        reasonCode = "POLICY_ASSIGNMENT_DELETE_ALL_STAGE_REQUIRED",
                     )
                 }
 
                 WorkItemDeleteIntent.DELETE_AMBIGUOUS -> {
                     return stage(
                         commitMode = CommitMode.APPROVAL_BACKED,
-                        reason = "Ambiguous goal deletion requests require staged owner approval.",
-                        reasonCode = "POLICY_GOAL_DELETE_AMBIGUOUS_STAGE_REQUIRED",
+                        reason = "Ambiguous assignment deletion requests require staged owner approval.",
+                        reasonCode = "POLICY_ASSIGNMENT_DELETE_AMBIGUOUS_STAGE_REQUIRED",
                     )
                 }
 
@@ -167,19 +167,19 @@ class ConfiguredActionAuthorizationPolicy(
                     if (!isOwnerVerifiedDirectChannel(conversationContext)) {
                         return stage(
                             commitMode = CommitMode.APPROVAL_BACKED,
-                            reason = "Goal deletion may direct commit only from an owner-verified direct channel.",
-                            reasonCode = "POLICY_GOAL_DELETE_OWNER_DIRECT_REQUIRED",
+                            reason = "Assignment deletion may direct commit only from an owner-verified direct channel.",
+                            reasonCode = "POLICY_ASSIGNMENT_DELETE_OWNER_DIRECT_REQUIRED",
                         )
                     }
                 }
             }
         }
 
-        if (isRecurringGoalMutation(action) && (rule?.recurringRequiresApproval != false)) {
+        if (isRecurringAssignmentMutation(action) && (rule?.recurringRequiresApproval != false)) {
             return stage(
                 commitMode = CommitMode.APPROVAL_BACKED,
-                reason = "Recurring goal mutations require staged approval.",
-                reasonCode = "POLICY_RECURRING_GOAL_STAGE_REQUIRED",
+                reason = "Recurring assignment mutations require staged approval.",
+                reasonCode = "POLICY_RECURRING_ASSIGNMENT_STAGE_REQUIRED",
             )
         }
 
@@ -330,15 +330,13 @@ class ConfiguredActionAuthorizationPolicy(
         }
     }
 
-    private fun isRecurringGoalMutation(action: PendingAction): Boolean {
-        if (action.type != ActionType.DURABLE_WORK_OPERATION) {
+    private fun isRecurringAssignmentMutation(action: PendingAction): Boolean {
+        if (action.type != ActionType.ASSIGNMENT_OPERATION) {
             return false
         }
-        val node = durableWorkOperationNode(action, ActionRegistry.empty()) ?: return false
-        val operation = optionalText(node, "command").ifBlank {
-            optionalText(node, "operation")
-        }
-        val cronExpression = optionalText(node, "cron_expression", "cronExpression")
+        val node = assignmentOperationNode(action, ActionRegistry.empty()) ?: return false
+        val operation = optionalText(node, "command")
+        val cronExpression = optionalText(node, "cron_expression")
         return cronExpression.isNotBlank() && operation in setOf("create", "revise_plan")
     }
 
@@ -346,14 +344,12 @@ class ConfiguredActionAuthorizationPolicy(
         action: PendingAction,
         actionRegistry: ActionRegistry,
     ): WorkItemDeleteIntent? {
-        if (action.type != ActionType.DURABLE_WORK_OPERATION) {
+        if (action.type != ActionType.ASSIGNMENT_OPERATION) {
             return null
         }
-        val node = durableWorkOperationNode(action, actionRegistry) ?: return null
-        val operation = optionalText(node, "command").ifBlank {
-            optionalText(node, "operation")
-        }
-        val workItemId = optionalText(node, "work_item_id", "workItemId").ifBlank {
+        val node = assignmentOperationNode(action, actionRegistry) ?: return null
+        val operation = optionalText(node, "command")
+        val workItemId = optionalText(node, "work_item_id").ifBlank {
             optionalText(node.path("work_item_reference"), "id")
         }
         return when (operation) {
@@ -363,11 +359,11 @@ class ConfiguredActionAuthorizationPolicy(
         }
     }
 
-    private fun durableWorkOperationNode(
+    private fun assignmentOperationNode(
         action: PendingAction,
         actionRegistry: ActionRegistry,
     ) = runCatching {
-        mapper.readTree(actionRegistry.repairPlannerPayload(ActionType.DURABLE_WORK_OPERATION, action.payload))
+        mapper.readTree(actionRegistry.repairPlannerPayload(ActionType.ASSIGNMENT_OPERATION, action.payload))
     }.getOrNull()
 
     private fun optionalText(

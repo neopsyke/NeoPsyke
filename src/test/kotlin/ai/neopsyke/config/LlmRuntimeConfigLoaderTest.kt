@@ -433,15 +433,15 @@ class LlmRuntimeConfigLoaderTest {
         assertEquals(LlmProvider.GROQ, highRouter.provider)
         assertEquals("openai/gpt-oss-120b", highRouter.model)
 
-        val appResponsibilityLane = appConfig.cognitiveRoles.plannerLanes["durable_work_responsibility"]!!
+        val appResponsibilityLane = appConfig.cognitiveRoles.plannerLanes["assignment_responsibility"]!!
         assertEquals(LlmProvider.GROQ, appResponsibilityLane.provider)
         assertEquals("openai/gpt-oss-120b", appResponsibilityLane.model)
 
-        val lowResponsibilityLane = lowLlmConfig.cognitiveRoles.plannerLanes["durable_work_responsibility"]!!
+        val lowResponsibilityLane = lowLlmConfig.cognitiveRoles.plannerLanes["assignment_responsibility"]!!
         assertEquals(LlmProvider.GROQ, lowResponsibilityLane.provider)
         assertEquals("openai/gpt-oss-120b", lowResponsibilityLane.model)
 
-        val highResponsibilityLane = highLlmConfig.cognitiveRoles.plannerLanes["durable_work_responsibility"]!!
+        val highResponsibilityLane = highLlmConfig.cognitiveRoles.plannerLanes["assignment_responsibility"]!!
         assertEquals(LlmProvider.GROQ, highResponsibilityLane.provider)
         assertEquals("openai/gpt-oss-120b", highResponsibilityLane.model)
     }

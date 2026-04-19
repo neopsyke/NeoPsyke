@@ -87,7 +87,7 @@ class RoutedConversationOutputGateway(
                 )
             }
         // A synthesized automation context may carry a preferred-channel hint
-        // in its attributes (e.g. set by durable-work from the work item's
+        // in its attributes (e.g. set by assignment from the work item's
         // contactChannel). The resolver honors the hint only if it matches a
         // currently-available target.
         val preferredHint = conversationContext.security.channel

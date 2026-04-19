@@ -371,7 +371,7 @@ internal class DecisionDispatcher(
                 }
 
                 // ── Gate 2: exact plan hash dedup (uses refined plan) ──
-                val planHash = normalizePlanHash(refinedDecision.goal, refinedDecision.steps)
+                val planHash = normalizePlanHash(refinedDecision.assignment, refinedDecision.steps)
                 val inputHashes = emittedPlanHashes.getOrPut(scope) { mutableSetOf() }
                 if (!inputHashes.add(planHash)) {
                     instrumentation.emit(
@@ -404,7 +404,7 @@ internal class DecisionDispatcher(
                 planCountByInput[scope] = currentPlanCount + 1
                 val scratchpadActivated = scratchpadStore.recordPlan(
                     rootInputId = rootInputId,
-                    goal = refinedDecision.goal,
+                    assignment = refinedDecision.assignment,
                     steps = refinedDecision.steps
                 )
                 if (scratchpadActivated) {
@@ -414,7 +414,7 @@ internal class DecisionDispatcher(
                             data = mapOf(
                                 "root_input_id" to rootInputId,
                                 "root_input_received_at_ms" to rootInputReceivedAtMs,
-                                "goal_preview" to TextSecurity.preview(refinedDecision.goal, 140),
+                                "assignment_preview" to TextSecurity.preview(refinedDecision.assignment, 140),
                                 "active_tasks" to scratchpadStore.activeTaskCount(),
                                 "activation_trigger" to "plan_complexity",
                                 "plan_step_count" to refinedDecision.steps.size
@@ -434,7 +434,7 @@ internal class DecisionDispatcher(
                             "root_input_id" to rootInputId,
                             "root_input_received_at_ms" to rootInputReceivedAtMs,
                             "update_type" to "plan_recorded",
-                            "goal_preview" to TextSecurity.preview(refinedDecision.goal, 140),
+                            "assignment_preview" to TextSecurity.preview(refinedDecision.assignment, 140),
                             "step_count" to refinedDecision.steps.size,
                             "active_tasks" to scratchpadStore.activeTaskCount()
                         )
@@ -450,7 +450,7 @@ internal class DecisionDispatcher(
                 instrumentation.emit(
                     AgentEvents.planCreated(
                         planId = planId,
-                        goal = refinedDecision.goal,
+                        assignment = refinedDecision.assignment,
                         stepCount = refinedDecision.steps.size,
                         urgency = refinedDecision.urgency.name.lowercase(),
                         steps = refinedDecision.steps,
@@ -466,7 +466,7 @@ internal class DecisionDispatcher(
                         ),
                         planContext = PlanContext(
                             planId = planId,
-                            planGoal = refinedDecision.goal,
+                            planAssignment = refinedDecision.assignment,
                             stepIndex = index,
                             totalSteps = refinedDecision.steps.size,
                             stepDescription = stepDescription,
@@ -635,8 +635,8 @@ internal class DecisionDispatcher(
         )
     }
 
-    private fun normalizePlanHash(goal: String, steps: List<String>): String {
-        val normalized = (listOf(goal) + steps)
+    private fun normalizePlanHash(assignment: String, steps: List<String>): String {
+        val normalized = (listOf(assignment) + steps)
             .joinToString("|") { it.lowercase().replace(Regex("\\s+"), " ").trim() }
         return normalized.hashCode().toString(16)
     }
@@ -725,8 +725,8 @@ internal class DecisionDispatcher(
         val request = PlanRefinementRequest(
             planKind = PlanKind.INLINE_EGO,
             terminalPolicy = TerminalPolicy.MAY_END_WITH_USER_DELIVERY,
-            goal = decision.goal,
-            instruction = decision.goal,
+            assignment = decision.assignment,
+            instruction = decision.assignment,
             steps = candidates,
             availableActions = buildInlineRefinementActions(plannerContext),
             runtimeFacts = buildInlineRuntimeFacts(plannerContext),

@@ -162,9 +162,9 @@ class ConversationOutputGatewayTest {
             text = "Goal result",
             conversationContext = ConversationContext(
                 sessionId = "default",
-                interlocutor = Interlocutor.named("goal-runtime"),
+                interlocutor = Interlocutor.named("assignment-runtime"),
                 security = ConversationSecurityContexts.internalAutomation(
-                    provider = "goal-runtime",
+                    provider = "assignment-runtime",
                     channelId = "default",
                 ),
             ),
@@ -175,7 +175,7 @@ class ConversationOutputGatewayTest {
     }
 
     @Test
-    fun `durable-work automation context routes through resolver using preferred channel hint`() = runBlocking {
+    fun `assignment automation context routes through resolver using preferred channel hint`() = runBlocking {
         var deliveredChatId: String? = null
         var seenHint: String? = null
         val gateway = RoutedConversationOutputGateway(
@@ -203,7 +203,7 @@ class ConversationOutputGatewayTest {
         })
 
         val baseSecurity = ConversationSecurityContexts.internalAutomation(
-            provider = "durable-work-runtime",
+            provider = "assignment-runtime",
             channelId = "",
         )
         val security = baseSecurity.copy(
@@ -215,7 +215,7 @@ class ConversationOutputGatewayTest {
             text = "Hamburg forecast: sunny.",
             conversationContext = ConversationContext(
                 sessionId = "default",
-                interlocutor = Interlocutor.named("durable-work-runtime"),
+                interlocutor = Interlocutor.named("assignment-runtime"),
                 security = security,
             ),
         )
@@ -252,7 +252,7 @@ class ConversationOutputGatewayTest {
         )
 
         val baseSecurity = ConversationSecurityContexts.internalAutomation(
-            provider = "durable-work-runtime",
+            provider = "assignment-runtime",
             channelId = "",
         )
         val security = baseSecurity.copy(
@@ -265,7 +265,7 @@ class ConversationOutputGatewayTest {
             text = "Weather update",
             conversationContext = ConversationContext(
                 sessionId = ConversationContext.DEFAULT_SESSION_ID,
-                interlocutor = Interlocutor.named("durable-work-runtime"),
+                interlocutor = Interlocutor.named("assignment-runtime"),
                 security = security,
             ),
         )
@@ -276,7 +276,7 @@ class ConversationOutputGatewayTest {
 
     @Test
     fun `non-DIRECT surface with trusted provider is not trusted with inbound channelId`() = runBlocking {
-        // Regression: a synthesized durable-work context with provider=telegram
+        // Regression: a synthesized assignment context with provider=telegram
         // and a non-chat channelId must not be delivered directly; the resolver
         // has to decide the real chat id.
         var telegramCalledWith: String? = null
@@ -305,10 +305,10 @@ class ConversationOutputGatewayTest {
             text = "hello",
             conversationContext = ConversationContext(
                 sessionId = "default",
-                interlocutor = Interlocutor.named("durable-work-runtime"),
+                interlocutor = Interlocutor.named("assignment-runtime"),
                 security = ConversationSecurityContexts.internalAutomation(
                     provider = "telegram",
-                    channelId = "work:some-goal:step2",
+                    channelId = "work:some-assignment:step2",
                 ),
             ),
         )
@@ -334,9 +334,9 @@ class ConversationOutputGatewayTest {
             text = "hello",
             conversationContext = ConversationContext(
                 sessionId = "default",
-                interlocutor = Interlocutor.named("goal-runtime"),
+                interlocutor = Interlocutor.named("assignment-runtime"),
                 security = ConversationSecurityContexts.internalAutomation(
-                    provider = "goal-runtime",
+                    provider = "assignment-runtime",
                     channelId = "default",
                 ),
             ),

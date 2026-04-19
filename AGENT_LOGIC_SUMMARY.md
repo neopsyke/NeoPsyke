@@ -15,7 +15,7 @@ NeoPsyke is an autonomous cognitive agent built around a Freudian-inspired archi
 
 **Six major subsystems:**
 
-1. **SensoryCortex** — Receives external stimuli (user messages, Telegram updates, goal/Id wake signals) and internal typed feedback cues, sanitizes/enriches stimulus envelopes, resolves conversation identity/security, and transforms envelope stimuli into typed `Percept` objects.
+1. **SensoryCortex** — Receives external stimuli (user messages, Telegram updates, assignment/Id wake signals) and internal typed feedback cues, sanitizes/enriches stimulus envelopes, resolves conversation identity/security, and transforms envelope stimuli into typed `Percept` objects.
 2. **Ego** — The central deliberation loop. Pulls percepts from SensoryCortex, schedules cognitive work via `AttentionScheduler`, delegates planning to the Planner, routes actions through the `ActionReviewPipeline`, tracks `DecisionPressure`, and manages thread/session lifecycle.
 3. **Superego** — Three-layer action review gate: `DeterministicConscience` hard-deny checks, configuration-based `ActionAuthorizationPolicy`, and LLM semantic review (with optional `TwoStageReview` escalation). Every non-fallback action must pass all three layers.
 4. **MotorCortex** — Discovers action plugins at startup via `ServiceLoader`, executes authorized actions through `ActionControlService`, and routes output through `ConversationOutputGateway`. Internal action feedback re-enters through SensoryCortex as a typed cognitive signal and is routed by `StimulusIngressCoordinator`.
@@ -23,7 +23,7 @@ NeoPsyke is an autonomous cognitive agent built around a Freudian-inspired archi
 6. **Memory System** — Four tiers: short-term context buffer (`MemoryStore`), long-term vector recall (`Hippocampus`), episodic journal (`Logbook`), and per-request scratchpad workspace (`ScratchpadStore`).
 
 **Supporting subsystems:**
-- **Goals Runtime** (`GoalsGateway` / `GoalManager`) — Persistent multi-step objective manager with event-sourced `GoalStateMachine`, cron scheduling via `TimerScheduler`, and async wait conditions via `WaitConditionMonitor`.
+- **Assignment Runtime** (`AssignmentGateway` / `AssignmentRuntime`) — Persistent multi-step objective manager with event-sourced `WorkItemStateMachine`, cron scheduling via `TimerScheduler`, and async wait conditions via `WaitConditionMonitor`.
 - **DeliberationEngine** — Tracks `DecisionPressure`, coordinates `MetaReasoner` assessments, enforces action retry budgets, and can force terminal answers under sustained pressure.
 - **Dashboard & Observability** (`DashboardServer` / `DashboardStateStore`) — Web UI for conversations, observability, and action control with SSE-based live updates.
 
@@ -47,7 +47,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
   - `ChatModelClient` instances per `CognitiveRole` (planner, superego_primary, superego_escalation, meta_reasoner, meta_reasoner_fallback, memory_advisor) from `llm-runtime.yaml`
   - Memory system from `memory-runtime.yaml` (off / default managed provider / external provider)
   - Id from `id-runtime.yaml` (optional)
-  - Goals runtime (optional, behind `config.goals.enabled`)
+  - Assignment runtime (optional, behind `config.assignment.enabled`)
   - Telegram ingress (optional, webhook or polling mode)
   - Google Workspace OAuth (optional)
   - `InstrumentationBus`, metrics, `TokenBudgetGate`
@@ -95,7 +95,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
   - Linguistic stimuli from dashboard chat sessions.
   - Linguistic stimuli from owner-only Telegram (webhook or polling).
   - Cue stimuli from Id impulse wakeups.
-  - Cue stimuli from goal-runtime work-ready signals.
+  - Cue stimuli from assignment-runtime work-ready signals.
   - Typed internal feedback cues from completed/waiting action outcomes (`FeedbackReceived`).
   - Envelope feedback stimuli for external compatibility paths (`StimulusReceived` with `family=FEEDBACK`).
 
@@ -107,7 +107,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
   - Dashboard chat: trusted owner direct-chat.
   - Stdin: control-only (exit command only, no chat stimuli).
   - Telegram: trusted owner after webhook-secret + owner chat/user allowlist checks.
-  - Id and goal-runtime cues: trusted internal automation.
+  - Id and assignment-runtime cues: trusted internal automation.
 - Session replay reconstructs security from recorded signal fields.
 
 ### L2: Telegram Ingress
@@ -150,7 +150,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 **`runLoop()`** — Inner deliberation loop (bounded by `config.planner.maxLoopStepsPerInput`):
 - Each iteration: `scheduler.nextTask(isBlocked)` → returns `LoopTask`.
 - Four task types:
-  - `AttendOpportunity` → `processOpportunity()` (routes by trigger: Input/Impulse/Feedback/GoalWork)
+  - `AttendOpportunity` → `processOpportunity()` (routes by trigger: Input/Impulse/Feedback/Assignment)
   - `ProcessContinuation` → `processContinuation()`
   - `ProcessIntention` → `processIntention()` (action-bearing intentions only)
   - `PerformAction` → `processAction()` → `actionPipeline.reviewAndExecute()`
@@ -159,7 +159,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 - Queue drain cleanup: clear orphaned scratchpads, reset per-input state, finalize idle Id impulse lifecycles.
 
 **`StimulusIngressCoordinator`** — Post-sensory routing:
-- Appraises goal-runtime cues through `GoalsGateway.nextWorkFromCue(...)`.
+- Appraises assignment-runtime cues through `AssignmentGateway.nextWorkFromCue(...)`.
 - Binds thread/percept state.
 - Shapes opportunity contract before enqueue (allowedIntentions, allowedCommitModes, availableActions).
 - Emits `ScheduledOpportunity` into scheduler.
@@ -190,7 +190,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 - Async waits update thread to `WAITING` with resume metadata.
 - Normal completion marks thread `RESOLVED` before cleanup.
 - Terminal thread snapshots preserved (bounded) after per-input ephemera cleared.
-- Non-goal threads use same semantics as goal roots.
+- Non-assignment threads use same semantics as assignment roots.
 
 ---
 
@@ -223,12 +223,12 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 
 ### L2: Ambient Context Assembly
 - Before planner/retrieval, Id assembles shared ambient context (cached best-effort snapshot):
-  - Active goals from `GoalRegistry`.
+  - Active assignments from `WorkItemRegistry`.
   - Recent scratchpad themes from digests.
   - Recent useful actions/updates from logbook.
   - Unresolved/open loops from active scratchpads.
   - Recently explored exact learning topics.
-- Advisory only: biases recall/prompting, does not hard-require goal alignment.
+- Advisory only: biases recall/prompting, does not hard-require assignment alignment.
 - Exact-repeat pressure is learning-specific: `recent_exact_learning_topics` visible to all needs, but only learning retrieval adds freshness guidance.
 
 ### L2: Denial Dynamics and Backoff
@@ -248,12 +248,12 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 **Decision types** (sealed `EgoDecision`):
 - `FormIntention(urgency, intentionKind, commitModePreference, actionType, payload, summary)` — Execute an action.
 - `EnqueueContinuation(urgency, continuation)` — Queue typed resumable work for later processing.
-- `EnqueuePlan(urgency, goal, steps)` — Multi-step plan decomposed into typed continuations. Steps pass through `PlanRefiner` before hash/dedup/enqueue.
+- `EnqueuePlan(urgency, assignment, steps)` — Multi-step plan decomposed into typed continuations. Steps pass through `PlanRefiner` before hash/dedup/enqueue.
 - `Noop(reason, parseFailureShortCircuit?, deniedActionType?, deniedActionPayload?, denialReasonCode?)` — No action.
 
 **Plan refinement** (`PlanRefiner`):
 - File: `src/main/kotlin/ai/neopsyke/agent/ego/planner/PlanRefiner.kt`
-- All plans (inline Ego plans and durable-work plans) pass through a single bounded refinement step before commit.
+- All plans (inline Ego plans and assignment plans) pass through a single bounded refinement step before commit.
 - `LlmPlanRefiner` makes one LLM call to repair/validate plans. Follows standard retry/validation/fallback.
 - `NoopPlanRefiner` for tests and when `config.planner.planRefinementEnabled=false`.
 - On failure: accepts original plan when meaning is preserved and mechanical boundary checks pass.
@@ -271,7 +271,7 @@ Stimulus → SensoryCortex (sanitize, appraise) → Percept
 |------|---------|------|
 | `InputPlanner` | `IncomingInput` | `lane/InputPlanner.kt` |
 | `ProgressionPlanner` | `Continuation`, `ActionFeedback` | `lane/ProgressionPlanner.kt` |
-| `GoalWorkPlanner` | `GoalWork` | `lane/GoalWorkPlanner.kt` |
+| `AssignmentPlanner` | `Assignment` | `lane/AssignmentPlanner.kt` |
 | `ImpulsePlanner` | `IncomingImpulse` | `lane/ImpulsePlanner.kt` |
 
 Each lane:
@@ -279,26 +279,26 @@ Each lane:
 - Uses `PlannerRuntime` for model calls (retry, circuit-breaker, schema fallback).
 - Parses model output into typed lane decision models before mapping to `EgoDecision`:
   - `ProgressionDecision` (`ProgressionPlanner`)
-  - `GoalWorkDecision` (`GoalWorkPlanner`)
+  - `AssignmentDecision` (`AssignmentPlanner`)
   - `ImpulseDecision` (`ImpulsePlanner`)
 - Validates constraints: allowed intentions, commit modes, available actions.
 - Emits per-lane prompt-budget telemetry.
 
 ### L2: InputPlanner Sub-Planners
 - `InputIntentRouter`: LLM-based semantic classifier returning typed `InputRoute`.
-- `DirectResponsePlanner`: terminal answers from current context.
+- `DirectResponder`: terminal answers from current context.
 - `GeneralActionPlanner`: single-action with full constraint validation.
 - `TaskDecompositionPlanner`: multi-step plan decomposition.
-- `GoalPlanner`: unified goal creation and management with typed GoalCommand and LLM reference resolution.
+- `AssignmentCommandBuilder`: unified assignment creation and management with typed `AssignmentCommand` and LLM reference resolution.
 
 Two-call pattern: InputIntentRouter (classify) then sub-planner (decide).
 Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM output.
 
-### L2: Goal Semantics (Typed)
-- Goal creation and management emit typed `GoalCommand` variants.
-- Goal references are LLM-resolved (`GoalReference.ByInternalId`, `ByResolvedEntity`, `Ambiguous`, `Unresolved`).
-- Planner payloads use a canonical serialized typed boundary (`SerializedGoalCommand`) with nested typed `goal_reference`.
-- `GoalOperationActionPlugin` validates and executes typed commands (no text heuristics, no plugin-side goal-id repair).
+### L2: Assignment Semantics (Typed)
+- Assignment creation and management emit typed `AssignmentCommand` variants.
+- Assignment references are LLM-resolved (`WorkItemReference.ByInternalId`, `ByResolvedEntity`, `Ambiguous`, `Unresolved`).
+- Planner payloads use a canonical serialized typed boundary (`SerializedAssignmentCommand`) with nested typed `work_item_reference`.
+- `AssignmentOperationActionPlugin` validates and executes typed commands (no text heuristics, no plugin-side assignment-id repair).
 - Ambiguous/unresolved references trigger clarification or failure, never silent guessing.
 
 ### L2: Prompt Budget and Assembly
@@ -328,7 +328,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 
 **`processContinuation(continuation: QueuedContinuation)`**:
 - Drops if `passes >= maxContinuationPasses`; if fallback allowed, enqueues fallback `contact_user` action.
-- User/system/goal-origin continuation chains default to `allowFallbackExplanation=true`.
+- User/system/assignment-origin continuation chains default to `allowFallbackExplanation=true`.
 - For Id-origin: rebuilds convergence state and action filters; fallback disabled unless earlier path explicitly enables it.
 - Otherwise mirrors the input path: build context → meta assessment → planner decision → dispatch.
 
@@ -364,7 +364,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Reads typed `isForcedTerminal` marker on the action.
 - Decision: grounding not required → allow; evidence gathered → allow; evidence unavailable → graceful allow (`GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL`); technical failures → deny (`TECH_GROUNDING_EVIDENCE_FAILURE`); no evidence yet → deny (`GROUNDING_EVIDENCE_REQUIRED`).
 - Forced terminal + grounding required + technical failures → allow degraded answer with verification-failure disclaimer.
-- Grounding classification happens at input intake via `GroundingClassifier` (deterministic pre-filter on `InputRoute` + LLM fallback for ambiguous routes). Goal work uses per-step typed grounding policy.
+- Grounding classification happens at input intake via `GroundingClassifier` (deterministic pre-filter on `InputRoute` + LLM fallback for ambiguous routes). Assignment work uses per-step typed grounding policy.
 
 ### L2: Superego Review
 - File: `src/main/kotlin/ai/neopsyke/agent/superego/Superego.kt`
@@ -380,7 +380,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 **Phase 2: Authorization policy** (`SuperegoPolicy.authorize`):
 - Delegates to `ActionAuthorizationPolicy` (YAML-backed).
 - Evaluates: instruction trust, principal role, argument data trust, per-action YAML overrides.
-- Special rules: public-commit deny-until-enabled, recurring-goal stricter approval, goal-delete rules (`delete_all` always stages; single-goal direct commit only from owner-verified direct channel with exact `goal_id`).
+- Special rules: public-commit deny-until-enabled, recurring-assignment stricter approval, assignment-delete rules (`delete_all` always stages; single-assignment direct commit only from owner-verified direct channel with exact `assignment_id`).
 - Returns `AuthorizationDecision` with progress: `DENY`, `ALLOW_STAGE`, `ALLOW_COMMIT`.
 
 **Phase 3: LLM semantic review** (conditional):
@@ -407,8 +407,8 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Creates durable approval request artifact.
 - Resolves owner-facing delivery channel (same-channel for conversation-origin, highest-priority live channel otherwise, fail-closed if no eligible channel).
 - Sends approval prompt through dashboard chat or Telegram.
-- **Approval context**: `StagedAction` carries generic `approvalContext: List<ApprovalContextEntry>` (labeled text blocks). Action plugins build context via `buildApprovalContext(payload)`. For durable-work CREATE, this renders the plan steps. Context is display-only (never parsed back into runtime state).
-- Approval prompt renders context entries after summary/reason block (e.g., plan steps for durable-work creation).
+- **Approval context**: `StagedAction` carries generic `approvalContext: List<ApprovalContextEntry>` (labeled text blocks). Action plugins build context via `buildApprovalContext(payload)`. For assignment CREATE, this renders the plan steps. Context is display-only (never parsed back into runtime state).
+- Approval prompt renders context entries after summary/reason block (e.g., plan steps for assignment creation).
 - Approval interpreter is fully LLM-based (no deterministic text classification). Receives approval context as additional classification input for plan-edit replies. Classification values: approve, deny, deny_and_reissue, explain, unclear.
 - `DENY_AND_REISSUE` handles plan-edit feedback: "combine steps", "use web search instead", "approve but change X" → classify as DENY_AND_REISSUE, forward as new input for replanning through Ego.
 - Keeps issuing root blocked until terminal state.
@@ -436,7 +436,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
   - Updates deliberation evidence/progress/cooldown.
   - `WAITING` → suspend thread (no auto-continuation).
   - Continuation decided only after feedback re-enters cognition; executor no longer tags feedback with verdict.
-  - Goal-origin `WAITING` without handles → contract violation → retry path.
+  - Assignment-origin `WAITING` without handles → contract violation → retry path.
 - For `contact_user`:
   - Clear pending work for same `(rootInputId, sessionId)` scope.
   - Capture session digest, destroy scratchpad.
@@ -533,8 +533,8 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - Per-thread workspace with sections/evidence (persists for thread, survives wait/resume).
 - Transient answer drafts grouped in active draft sequence per thread, excluded from planner prompt summaries, reset when cognition leaves answer-drafting work.
 - `promptSummary(rootInputId, maxTokens)` for planner context (index + compact section summaries).
-- `buildFinalCompilation(...)` for terminal answer: goal + sections + evidence + drafts + candidate.
-- Confidence estimate: `(sections * 0.45) + (evidence * 0.45) + (goal * 0.10)`.
+- `buildFinalCompilation(...)` for terminal answer: plan objective + sections + evidence + drafts + candidate.
+- Confidence estimate: `(sections * 0.45) + (evidence * 0.45) + (assignment * 0.10)`.
 - `ScratchpadFinalizer` (`LlmScratchpadFinalizer`): LLM rewrite of final answer using workspace evidence. Workspace-confidence gate first, then model-confidence gate. Original payload kept on any gate/finalizer failure.
 - Session digests captured before scratchpad destruction for ambient context.
 - Dashboard: workspace telemetry carries `root_input_id` + `root_input_received_at_ms`. Full snapshots served on-demand via `/api/obs/workspace/{rootId}`.
@@ -543,31 +543,31 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 
 ## L1: Durable Work Runtime
 
-- Files: `src/main/kotlin/ai/neopsyke/agent/durablework/DurableWorkGateway.kt`, `DurableWorkRuntime.kt`, `WorkItemStateMachine.kt`, `WorkPlanBuilder.kt`, `WorkStepVerifier.kt`
-- Feature flag: `config.durableWork.enabled=false` → `NoopDurableWorkGateway`.
+- Files: `src/main/kotlin/ai/neopsyke/agent/assignments/AssignmentGateway.kt`, `AssignmentRuntime.kt`, `WorkItemStateMachine.kt`, `AssignmentPlanBuilder.kt`, `WorkStepVerifier.kt`
+- Feature flag: `config.assignment.enabled=false` → `NoopAssignmentGateway`.
 
-**Plan ownership** — Plan generation for durable work is fully Ego-owned:
-- `CREATE`: Ego planner generates plan steps as part of the CREATE decision payload. Steps pass through `PlanRefiner`. `DurableWorkRuntime` uses the pre-built plan; it does not generate its own.
+**Plan ownership** — Plan generation for assignment is fully Ego-owned:
+- `CREATE`: Ego planner generates plan steps as part of the CREATE decision payload. Steps pass through `PlanRefiner`. `AssignmentRuntime` uses the pre-built plan; it does not generate its own.
 - `REVISE_PLAN`: Ego produces revised plan steps with current work-item context. Runtime applies the supplied plan.
-- `LlmWorkPlanBuilder` has been deleted. `DeterministicWorkPlanBuilder` remains as an explicit recovery/migration fallback only.
-- Missing-plan payloads emit `durable_work_missing_plan` telemetry and use the deterministic fallback.
+- The old LLM plan builder has been deleted. `DeterministicAssignmentPlanBuilder` remains as an explicit recovery/migration fallback only.
+- Missing-plan payloads emit `assignment_missing_plan` telemetry and use the deterministic fallback.
 
 **Boundary** — Ego uses gateway only for:
 - `pendingWorkSummary()` during Id-driven impulses.
 - `reviewableResponsibilities()` to build the bounded responsibility-review slate for "be useful" planning.
-- `nextWorkFromCue(DurableWorkCue)` when durable work is ready.
-- Durable-work-origin action lifecycle callbacks + `finalizeDurableWorkCycle(rootInputId)`.
+- `nextWorkFromCue(AssignmentCue)` when assignment is ready.
+- Durable-work-origin action lifecycle callbacks + `finalizeAssignmentCycle(rootInputId)`.
 
 **Event-sourced state machine** (`WorkItemStateMachine`):
 - Pure function: `transition(state, event) → (newState, commands)`.
 - `WorkItemStatus`: `CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`, `STALLED`, `NEEDS_ATTENTION`, `RETIRED`.
-- `WorkItemKind`: `RECURRENT_TASK` and `RESPONSIBILITY`. The runtime keeps `DurableWork` as the architectural umbrella but the user-facing planner surface splits by kind.
+- `WorkItemKind`: `RECURRENT_TASK` and `RESPONSIBILITY`. The runtime keeps `Assignment` as the architectural umbrella but the user-facing planner surface splits by kind.
 - Responsibility cycles are open-ended. Exhausting the current plan does not auto-complete or auto-fail a responsibility; review-eligible wakes can rearm the next cycle, while exhausted/error states surface as `NEEDS_ATTENTION` instead of terminal failure.
 - Events: Created, PlanGenerated, PlanRevised, StepStarted, StepActionExecuted, StepAcceptancePassed/Failed, StepBlocked/Unblocked, WaitConditionSatisfied/TimedOut, Suspended, Resumed, CronCycleStarted, Completed, Retired, Failed, PriorityChanged, Updated, lease/activation lifecycle events, delivery/monitor/review lifecycle events, effect-intent lifecycle events.
 - Commands (side effects): EmitWorkReady, ScheduleWakeTimer, CancelWakeTimer, RegisterWaitCondition, ClearWaitCondition, PersistWorkItem, NotifyUser.
 
 **Phase-2 runtime-owned state**:
-- `DurableWorkState` now persists typed delivery, monitor, review, and runtime wake metadata instead of relying on prompt memory.
+- `AssignmentState` now persists typed delivery, monitor, review, and runtime wake metadata instead of relying on prompt memory.
 - Delivery state tracks pending digest entries, digest windows, last decision, last suppression reason, and the last delivered delta fingerprint.
 - Monitor state tracks source cursors, bounded seen-item records, bounded change history, and review history.
 - Responsibilities carry review policy, `lastReviewAt`, and `nextReviewAt`; recurrent tasks do not pay that extra intake/review overhead by default.
@@ -586,31 +586,31 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `computeNextWakeAt()` considers `nextReviewAt`, so dashboards/operators see review due dates as the next wake when no earlier cron/wait wake exists.
 - `WaitConditionMonitor`: polls async operations, fires satisfaction events.
 - Work step roots stable per `work:<workItemId>:<stepId>` for thread/scratchpad continuity across wait/resume.
-- Wake handoff is typed. `DurableWorkCue` carries a `WakeReasonType` and detail, and `ActivationStarted` persists the typed wake-reason list into runtime state.
+- Wake handoff is typed. `AssignmentCue` carries a `WakeReasonType` and detail, and `ActivationStarted` persists the typed wake-reason list into runtime state.
 
-**Durable work activations** use trusted internal automation `ConversationContext`.
+**Assignment activations** use trusted internal automation `ConversationContext`.
 - `WorkContextLoader.buildWorkUnit()` builds an `ActivationContext` with typed wake reasons, review/delivery hints, and runtime facts for the current activation.
-- Channel routing: `WorkContextLoader.buildWorkUnit()` always sets `provider = "durable-work-runtime"` with an empty `channelId` (surface = `AUTOMATION`). `workItem.contactChannel` is carried as a preferred-channel hint in `channel.attributes["preferred_channel"]`, never as a transport address.
+- Channel routing: `WorkContextLoader.buildWorkUnit()` always sets `provider = "assignment-runtime"` with an empty `channelId` (surface = `AUTOMATION`). `workItem.contactChannel` is carried as a preferred-channel hint in `channel.attributes["preferred_channel"]`, never as a transport address.
 - Delivery: `RoutedConversationOutputGateway.deliver()` trusts the incoming `channelId` only when `surface == DIRECT` (authenticated inbound chat). For `AUTOMATION` contexts it always routes through `DefaultUserContactChannelResolver`, which honors the preferred-channel hint first, then falls back to `channelPriority`/`defaultChannel`, and only returns targets present in `UserContactChannelStatusProvider.availableChannels()` (config-backed, ACK-verified).
-- `contactChannel` is set via `WorkPlanBuilder` on create/update operations from the `contact_channel` planner payload field. Canonical durable-work channel names are user-facing keys from `availableChannels()` (`dashboard`, `telegram`), not transport providers (`webapp`). The planner prompt enumerates currently-available channels and instructs the LLM to map user intent semantically or set null.
-- `ContactChannelPolicy` gates the `durable_work_operation` plugin: only owner-initiated actions (`principal.role == OWNER && origin.source == USER`) may alter `contactChannel`; requested values outside `availableChannels()` are stripped at execute time so other fields (title, cron, instruction) still apply, and a clarification note is appended to the action outcome so the next planning turn can forward it to the user via the normal `contact_user` flow.
-- Context isolation: durable-work step execution is conversation-independent (a recurrent task or responsibility review may fire minutes or months after setup). `Ego.processGoalWork` strips `shortTermContextSummary`, `recentDialogue`, `sessionScratchpadDigest`, and `ambientContext` from the planner context. Long-term recall, lessons, and episodic recall are preserved — they carry durable user preferences and prior execution history.
-- Memory recall does not receive ambient context. Recall cues are derived from the trigger (step description for durable work, explicit queries for continuations) and episodic vector cues.
+- `contactChannel` is set via `AssignmentCommandBuilder` on create/update operations from the `contact_channel` planner payload field. Canonical assignment channel names are user-facing keys from `availableChannels()` (`dashboard`, `telegram`), not transport providers (`webapp`). The planner prompt enumerates currently-available channels and instructs the LLM to map user intent semantically or set null.
+- `ContactChannelPolicy` gates the `assignment_operation` plugin: only owner-initiated actions (`principal.role == OWNER && origin.source == USER`) may alter `contactChannel`; requested values outside `availableChannels()` are stripped at execute time so other fields (title, cron, instruction) still apply, and a clarification note is appended to the action outcome so the next planning turn can forward it to the user via the normal `contact_user` flow.
+- Context isolation: assignment step execution is conversation-independent (a recurrent task or responsibility review may fire minutes or months after setup). `Ego.processAssignment` strips `shortTermContextSummary`, `recentDialogue`, `sessionScratchpadDigest`, and `ambientContext` from the planner context. Long-term recall, lessons, and episodic recall are preserved — they carry durable user preferences and prior execution history.
+- Memory recall does not receive ambient context. Recall cues are derived from the trigger (step description for assignment, explicit queries for continuations) and episodic vector cues.
 - Scratchpads created when work is actually processed, not when cue ingested.
 - Durable-work-origin `WAITING` without async handles → contract violation.
 - Activation journal records `STARTED`, `STEP_SELECTED`, `CONTEXT_MATERIALIZED`, `NEXT_WAKE_SCHEDULED`, `FINISHED`, `RECOVERED`.
-- Mutating durable-work actions are guarded by `WorkEffectLedger` (`effectIntentId = workItemId + planRevision + stepId + logicalEffectKey`) and duplicate confirmed effects are blocked before dispatch.
-- Event history uses segmented JSONL rollover for long-lived workloads; overflow segments are appended into `goal-events.archive.jsonl`, and replay/restoration reads the archive plus retained segments plus the current segment.
-- Persist: `goal-events.jsonl`, `goal-events.archive.jsonl`, `goal.json`, `goal-snapshot.json`, workspace artifacts.
+- Mutating assignment actions are guarded by `WorkEffectLedger` (`effectIntentId = workItemId + planRevision + stepId + logicalEffectKey`) and duplicate confirmed effects are blocked before dispatch.
+- Event history uses segmented JSONL rollover for long-lived workloads; overflow segments are appended into `assignment-events.archive.jsonl`, and replay/restoration reads the archive plus retained segments plus the current segment.
+- Persist: `assignment-events.jsonl`, `assignment-events.archive.jsonl`, `assignment.json`, `assignment-snapshot.json`, workspace artifacts.
 
 **Planner split and operator surface**:
-- `InputIntentRouter` remains the only semantic router. When it returns `durable_work`, it now also returns a typed durable-work target: `GENERIC`, `RECURRENT_TASK`, or `RESPONSIBILITY`.
-- `InputPlanner` keeps the same route → grounding → L2 dispatch order and then dispatches deterministically to the matching durable-work planner profile.
-- LLM lane config now exposes `durable_work_generic`, `durable_work_recurrent_task`, and `durable_work_responsibility`; the responsibility lane can use a larger intake prompt budget than the generic/recurrent paths.
-- `WorkPlanBuilder` keeps one canonical `durable_work_operation` action boundary but now supports `review` and `retire` in addition to the phase-1 lifecycle operations.
+- `InputIntentRouter` remains the only semantic router. When it returns `assignment`, it now also returns a typed assignment target: `GENERIC`, `RECURRENT_TASK`, or `RESPONSIBILITY`.
+- `InputPlanner` keeps the same route → grounding → L2 dispatch order and then dispatches deterministically to the matching assignment planner profile.
+- LLM lane config now exposes `assignment_generic`, `assignment_recurrent_task`, and `assignment_responsibility`; the responsibility lane can use a larger intake prompt budget than the generic/recurrent paths.
+- `AssignmentCommandBuilder` keeps one canonical `assignment_operation` action boundary but now supports `review` and `retire` in addition to the phase-1 lifecycle operations.
 - Responsibility creation uses a bounded thread-scoped intake draft; the draft stays inside Ego until `CREATE` succeeds and never persists into runtime state as a live work item.
-- Id remains impulse-only. Ego injects a bounded reviewable-responsibility slate into the impulse planner context and can translate one selected responsibility back into a typed durable-work `review` operation.
-- Successful `durable_work_operation` executions report `TASK_PROGRESS`, so Id lifecycle tracking can treat accepted durable-work review/progress actions as satisfying "be useful" work.
+- Id remains impulse-only. Ego injects a bounded reviewable-responsibility slate into the impulse planner context and can translate one selected responsibility back into a typed assignment `review` operation.
+- Successful `assignment_operation` executions report `TASK_PROGRESS`, so Id lifecycle tracking can treat accepted assignment review/progress actions as satisfying "be useful" work.
 
 ---
 
@@ -628,7 +628,7 @@ Dispatch from `InputRoute` variant to sub-planner is deterministic on typed LLM 
 - `website_fetch` — Fetch URL content. Effect: OBSERVE. Capability: GATHERS_EVIDENCE.
 - `reflect_internal` — Internal durable-memory action. Effect: OBSERVE. Direct+autonomous commit.
 - `reflect_evidence` — Evidence-bound reflection. Effect: OBSERVE.
-- `durable_work_operation` — Durable work lifecycle for recurrent tasks and responsibilities (`create`, `update`, `status`, `list`, `review`, `pause`, `resume`, `reprioritize`, `complete`, `retire`, `delete`, `delete_all`, `revise_plan`). Effect: CONTROL_PLANE. Create supports optional `cron_expression`.
+- `assignment_operation` — Assignment lifecycle for recurrent tasks and responsibilities (`create`, `update`, `status`, `list`, `review`, `pause`, `resume`, `reprioritize`, `complete`, `retire`, `delete`, `delete_all`, `revise_plan`). Effect: CONTROL_PLANE. Create supports optional `cron_expression`.
 - `email_send` — Microsoft Graph adapter. Disabled unless env config present.
 - `gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events` — Native Google read-only.
 

@@ -189,7 +189,7 @@ private object ApprovalTextViews {
     fun effectDescription(stagedAction: StagedAction): String =
         when (stagedAction.actionType.id) {
             "contact_user" -> "Send a user-visible message."
-            "goal_operation" -> "Create, update, or remove a goal."
+            "assignment_operation" -> "Create, update, or remove an assignment."
             "web_search" -> "Run a web search and gather external information."
             "website_fetch" -> "Fetch a website and inspect its contents."
             else -> "Execute the staged ${stagedAction.actionType.id} action."

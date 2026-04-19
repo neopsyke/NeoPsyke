@@ -128,7 +128,7 @@
     <a class="tab-link" data-tab="conversations" href="/">Conversations</a>
     <a class="tab-link" data-tab="observability" href="/dashboard">Observability</a>
     <a class="tab-link" data-tab="metrics" href="/metrics">Metrics</a>
-    <a class="tab-link" data-tab="goals" href="/goals">Goals</a>
+    <a class="tab-link" data-tab="goals" href="/assignments">Goals</a>
     <a class="tab-link" data-tab="action-control" href="/action-control">Action Control</a>
   </nav>
 
@@ -152,9 +152,9 @@
         framePath: "/__dashboard/metrics"
       },
       "goals": {
-        path: "/goals",
+        path: "/assignments",
         title: "NeoPsyke Goals",
-        framePath: "/__dashboard/goals"
+        framePath: "/__dashboard/assignments"
       },
       "action-control": {
         path: "/action-control",
@@ -171,7 +171,7 @@
           return "observability";
         case "/metrics":
           return "metrics";
-        case "/goals":
+        case "/assignments":
           return "goals";
         case "/action-control":
           return "action-control";

@@ -17,8 +17,8 @@ import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
-import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.assignments.NoopAssignmentGateway
+import ai.neopsyke.agent.assignments.AssignmentGateway
 import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 
 data class ActionImplementationStatus(
@@ -38,7 +38,7 @@ class MotorCortex(
         conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
         reflectionMemoryRecorder: ReflectionMemoryRecorder,
         config: AgentConfig = AgentConfig(),
-        durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
+        assignmentGateway: AssignmentGateway = NoopAssignmentGateway,
         evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     ) : this(
         actionRegistry = ActionRegistry.discover(
@@ -50,7 +50,7 @@ class MotorCortex(
                 conversationOutput = conversationOutput,
                 evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = reflectionMemoryRecorder,
-                durableWorkGateway = durableWorkGateway,
+                assignmentGateway = assignmentGateway,
             )
         )
     )

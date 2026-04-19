@@ -206,7 +206,7 @@ class PlannerRuntime(
                         trigger = triggerLabel,
                         decisionType = "plan",
                         urgency = decision.urgency.name.lowercase(),
-                        content = decision.goal,
+                        content = decision.assignment,
                         reason = "steps=${decision.steps.size}",
                         sessionId = sessionId,
                         rootInputId = rootInputId,

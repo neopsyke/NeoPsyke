@@ -24,7 +24,7 @@ type FeatureLoopOpts struct {
 	FromStep       string
 	OnlyStep       string
 	SkipSteps      []string
-	GoalsEnabled   *bool
+	AssignmentsEnabled *bool
 	Cfg            *config.FreudConfig
 	RepoRoot       string
 	Verbose        int
@@ -144,9 +144,9 @@ func FeatureLoop(opts FeatureLoopOpts) (*FeatureLoopResult, error) {
 	sif, _ := os.Create(stepIndexFile)
 	fmt.Fprintln(sif, "step\tstatus\tduration_sec\tlog\tlog_index\tlog_lines\twarnings\terrors\tfirst_warning\tfirst_error\tfirst_pressure")
 
-	// Export goals override
-	if opts.GoalsEnabled != nil {
-		os.Setenv("NEOPSYKE_GOALS_ENABLED", fmt.Sprintf("%v", *opts.GoalsEnabled))
+	// Export assignments override
+	if opts.AssignmentsEnabled != nil {
+		os.Setenv("NEOPSYKE_ASSIGNMENTS_ENABLED", fmt.Sprintf("%v", *opts.AssignmentsEnabled))
 	}
 	// Export lane name for shell cmd steps that invoke `freud eval --lane`.
 	if cfg.Lane != "" {
@@ -462,7 +462,7 @@ func cognitiveRuntimePhasePipeline(featureID string, pipeline []config.PipelineS
 		"cognitive-runtime-p2-opportunities",
 		"cognitive-runtime-p3-intentions",
 		"cognitive-runtime-p4-feedback",
-		"cognitive-runtime-p5-goals-scratchpad",
+		"cognitive-runtime-p5-assignments-scratchpad",
 		"cognitive-runtime-p6-policy-control",
 		"cognitive-runtime-p7-convergence":
 		result, ok := buildPipeline(
@@ -692,4 +692,3 @@ func orDefault(value, fallback string) string {
 	}
 	return value
 }
-

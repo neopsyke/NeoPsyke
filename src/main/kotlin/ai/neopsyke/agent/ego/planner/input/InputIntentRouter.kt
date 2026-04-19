@@ -5,7 +5,7 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
-import ai.neopsyke.agent.ego.planner.model.DurableWorkRouteTarget
+import ai.neopsyke.agent.ego.planner.model.AssignmentRouteTarget
 import ai.neopsyke.agent.ego.planner.model.InputRoute
 import ai.neopsyke.agent.ego.planner.prompt.SharedPromptSections
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
@@ -40,8 +40,8 @@ class InputIntentRouter(
             rootInputId = rootInputId,
         )
 
-        val goalsAvailable = ActionType.DURABLE_WORK_OPERATION in context.availableActions
-        val routeOptions = buildRouteOptions(goalsAvailable)
+        val assignmentsAvailable = ActionType.ASSIGNMENT_OPERATION in context.availableActions
+        val routeOptions = buildRouteOptions(assignmentsAvailable)
         val actionSummary = context.availableActions.map { it.id }.sorted().joinToString(", ")
 
         val sections = listOfNotNull(
@@ -61,8 +61,8 @@ class InputIntentRouter(
                     - direct_response: the request can be answered directly from current context without external tools.
                     - general_action: the request requires one explicit action (search, fetch, contact, etc.).
                     - multi_step_task: the request requires multiple sequential stages.
-                    - durable_work: the user wants to create, manage, or interact with persistent recurrent tasks or responsibilities.
-                    - If route=durable_work, you MUST also set durable_work_target:
+                    - assignment: the user wants to create, manage, or interact with persistent recurrent tasks or responsibilities.
+                    - If route=assignment, you MUST also set assignment_target:
                       - generic: shared lifecycle work like list, status, pause, resume, review, complete, retire, delete, delete_all, reprioritize.
                       - recurrent_task: create/update/revise for reminders, recurring searches, scheduled monitoring, and other repeated structured tasks.
                       - responsibility: create/update/revise for broad ongoing ownership where the agent may need multi-turn intake before creating the item.
@@ -81,7 +81,7 @@ class InputIntentRouter(
                 floorTokens = 24,
                 content = """
                     JSON schema:
-                    {"route":"$routeOptions","durable_work_target":"generic|recurrent_task|responsibility|null","reasoning":"short explanation"}
+                    {"route":"$routeOptions","assignment_target":"generic|recurrent_task|responsibility|null","reasoning":"short explanation"}
                 """.trimIndent()
             ),
             SharedPromptSections.recentDialogueSection(context),
@@ -124,26 +124,26 @@ class InputIntentRouter(
             "direct_response" -> InputRoute.DirectResponse(reasoning)
             "general_action" -> InputRoute.GeneralAction(reasoning)
             "multi_step_task" -> InputRoute.MultiStepTask(reasoning)
-            "durable_work", "goal", "goal_creation", "goal_management" ->
-                if (goalsAvailable) {
-                    InputRoute.DurableWork(
+            "assignment", "assignment_creation", "assignment_management" ->
+                if (assignmentsAvailable) {
+                    InputRoute.Assignment(
                         reasoning = reasoning,
-                        target = parseDurableWorkTarget(normalizedRoute, payload.durableWorkTarget),
+                        target = parseAssignmentTarget(normalizedRoute, payload.assignmentTarget),
                     )
                 }
-                else InputRoute.GeneralAction("Durable work unavailable; routing as general action.")
+                else InputRoute.GeneralAction("Assignment unavailable; routing as general action.")
             "clarification" -> InputRoute.ClarificationNeeded(reasoning.ifBlank { "Could you clarify what you'd like me to do?" })
             "noop" -> InputRoute.Noop(reasoning.ifBlank { "No actionable intent." })
             else -> InputRoute.GeneralAction(reasoning.ifBlank { "Unrecognized route; fallback to general action." })
         }
     }
 
-    private fun buildRouteOptions(goalsAvailable: Boolean): String {
+    private fun buildRouteOptions(assignmentsAvailable: Boolean): String {
         val routes = mutableListOf(
             "direct_response", "general_action", "multi_step_task"
         )
-        if (goalsAvailable) {
-            routes.add("durable_work")
+        if (assignmentsAvailable) {
+            routes.add("assignment")
         }
         routes.add("clarification")
         routes.add("noop")
@@ -152,19 +152,19 @@ class InputIntentRouter(
 
     private data class RouterPayload(
         val route: String? = null,
-        @param:JsonProperty("durable_work_target")
-        val durableWorkTarget: String? = null,
+        @param:JsonProperty("assignment_target")
+        val assignmentTarget: String? = null,
         val reasoning: String? = null,
     )
 
-    private fun parseDurableWorkTarget(route: String?, raw: String?): DurableWorkRouteTarget =
+    private fun parseAssignmentTarget(route: String?, raw: String?): AssignmentRouteTarget =
         when {
-            route == "goal" || route == "goal_creation" -> DurableWorkRouteTarget.RECURRENT_TASK
-            route == "goal_management" -> DurableWorkRouteTarget.GENERIC
+            route == "assignment_creation" -> AssignmentRouteTarget.RECURRENT_TASK
+            route == "assignment_management" -> AssignmentRouteTarget.GENERIC
             else -> when (raw?.trim()?.lowercase()) {
-                "recurrent_task", "goal_creation" -> DurableWorkRouteTarget.RECURRENT_TASK
-                "responsibility" -> DurableWorkRouteTarget.RESPONSIBILITY
-                else -> DurableWorkRouteTarget.GENERIC
+                "recurrent_task", "assignment_creation" -> AssignmentRouteTarget.RECURRENT_TASK
+                "responsibility" -> AssignmentRouteTarget.RESPONSIBILITY
+                else -> AssignmentRouteTarget.GENERIC
             }
         }
 
@@ -178,7 +178,7 @@ class InputIntentRouter(
                   "required": ["route", "reasoning"],
                   "properties": {
                     "route": { "type": "string" },
-                    "durable_work_target": { "type": ["string", "null"] },
+                    "assignment_target": { "type": ["string", "null"] },
                     "reasoning": { "type": ["string", "null"] }
                   }
                 }

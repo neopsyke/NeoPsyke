@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.ego
 
 import mu.KotlinLogging
-import ai.neopsyke.agent.durablework.DurableWorkActivation
+import ai.neopsyke.agent.assignments.AssignmentActivation
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.CognitiveThread
 import ai.neopsyke.agent.model.CognitiveThreadKind
@@ -30,8 +30,8 @@ private val threadStoreLogger = KotlinLogging.logger("CognitiveThreadStore")
 
 internal class CognitiveThreadStore {
     private sealed interface ContinuationState {
-        data class GoalActivation(
-            val work: DurableWorkActivation,
+        data class AssignmentContinuation(
+            val work: AssignmentActivation,
         ) : ContinuationState
     }
 
@@ -183,23 +183,23 @@ internal class CognitiveThreadStore {
         }
     }
 
-    fun ensureForGoalWork(work: DurableWorkActivation): CognitiveThread =
+    fun ensureForAssignment(work: AssignmentActivation): CognitiveThread =
         ensureThread(
             rootInputId = work.rootInputId,
             conversationContext = work.conversationContext,
-            kind = CognitiveThreadKind.DURABLE_WORK_DIRECTED,
+            kind = CognitiveThreadKind.ASSIGNMENT_DIRECTED,
             title = work.stepDescription,
             rootStimulusId = work.rootInputId,
             metadata = mapOf(
-                META_GOAL_ID to work.workItemId,
-                META_GOAL_STEP_ID to work.stepId,
-                META_GOAL_WAKE_REASON to work.wakeReason,
+                META_ASSIGNMENT_ID to work.workItemId,
+                META_ASSIGNMENT_STEP_ID to work.stepId,
+                META_ASSIGNMENT_WAKE_REASON to work.wakeReason,
             ),
             workItemId = work.workItemId,
         )
 
-    fun bindGoalWork(work: DurableWorkActivation): CognitiveThread {
-        val thread = ensureForGoalWork(work)
+    fun bindAssignment(work: AssignmentActivation): CognitiveThread {
+        val thread = ensureForAssignment(work)
         update(work.rootInputId, work.conversationContext) { record ->
             record.copy(
                 thread = record.thread.copy(
@@ -208,20 +208,20 @@ internal class CognitiveThreadStore {
                 ),
                 waitState = null,
                 terminalState = null,
-                continuation = ContinuationState.GoalActivation(work),
+                continuation = ContinuationState.AssignmentContinuation(work),
             )
         }
         return thread
     }
 
-    fun goalOpportunity(work: DurableWorkActivation): Opportunity {
-        val thread = ensureForGoalWork(work)
+    fun assignmentOpportunity(work: AssignmentActivation): Opportunity {
+        val thread = ensureForAssignment(work)
         return opportunityFor(
             thread = thread,
             kind = OpportunityKind.RESUME,
             summary = work.stepDescription,
             rootStimulusId = work.rootInputId,
-            salience = GOAL_SALIENCE,
+            salience = ASSIGNMENT_SALIENCE,
             allowedIntentions = setOf(
                 IntentionKind.OBSERVE,
                 IntentionKind.PREPARE,
@@ -287,9 +287,9 @@ internal class CognitiveThreadStore {
         thread(rootInputId, conversationContext)?.securityContext
             ?: CognitiveThreadSecurityContext.fromConversation(conversationContext.security)
 
-    fun goalWork(rootInputId: String?, conversationContext: ConversationContext): DurableWorkActivation? =
+    fun assignment(rootInputId: String?, conversationContext: ConversationContext): AssignmentActivation? =
         when (val continuation = record(rootInputId, conversationContext)?.continuation) {
-            is ContinuationState.GoalActivation -> continuation.work
+            is ContinuationState.AssignmentContinuation -> continuation.work
             null -> null
         }
 
@@ -622,7 +622,7 @@ internal class CognitiveThreadStore {
                 CognitiveThreadKind.DRIVE
 
             PerceptFamily.STATE_CHANGE ->
-                CognitiveThreadKind.DURABLE_WORK_DIRECTED
+                CognitiveThreadKind.ASSIGNMENT_DIRECTED
         }
 
     private fun previewTitle(value: String): String = TextSecurity.preview(value, MAX_TITLE_CHARS)
@@ -647,7 +647,7 @@ internal class CognitiveThreadStore {
             securityContext = thread.securityContext,
             rootStimulusId = rootStimulusId,
             workItemId = thread.workItemId,
-            goalRunId = thread.goalRunId,
+            assignmentRunId = thread.assignmentRunId,
             allowedIntentions = allowedIntentions,
             allowedCommitModes = allowedCommitModes,
             metadata = thread.metadata,
@@ -672,12 +672,12 @@ internal class CognitiveThreadStore {
         private const val MAX_ACTIVE_THREADS: Int = 256
         private const val MAX_TERMINAL_THREADS: Int = 512
         private const val MAX_TITLE_CHARS: Int = 160
-        private const val GOAL_SALIENCE: Double = 0.75
+        private const val ASSIGNMENT_SALIENCE: Double = 0.75
         private const val DEFAULT_SNAPSHOT_LIMIT: Int = 100
 
-        private const val META_GOAL_ID: String = "goal_id"
-        private const val META_GOAL_STEP_ID: String = "goal_step_id"
-        private const val META_GOAL_WAKE_REASON: String = "goal_wake_reason"
+        private const val META_ASSIGNMENT_ID: String = "assignment_id"
+        private const val META_ASSIGNMENT_STEP_ID: String = "assignment_step_id"
+        private const val META_ASSIGNMENT_WAKE_REASON: String = "assignment_wake_reason"
         private const val META_THREAD_WAIT_REASON: String = "thread_wait_reason"
         private const val META_THREAD_RESUME_HINT: String = "thread_resume_hint"
         private const val META_THREAD_BLOCK_REASON: String = "thread_block_reason"

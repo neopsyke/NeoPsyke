@@ -168,7 +168,7 @@ non-runnable until the approval request reaches a terminal resolution state.
 ### 5.8 One surfaced approval prompt per conversation
 
 The runtime may continue processing other work in other roots, including other
-conversations, other cognitive threads, Id work, goal work, and feedback
+conversations, other cognitive threads, Id work, assignment work, and feedback
 processing. But within one conversation, only one approval prompt may be
 actively awaiting owner resolution at a time.
 
@@ -376,7 +376,7 @@ Allowed by default:
 - high-level target description
 - high-level effect description
 - why approval is required
-- origin class (conversation, goal, Id, or system)
+- origin class (conversation, assignment, Id, or system)
 - originating provider/channel label
 - created-at timestamp
 - expiry timestamp
@@ -567,7 +567,7 @@ future owner channels. Styling is presentation, not authority.
 ### 9.4 Non-conversation-origin routing
 
 Some staged actions may originate from roots that are not currently tied to an
-active user conversation, such as Id-origin or goal-origin work.
+active user conversation, such as Id-origin or assignment-origin work.
 
 In those cases, the runtime must use an owner approval channel resolver that:
 
@@ -881,7 +881,7 @@ Mitigation direction:
 
 ### 15.8 Non-conversation-origin delivery confusion
 
-Risk: approvals triggered by goal or Id roots are sent to the wrong owner
+Risk: approvals triggered by assignment or Id roots are sent to the wrong owner
 surface or to no visible owner surface at all.
 
 Mitigation direction:
@@ -961,7 +961,7 @@ Mitigation direction:
 
 ### 15.15 Approval-queue starvation
 
-Risk: a root, goal, or subsystem can monopolize the conversation approval queue
+Risk: a root, assignment, or subsystem can monopolize the conversation approval queue
 with repeated staged actions.
 
 Mitigation direction:
@@ -1076,7 +1076,7 @@ implemented and validated.
    - other conversations
    - other cognitive threads
    - Id-origin work
-   - goal-origin work
+   - assignment-origin work
    - async feedback processing for unrelated roots
 4. Once the approval request reaches a terminal state, the blocked root can
    become runnable again according to normal runtime semantics.

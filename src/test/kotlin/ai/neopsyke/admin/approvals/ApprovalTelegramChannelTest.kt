@@ -305,10 +305,10 @@ class ApprovalTelegramChannelTest {
     @Test
     fun `7 telegram channel eligibility semantics for approval router`() = runBlocking {
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session", interlocutor = Interlocutor.named("System"),
+            sessionId = "assignment-session", interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT))
         val config = AgentConfig(
             approvals = ApprovalRuntimeConfig(
                 telegramStartupAckEnabled = true,
@@ -321,7 +321,7 @@ class ApprovalTelegramChannelTest {
 
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
-                reason = "Goal approval.", reasonCode = "NEEDS_APPROVAL",
+                reason = "Assignment approval.", reasonCode = "NEEDS_APPROVAL",
                 conversationContext = staged.conversationContext,
             )
             val request = store.requestByStagedActionId(staged.id)

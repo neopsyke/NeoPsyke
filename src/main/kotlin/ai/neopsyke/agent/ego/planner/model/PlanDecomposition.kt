@@ -6,7 +6,7 @@ import ai.neopsyke.agent.model.ActionType
  * Typed multi-step plan structure produced by TaskDecompositionPlanner.
  */
 data class PlanDecomposition(
-    val goal: String,
+    val assignment: String,
     val steps: List<PlanStep>,
 ) {
     data class PlanStep(

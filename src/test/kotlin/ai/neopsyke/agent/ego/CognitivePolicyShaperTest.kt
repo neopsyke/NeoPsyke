@@ -42,7 +42,7 @@ class CognitivePolicyShaperTest {
             disabledActions = emptySet(),
         )
 
-        assertFalse(shaped.availableActions.contains(ActionType.DURABLE_WORK_OPERATION))
+        assertFalse(shaped.availableActions.contains(ActionType.ASSIGNMENT_OPERATION))
         assertTrue(shaped.availableActions.contains(ActionType.WEB_SEARCH))
         assertEquals(
             setOf(CommitMode.NOT_APPLICABLE, CommitMode.APPROVAL_BACKED),
@@ -93,10 +93,10 @@ class CognitivePolicyShaperTest {
             disabledActions = emptySet(),
         )
 
-        val goalOperation = shaped.actionDefinitions.first { it.actionType == ActionType.DURABLE_WORK_OPERATION }
-        assertTrue(shaped.availableActions.contains(ActionType.DURABLE_WORK_OPERATION))
-        assertTrue(goalOperation.directCommitAllowed)
-        assertTrue(goalOperation.supportsAutonomousCommit)
+        val assignmentOperation = shaped.actionDefinitions.first { it.actionType == ActionType.ASSIGNMENT_OPERATION }
+        assertTrue(shaped.availableActions.contains(ActionType.ASSIGNMENT_OPERATION))
+        assertTrue(assignmentOperation.directCommitAllowed)
+        assertTrue(assignmentOperation.supportsAutonomousCommit)
         assertEquals(
             setOf(CommitMode.NOT_APPLICABLE, CommitMode.POLICY_AUTONOMOUS, CommitMode.APPROVAL_BACKED),
             CognitivePolicyShaper.opportunityCommitModes(security),
@@ -135,7 +135,7 @@ class CognitivePolicyShaperTest {
     }
 
     @Test
-    fun `goal opportunity contracts keep commit progression when policy allows control plane work`() {
+    fun `assignment opportunity contracts keep commit progression when policy allows control plane work`() {
         val context = conversationContext(
             role = PrincipalRole.ADMIN_CONTROL,
             surface = ChannelSurface.ADMIN,
@@ -166,10 +166,10 @@ class CognitivePolicyShaperTest {
                 ),
             ),
             plannerActionSurface = plannerSurface,
-            implementedAvailableActions = setOf(ActionType.DURABLE_WORK_OPERATION),
+            implementedAvailableActions = setOf(ActionType.ASSIGNMENT_OPERATION),
         )
 
-        assertEquals(setOf(ActionType.DURABLE_WORK_OPERATION), shaped.availableActions)
+        assertEquals(setOf(ActionType.ASSIGNMENT_OPERATION), shaped.availableActions)
         assertTrue(IntentionKind.PREPARE in shaped.allowedIntentions)
         assertTrue(IntentionKind.STAGE in shaped.allowedIntentions)
         assertTrue(IntentionKind.COMMIT in shaped.allowedIntentions)
@@ -198,9 +198,9 @@ class CognitivePolicyShaperTest {
                 supportsAutonomousCommit = true,
             ),
             ActionDescriptor(
-                actionType = ActionType.DURABLE_WORK_OPERATION,
-                plannerDescription = "mutate goals",
-                payloadGuidance = "goal operation payload",
+                actionType = ActionType.ASSIGNMENT_OPERATION,
+                plannerDescription = "mutate assignments",
+                payloadGuidance = "assignment operation payload",
                 effectClass = ActionEffectClass.CONTROL_PLANE,
                 directCommitAllowed = true,
                 supportsAutonomousCommit = true,

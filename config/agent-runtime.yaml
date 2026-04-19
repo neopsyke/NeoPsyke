@@ -123,7 +123,7 @@ agent:
     contact_user_per_root_input: 5
     reflection_family_per_root_input: 2
     reflect_evidence_per_root_input: 1
-    durable_work_operation_per_root_input: 3
+    assignment_operation_per_root_input: 3
     commit_private_per_type_per_root_input: 3
     commit_stateful_per_type_per_root_input: 2
     commit_public_per_type_per_root_input: 1
@@ -153,7 +153,7 @@ agent:
     max_content_chars: 500
     max_events_per_session: 100
 
-  durable_work:
+  assignment:
     enabled: true
     workspace_root: .neopsyke/work-items
     max_active_work_items: 10

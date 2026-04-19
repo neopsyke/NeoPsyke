@@ -5,7 +5,7 @@ import ai.neopsyke.agent.model.DataTrust
 import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.PendingInput
-import ai.neopsyke.agent.durablework.DurableWorkActivation
+import ai.neopsyke.agent.assignments.AssignmentActivation
 import ai.neopsyke.agent.config.ScratchpadConfig
 import ai.neopsyke.agent.support.TextSecurity
 import kotlin.math.max
@@ -30,7 +30,7 @@ data class ScratchpadDebugHead(
     val rootInputReceivedAtMs: Long,
     val version: Long,
     val updatedAtMs: Long,
-    val goal: String,
+    val assignment: String,
     val sectionCount: Int,
     val evidenceCount: Int,
     val workspaceConfidence: Double,
@@ -59,7 +59,7 @@ data class ScratchpadDebugEvidence(
 
 data class WorkspaceDigestEntry(
     val rootInputId: String,
-    val goal: String,
+    val assignment: String,
     val sectionIndex: List<String>,
     val keyEvidence: List<String>,
     val createdAtMs: Long,
@@ -69,10 +69,10 @@ class ScratchpadStore(
     private val config: ScratchpadConfig,
 ) {
     @Volatile
-    private var activeGoalSignalsSnapshot: List<String> = emptyList()
+    private var activeAssignmentSignalsSnapshot: List<String> = emptyList()
 
     @Volatile
-    private var recentResolvedGoalSignalsSnapshot: List<String> = emptyList()
+    private var recentResolvedAssignmentSignalsSnapshot: List<String> = emptyList()
 
     @Synchronized
     fun ensureForInput(input: PendingInput): Boolean {
@@ -91,7 +91,7 @@ class ScratchpadStore(
         val workspace = Scratchpad(
             rootInputId = rootId,
             rootInputReceivedAtMs = input.receivedAtMs,
-            goal = TextSecurity.preview(input.content, MAX_GOAL_CHARS)
+            assignment = TextSecurity.preview(input.content, MAX_ASSIGNMENT_CHARS)
         )
         workspace.addSection(
             title = "Request",
@@ -105,7 +105,7 @@ class ScratchpadStore(
     }
 
     @Synchronized
-    fun ensureForGoalWork(work: DurableWorkActivation): Boolean {
+    fun ensureForAssignment(work: AssignmentActivation): Boolean {
         if (!config.enabled) return false
         val rootId = work.rootInputId
         if (workspaces.containsKey(rootId)) return false
@@ -113,17 +113,17 @@ class ScratchpadStore(
         val workspace = Scratchpad(
             rootInputId = rootId,
             rootInputReceivedAtMs = System.currentTimeMillis(),
-            goal = TextSecurity.preview(work.stepDescription, MAX_GOAL_CHARS)
+            assignment = TextSecurity.preview(work.stepDescription, MAX_ASSIGNMENT_CHARS)
         )
         workspace.addSection(
-            title = "Goal step",
+            title = "Assignment step",
             summary = TextSecurity.preview(work.stepDescription, config.maxSectionSummaryChars),
             content = TextSecurity.preview(work.acceptanceCriteria, config.maxSectionChars),
             source = SOURCE_GOAL_STEP
         )
         if (work.workingContext.isNotBlank()) {
             workspace.addSection(
-                title = "Goal context",
+                title = "Assignment context",
                 summary = TextSecurity.preview(work.workingContext, config.maxSectionSummaryChars),
                 content = TextSecurity.preview(work.workingContext, config.maxSectionChars),
                 source = SOURCE_GOAL_CONTEXT
@@ -135,36 +135,36 @@ class ScratchpadStore(
     }
 
     @Synchronized
-    fun recordPlan(rootInputId: String?, goal: String, steps: List<String>): Boolean {
+    fun recordPlan(rootInputId: String?, assignment: String, steps: List<String>): Boolean {
         val workspace = lookup(rootInputId)
         if (workspace != null) {
-            appendPlanToWorkspace(workspace, goal, steps)
+            appendPlanToWorkspace(workspace, assignment, steps)
             refreshAmbientSnapshotsLocked()
             return false
         }
-        val activated = maybeActivateFromPending(rootInputId, goal, steps)
+        val activated = maybeActivateFromPending(rootInputId, assignment, steps)
         if (activated) {
             val activatedWorkspace = lookup(rootInputId) ?: return true
-            appendPlanToWorkspace(activatedWorkspace, goal, steps)
+            appendPlanToWorkspace(activatedWorkspace, assignment, steps)
             refreshAmbientSnapshotsLocked()
         }
         return activated
     }
 
-    private fun appendPlanToWorkspace(workspace: Scratchpad, goal: String, steps: List<String>) {
-        val normalizedGoal = TextSecurity.preview(goal, MAX_GOAL_CHARS)
-        if (normalizedGoal.isNotBlank()) {
-            workspace.updateGoal(normalizedGoal)
+    private fun appendPlanToWorkspace(workspace: Scratchpad, assignment: String, steps: List<String>) {
+        val normalizedAssignment = TextSecurity.preview(assignment, MAX_ASSIGNMENT_CHARS)
+        if (normalizedAssignment.isNotBlank()) {
+            workspace.updateAssignment(normalizedAssignment)
         }
         val stepLines = steps.mapIndexed { index, step ->
             "${index + 1}. ${TextSecurity.preview(step, MAX_PLAN_STEP_CHARS)}"
         }
         workspace.addSection(
             title = "Plan",
-            summary = "Planned ${steps.size} step(s) toward task goal.",
+            summary = "Planned ${steps.size} step(s) toward the assignment.",
             content = buildString {
-                append("Goal: ")
-                append(normalizedGoal.ifBlank { "none" })
+                append("Assignment: ")
+                append(normalizedAssignment.ifBlank { "none" })
                 append('\n')
                 if (stepLines.isEmpty()) {
                     append("Steps: none")
@@ -251,7 +251,7 @@ class ScratchpadStore(
         val compiled = buildString {
             append("Scratchpad final compilation:\n")
             append("work: ")
-            append(workspace.goal.ifBlank { "none" })
+            append(workspace.assignment.ifBlank { "none" })
             append('\n')
             if (sections.isNotEmpty()) {
                 append("sections:\n")
@@ -329,7 +329,7 @@ class ScratchpadStore(
             .map { TextSecurity.preview(it.render(), evidencePerItemCap) }
         val entry = WorkspaceDigestEntry(
             rootInputId = rootInputId ?: "",
-            goal = workspace.goal,
+            assignment = workspace.assignment,
             sectionIndex = sectionIndex,
             keyEvidence = keyEvidence,
             createdAtMs = System.currentTimeMillis(),
@@ -351,7 +351,7 @@ class ScratchpadStore(
         val summary = buildString {
             append("Prior workspace digests (session history, most recent last):\n")
             buffer.forEachIndexed { index, entry ->
-                append("[${index + 1}] workItem=${entry.goal}")
+                append("[${index + 1}] workItem=${entry.assignment}")
                 if (entry.sectionIndex.isNotEmpty()) {
                     append(" | sections=[${entry.sectionIndex.joinToString(", ")}]")
                 }
@@ -369,10 +369,10 @@ class ScratchpadStore(
     }
 
     fun activeGoalSignals(limit: Int = CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT): List<String> =
-        activeGoalSignalsSnapshot.take(max(1, limit))
+        activeAssignmentSignalsSnapshot.take(max(1, limit))
 
     fun recentResolvedGoalSignals(limit: Int = CROSS_SESSION_DIGEST_LIMIT): List<String> =
-        recentResolvedGoalSignalsSnapshot.take(max(1, limit))
+        recentResolvedAssignmentSignalsSnapshot.take(max(1, limit))
 
     @Synchronized
     fun clearDigestsForSession(sessionId: String) {
@@ -486,7 +486,7 @@ class ScratchpadStore(
     private fun isGateEnabled(): Boolean =
         config.activationMinPlanSteps >= 2
 
-    private fun maybeActivateFromPending(rootInputId: String?, goal: String, steps: List<String>): Boolean {
+    private fun maybeActivateFromPending(rootInputId: String?, assignment: String, steps: List<String>): Boolean {
         if (!config.enabled || rootInputId.isNullOrBlank()) return false
         val pending = pendingInputs[rootInputId] ?: return false
         if (steps.size < config.activationMinPlanSteps) return false
@@ -495,9 +495,9 @@ class ScratchpadStore(
         val workspace = Scratchpad(
             rootInputId = pending.rootInputId,
             rootInputReceivedAtMs = pending.receivedAtMs,
-            goal = TextSecurity.preview(
-                goal.ifBlank { pending.contentPreview },
-                MAX_GOAL_CHARS
+            assignment = TextSecurity.preview(
+                assignment.ifBlank { pending.contentPreview },
+                MAX_ASSIGNMENT_CHARS
             )
         )
         workspace.addSection(
@@ -518,14 +518,14 @@ class ScratchpadStore(
     }
 
     private fun refreshAmbientSnapshotsLocked() {
-        activeGoalSignalsSnapshot =
+        activeAssignmentSignalsSnapshot =
             workspaces.values
                 .toList()
                 .takeLast(max(1, CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT))
-                .map { workspace -> TextSecurity.preview(workspace.goal, MAX_GOAL_CHARS) }
+                .map { workspace -> TextSecurity.preview(workspace.assignment, MAX_ASSIGNMENT_CHARS) }
                 .filter { it.isNotBlank() }
 
-        recentResolvedGoalSignalsSnapshot =
+        recentResolvedAssignmentSignalsSnapshot =
             digestsBySession.values
                 .asSequence()
                 .flatMap { it.asSequence() }
@@ -533,7 +533,7 @@ class ScratchpadStore(
                 .take(max(1, CROSS_SESSION_DIGEST_LIMIT))
                 .map { entry ->
                     buildString {
-                        append(TextSecurity.preview(entry.goal, MAX_GOAL_CHARS))
+                        append(TextSecurity.preview(entry.assignment, MAX_ASSIGNMENT_CHARS))
                         if (entry.keyEvidence.isNotEmpty()) {
                             append(" | evidence=")
                             append(entry.keyEvidence.joinToString(" | "))
@@ -561,7 +561,7 @@ class ScratchpadStore(
     private inner class Scratchpad(
         val rootInputId: String,
         val rootInputReceivedAtMs: Long,
-        var goal: String,
+        var assignment: String,
         val sections: ArrayDeque<ScratchpadSection> = ArrayDeque(),
         val evidence: ArrayDeque<ScratchpadEvidence> = ArrayDeque(),
     ) {
@@ -570,9 +570,9 @@ class ScratchpadStore(
         var updatedAtMs: Long = System.currentTimeMillis()
             private set
 
-        fun updateGoal(newGoal: String) {
-            if (newGoal == goal) return
-            goal = newGoal
+        fun updateAssignment(newAssignment: String) {
+            if (newAssignment == assignment) return
+            assignment = newAssignment
             touch()
         }
 
@@ -631,7 +631,7 @@ class ScratchpadStore(
             return buildString {
                 append("Thread scratchpad (persists for this cognitive thread across resume/wait):\n")
                 append("work: ")
-                append(goal.ifBlank { "none" })
+                append(assignment.ifBlank { "none" })
                 append('\n')
                 append("index:\n")
                 sections.forEachIndexed { index, section ->
@@ -665,10 +665,10 @@ class ScratchpadStore(
         fun estimateConfidence(): Double {
             val sectionSignal = (sections.size.coerceAtMost(4).toDouble() / 4.0)
             val evidenceSignal = (evidence.size.coerceAtMost(4).toDouble() / 4.0)
-            val goalSignal = if (goal.isBlank()) 0.0 else 1.0
+            val assignmentSignal = if (assignment.isBlank()) 0.0 else 1.0
             return (sectionSignal * SECTION_SIGNAL_WEIGHT) +
                 (evidenceSignal * EVIDENCE_SIGNAL_WEIGHT) +
-                (goalSignal * GOAL_SIGNAL_WEIGHT)
+                (assignmentSignal * ASSIGNMENT_SIGNAL_WEIGHT)
         }
 
         fun debugHead(): ScratchpadDebugHead =
@@ -677,7 +677,7 @@ class ScratchpadStore(
                 rootInputReceivedAtMs = rootInputReceivedAtMs,
                 version = version,
                 updatedAtMs = updatedAtMs,
-                goal = goal,
+                assignment = assignment,
                 sectionCount = sections.size,
                 evidenceCount = evidence.size,
                 workspaceConfidence = estimateConfidence(),
@@ -711,7 +711,7 @@ class ScratchpadStore(
         }
 
         private fun estimateBytes(): Int {
-            var total = goal.length
+            var total = assignment.length
             sections.forEach { section ->
                 total += section.title.length + section.summary.length + section.content.length + section.source.length
             }
@@ -721,20 +721,20 @@ class ScratchpadStore(
     }
 
     private companion object {
-        const val MAX_GOAL_CHARS: Int = 220
+        const val MAX_ASSIGNMENT_CHARS: Int = 220
         const val MAX_PLAN_STEP_CHARS: Int = 160
         const val FINAL_COMPILATION_SECTION_LIMIT: Int = 6
         const val FINAL_COMPILATION_EVIDENCE_LIMIT: Int = 6
         const val FINAL_COMPILATION_DRAFT_LIMIT: Int = 4
         const val FINAL_COMPILATION_SECTION_CONTENT_PREVIEW_CHARS: Int = 220
         const val SOURCE_INPUT: String = "input"
-        const val SOURCE_GOAL_STEP: String = "goal_step"
-        const val SOURCE_GOAL_CONTEXT: String = "goal_context"
+        const val SOURCE_GOAL_STEP: String = "assignment_step"
+        const val SOURCE_GOAL_CONTEXT: String = "assignment_context"
         const val SOURCE_PLAN: String = "plan"
         const val SOURCE_ACTION: String = "action_outcome"
         const val SECTION_SIGNAL_WEIGHT: Double = 0.45
         const val EVIDENCE_SIGNAL_WEIGHT: Double = 0.45
-        const val GOAL_SIGNAL_WEIGHT: Double = 0.10
+        const val ASSIGNMENT_SIGNAL_WEIGHT: Double = 0.10
         const val DIGEST_MAX_EVIDENCE_ITEMS: Int = 3
         const val MAX_DIGEST_TRACKED_SESSIONS: Int = 32
         const val CROSS_SESSION_ACTIVE_WORKSPACE_LIMIT: Int = 4

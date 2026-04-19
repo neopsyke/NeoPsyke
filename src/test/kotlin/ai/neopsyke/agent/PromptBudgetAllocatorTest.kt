@@ -146,7 +146,7 @@ class PromptBudgetAllocatorTest {
                     role = ChatRole.USER,
                     band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                     floorTokens = 10,
-                    content = "Background context:\nactive_goals:\n1. Keep planner stable\n" + "g".repeat(320)
+                    content = "Background context:\nactive_assignments:\n1. Keep planner stable\n" + "g".repeat(320)
                 ),
                 PromptBudgetAllocator.Section(
                     key = "optional",

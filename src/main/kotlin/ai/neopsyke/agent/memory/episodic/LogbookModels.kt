@@ -16,7 +16,7 @@ enum class MemoryEventType {
     FACT_CORRECTED,
     RELATION_INFERRED,
     CONSOLIDATION_RUN,
-    GOAL_UPDATED,
+    ASSIGNMENT_UPDATED,
     PREFERENCE_REINFORCED;
 
     fun dbValue(): String = name.lowercase()

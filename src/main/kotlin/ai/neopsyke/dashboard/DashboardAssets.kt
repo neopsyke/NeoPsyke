@@ -19,8 +19,8 @@ object DashboardAssets {
         loadText("/dashboard/metrics.html")
     }
 
-    val goalsHtml: String by lazy {
-        loadText("/dashboard/goals.html")
+    val assignmentsHtml: String by lazy {
+        loadText("/dashboard/assignments.html")
     }
 
     val actionControlHtml: String by lazy {

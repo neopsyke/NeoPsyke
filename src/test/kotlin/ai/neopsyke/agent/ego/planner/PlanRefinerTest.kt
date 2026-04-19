@@ -31,7 +31,7 @@ class PlanRefinerTest {
     ) = PlanRefinementRequest(
         planKind = planKind,
         terminalPolicy = terminalPolicy,
-        goal = "Test goal",
+        assignment = "Test assignment",
         instruction = "Test instruction",
         steps = steps,
         availableActions = listOf(ActionSummary("web_search", "Search the web")),
@@ -220,12 +220,12 @@ class PlanRefinerTest {
 
         refiner.refine(sampleRequest(
             sampleSteps(1),
-            planKind = PlanKind.DURABLE_WORK_CREATE,
+            planKind = PlanKind.ASSIGNMENT_CREATE,
             terminalPolicy = TerminalPolicy.DELIVERY_CONTROLLED_BY_WORK_ITEM,
         ))
 
         val systemMessage = llm.calls.last().messages.first { it.role == ai.neopsyke.llm.ChatRole.SYSTEM }
-        assertTrue(systemMessage.content.contains("durable_work_create"), "System prompt should contain plan kind")
+        assertTrue(systemMessage.content.contains("assignment_create"), "System prompt should contain plan kind")
         assertTrue(
             systemMessage.content.contains("user delivery is controlled by the work item runtime"),
             "System prompt should contain terminal policy guidance",

@@ -392,7 +392,7 @@ The config file (`freud/config/freud.yaml`) contains:
 
 - **project**: name, run_root, retention_days, gradle_home
 - **pipeline**: ordered list of steps (shell commands or built-in by name)
-- **live_eval**: timeout, preserve_memory, goals_enabled, llm_config_file
+- **live_eval**: timeout, preserve_memory, assignments_enabled, llm_config_file
 - **session**: replay-artifact recording defaults and the Freud replay E2E gate toggle
 - **scenarios**: manifest_file
 - **bbh**: prompts_file, answers_file, min_pass_rate, max_timeouts

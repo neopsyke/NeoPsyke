@@ -5,7 +5,7 @@ actions:
     directCommitEnabled: true
     autonomousCommitEnabled: true
 
-  goal_operation:
+  assignment_operation:
     directCommitEnabled: true
     autonomousCommitEnabled: true
     recurringRequiresApproval: true

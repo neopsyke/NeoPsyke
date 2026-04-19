@@ -348,7 +348,7 @@ class SuperegoGatekeeperTest {
     }
 
     @Test
-    fun `gatekeeper allows id-origin durable work review actions to proceed`() {
+    fun `gatekeeper allows id-origin assignment review actions to proceed`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponse("""{"allow":true}""")
         }
@@ -357,10 +357,10 @@ class SuperegoGatekeeperTest {
             config = AgentConfig(),
             actionRegistry = testRegistry()
         )
-        val durableWorkAction = PendingAction(
+        val assignmentAction = PendingAction(
             id = 702,
             urgency = Urgency.MEDIUM,
-            type = ActionType.DURABLE_WORK_OPERATION,
+            type = ActionType.ASSIGNMENT_OPERATION,
             payload = """{"command":"review","work_item_id":"resp-1"}""",
             summary = "review responsibility",
             groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
@@ -379,14 +379,14 @@ class SuperegoGatekeeperTest {
             )
         )
         val idContext = snapshot.copy(
-            origin = durableWorkAction.origin,
-            conversationContext = durableWorkAction.conversationContext,
+            origin = assignmentAction.origin,
+            conversationContext = assignmentAction.conversationContext,
             threadSecurityContext = CognitiveThreadSecurityContext.fromConversation(
-                durableWorkAction.conversationContext.security
+                assignmentAction.conversationContext.security
             ),
         )
 
-        val decision = gatekeeper.review(durableWorkAction, idContext)
+        val decision = gatekeeper.review(assignmentAction, idContext)
 
         assertTrue(decision.allow)
         assertEquals(1, llm.calls.size)

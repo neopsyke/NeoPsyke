@@ -6,7 +6,7 @@ import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.agent.model.PrincipalRole
 
 /**
- * Authoritative gate for which delivery channels may be named on durable-work
+ * Authoritative gate for which delivery channels may be named on assignment
  * commands and how a preferred-channel hint flows through a
  * [ConversationContext].
  *
@@ -39,7 +39,7 @@ class ContactChannelPolicy(
 
     companion object {
         /** Attribute key on [ai.neopsyke.agent.model.ChannelRef.attributes] that
-         *  carries a durable-work preferred-channel hint into the resolver. */
+         *  carries an assignment preferred-channel hint into the resolver. */
         const val PREFERRED_CHANNEL_ATTRIBUTE: String = "preferred_channel"
     }
 }

@@ -525,13 +525,13 @@ class ApprovalIntegrationTest {
     @Test
     fun `9 non conversation origin routes through eligible channel selection`() = runBlocking {
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session",
+            sessionId = "assignment-session",
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
         val staged = testStagedAction(
             conversationContext = nonOwnerCtx,
-            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK),
+            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT),
         )
         val telegramConfig = TelegramChannelConfig(
             enabled = true,
@@ -559,13 +559,13 @@ class ApprovalIntegrationTest {
     @Test
     fun `10 fail closed when no eligible owner channel exists`() = runBlocking {
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session",
+            sessionId = "assignment-session",
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
         val staged = testStagedAction(
             conversationContext = nonOwnerCtx,
-            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK),
+            origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT),
         )
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(
             dashboardRequiresLiveSubscriber = true,

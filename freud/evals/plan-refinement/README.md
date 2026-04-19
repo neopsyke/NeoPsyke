@@ -1,23 +1,23 @@
 # Plan Refinement Live Evals
 
 Live eval inputs that exercise the Ego-level plan generation and refinement
-pipeline for durable work. These require `--goals` to enable the durable work
-subsystem.
+pipeline for durable assignments. These require `--assignments` to enable the
+assignment subsystem.
 
 ## Running
 
 ```bash
-# Simple recurring goal (plan generation + refinement + approval staging)
-./freud/bin/freud eval --live --goals --lane low-llm \
-    --input freud/evals/plan-refinement/simple-recurring-goal.txt
+# Simple recurring assignment (plan generation + refinement + approval staging)
+./freud/bin/freud eval --live --assignments --lane low-llm \
+    --input freud/evals/plan-refinement/simple-recurring-assignment.txt
 
-# Multi-step goal with richer plan (more steps, data flow, grounding)
-./freud/bin/freud eval --live --goals --lane low-llm \
-    --input freud/evals/plan-refinement/multi-step-goal.txt
+# Multi-step assignment with richer plan (more steps, data flow, grounding)
+./freud/bin/freud eval --live --assignments --lane low-llm \
+    --input freud/evals/plan-refinement/multi-step-assignment.txt
 
 # Record for later replay
-./freud/bin/freud eval --live --goals --record --lane low-llm \
-    --input freud/evals/plan-refinement/simple-recurring-goal.txt
+./freud/bin/freud eval --live --assignments --record --lane low-llm \
+    --input freud/evals/plan-refinement/simple-recurring-assignment.txt
 ```
 
 ## What to check in the artifacts
@@ -25,7 +25,7 @@ subsystem.
 After a run, inspect the run directory:
 
 1. **Telemetry events** (`logs/events.jsonl`):
-   - `plan_refinement_completed` with `plan_kind=durable_work_create`
+   - `plan_refinement_completed` with `plan_kind=assignment_create`
    - `refinement_mode` should be `unchanged` or `llm_rewritten`
    - `original_step_count` and `refined_step_count` should be > 0
 

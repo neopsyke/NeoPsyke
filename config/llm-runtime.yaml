@@ -60,23 +60,23 @@ cognitive_roles:
         provider: groq
         model: openai/gpt-oss-120b
         reasoning_effort: medium
-      durable_work_generic:
+      assignment_generic:
         provider: groq
         model: openai/gpt-oss-120b
         reasoning_effort: low
-      durable_work_recurrent_task:
+      assignment_recurrent_task:
         provider: groq
         model: openai/gpt-oss-120b
         reasoning_effort: medium
-      durable_work_responsibility:
+      assignment_responsibility:
         provider: groq
         model: openai/gpt-oss-120b
         reasoning_effort: high
-      goal_creation:
+      assignment_creation:
         provider: groq
         model: openai/gpt-oss-120b
         reasoning_effort: medium
-      goal_management:
+      assignment_management:
         provider: groq
         model: openai/gpt-oss-120b
         reasoning_effort: low  # lifecycle ops (pause/resume/delete) are straightforward
@@ -88,7 +88,7 @@ cognitive_roles:
         provider: groq
         model: openai/gpt-oss-120b
         reasoning_effort: medium
-      goal_work:
+      assignment:
         provider: groq
         model: openai/gpt-oss-120b
         reasoning_effort: medium

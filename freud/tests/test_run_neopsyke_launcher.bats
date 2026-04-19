@@ -11,7 +11,7 @@ cat >"$LAUNCHER_ROOT/build/install/neopsyke/bin/neopsyke" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'EGO_LOOP_DELAY_MS=%s\n' "${EGO_LOOP_DELAY_MS:-}" >"${NEOPSYKE_STUB_ENV_OUT:?}"
-printf 'NEOPSYKE_GOALS_WORKSPACE_ROOT=%s\n' "${NEOPSYKE_GOALS_WORKSPACE_ROOT:-}" >>"${NEOPSYKE_STUB_ENV_OUT:?}"
+printf 'NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT=%s\n' "${NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT:-}" >>"${NEOPSYKE_STUB_ENV_OUT:?}"
 printf 'ARGS=%s\n' "$*" >>"${NEOPSYKE_STUB_ENV_OUT:?}"
 EOF
   chmod +x "$LAUNCHER_ROOT/build/install/neopsyke/bin/neopsyke"
@@ -30,7 +30,7 @@ teardown() {
   [[ "$status" -eq 0 ]]
   grep -q '^EGO_LOOP_DELAY_MS=0$' "$ENV_OUT"
   grep -q 'ARGS=--freud-live' "$ENV_OUT"
-  grep -q "^NEOPSYKE_GOALS_WORKSPACE_ROOT=$LAUNCHER_ROOT/.neopsyke/eval-goals/" "$ENV_OUT"
+  grep -q "^NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT=$LAUNCHER_ROOT/.neopsyke/eval-assignments/" "$ENV_OUT"
 }
 
 @test "run-neopsyke forwards --clear-memory-lessons and no longer documents the old flag name" {
@@ -55,12 +55,12 @@ teardown() {
   [[ "$output" != *"LLM_WEBSEARCH_BASE_URL"* ]]
 }
 
-@test "run-neopsyke preserves explicit goals workspace overrides in eval mode" {
+@test "run-neopsyke preserves explicit assignments workspace overrides in eval mode" {
   run env \
-    NEOPSYKE_GOALS_WORKSPACE_ROOT="/tmp/custom-goals-root" \
+    NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT="/tmp/custom-assignments-root" \
     NEOPSYKE_STUB_ENV_OUT="$ENV_OUT" \
-    "$LAUNCHER_ROOT/run-neopsyke.sh" --freud-live --goals
+    "$LAUNCHER_ROOT/run-neopsyke.sh" --freud-live --assignments
 
   [[ "$status" -eq 0 ]]
-  grep -q '^NEOPSYKE_GOALS_WORKSPACE_ROOT=/tmp/custom-goals-root$' "$ENV_OUT"
+  grep -q '^NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT=/tmp/custom-assignments-root$' "$ENV_OUT"
 }

@@ -22,8 +22,8 @@ flowchart LR
     Id["Id\n(Autonomous Drives)"] -->|"Impulse"| SC
     Ego --> Mem["Memory System\n(MemoryStore/Hippocampus/Logbook/ScratchpadStore)"]
     Mem --> Ego
-    Ego --> Goals["DurableWorkGateway\n(Persistent Work Items)"]
-    Goals -->|"DurableWorkCue"| SC
+    Ego --> Assignments["AssignmentGateway\n(Persistent Work Items)"]
+    Assignments -->|"AssignmentCue"| SC
     MC --> Output["ConversationOutputGateway\n(Dashboard, Telegram)"]
 ```
 
@@ -52,14 +52,14 @@ flowchart LR
     E --> P["HierarchicalEgoPlanner (L0)"]
     P --> IL["InputPlanner (L1)"]
     IL --> IR["InputIntentRouter (L2)"]
-    IL --> DRP["DirectResponsePlanner"]
+    IL --> DRP["DirectResponder"]
     IL --> GAP["GeneralActionPlanner"]
     IL --> TDP["TaskDecompositionPlanner"]
-    IL --> GP["GoalPlanner"]
+    IL --> GP["AssignmentCommandBuilder"]
     IL --> CLR["ClarificationNeeded (→ contact_user)"]
     IL --> NOP["Noop (unactionable input)"]
     P --> PP["ProgressionPlanner (L1)"]
-    P --> GWP["GoalWorkPlanner (L1)"]
+    P --> GWP["AssignmentPlanner (L1)"]
     P --> IP["ImpulsePlanner (L1)"]
     E --> TV["GroundingGate (Typed Evidence Gate)"]
     E --> S["Superego"]
@@ -91,9 +91,9 @@ flowchart LR
     E --> TWS["ScratchpadStore (Thread Workspace + Intention Drafts)"]
     E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
     E --> PR["PlanRefiner (LLM or Noop)"]
-    E --> PG["DurableWorkGateway (optional durable runtime boundary)"]
-    PG --> PM["DurableWorkRuntime"]
-    PM --> DWP["DeterministicWorkPlanBuilder (fallback only)"]
+    E --> PG["AssignmentGateway (optional durable runtime boundary)"]
+    PG --> PM["AssignmentRuntime"]
+    PM --> DWP["DeterministicAssignmentPlanBuilder (fallback only)"]
     PM --> PV["WorkStepVerifier"]
     PM --> AOR["AsyncOperationRegistry"]
     PM --> PS["WorkItemStateMachine + WorkItemStore"]
@@ -148,17 +148,17 @@ flowchart TD
         PR1 --> DD["DecisionDispatcher\n(hash/dedup/enqueue)"]
     end
     subgraph "Durable Work CREATE"
-        GP["Goal Planner generates\nDurableWorkCommand.Create\nwith planSteps"] --> PR2["PlanRefiner.refine()"]
+        GP["Assignment planner generates\nAssignmentCommand.Create\nwith planSteps"] --> PR2["PlanRefiner.refine()"]
         PR2 --> FI["EgoDecision.FormIntention\n(CREATE payload with refined plan)"]
         FI --> AC["ActionControlService\n(stage with approvalContext)"]
         AC --> AR["ApprovalRuntime\n(shows plan in prompt)"]
-        AR -->|"APPROVE"| DWR["DurableWorkRuntime\n(uses pre-built plan)"]
+        AR -->|"APPROVE"| DWR["AssignmentRuntime\n(uses pre-built plan)"]
         AR -->|"DENY_AND_REISSUE"| RI["Reissue to Ego\n(re-plan with feedback)"]
     end
     subgraph "Durable Work REVISE_PLAN"
         REV["Ego builds revised plan\nfrom work-item context"] --> PR3["PlanRefiner.refine()"]
         PR3 --> FI2["EgoDecision.FormIntention\n(REVISE_PLAN with plan)"]
-        FI2 --> DWR2["DurableWorkRuntime\n(applies supplied plan)"]
+        FI2 --> DWR2["AssignmentRuntime\n(applies supplied plan)"]
     end
 ```
 
@@ -188,7 +188,7 @@ sequenceDiagram
         Ego->>Sched: nextTask()
         Sched-->>Ego: opportunity / intention / action
 
-        alt Opportunity (input/feedback/impulse/goal)
+        alt Opportunity (input/feedback/impulse/assignment)
             Ego->>Mem: recall context
             Ego->>Planner: decide(context)
             Planner-->>Ego: intend / plan / noop
@@ -256,19 +256,19 @@ sequenceDiagram
         Ego->>Delib: startStep()
 
         alt Task = impulse opportunity
-    Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: goals, scratchpad themes, useful updates, open loops, and recent exact learning topics
+    Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: assignments, scratchpad themes, useful updates, open loops, and recent exact learning topics
     Note over Ego,Mem: Ambient context is a cached best-effort snapshot, not a real-time synchronized view
             Ego->>Planner: decide(context + idState)
             Planner-->>Ego: intend/plan/noop
             Ego->>Sched: enqueue impulse-derived work with origin=ID
             Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
-        else Task = durable work opportunity
-            Ego->>PG: finalizeDurableWorkCycle(rootInputId) after queues drain for that work root
-    Note over Ego,PG: Durable runtime resumes from stable per-step roots, records activation boundaries in an activation journal, and may re-emit durable-work cues for resumable steps
+        else Task = assignment opportunity
+            Ego->>PG: finalizeAssignmentCycle(rootInputId) after queues drain for that work root
+    Note over Ego,PG: Durable runtime resumes from stable per-step roots, records activation boundaries in an activation journal, and may re-emit assignment cues for resumable steps
     Note over Ego,PG: Durable-work wakes are typed [cron_due, overdue_check, id_review, manual_review, wait_resolved, recovery, etc.] and the activation context carries those wake reasons into Ego
     Note over Ego,PG: Runtime-owned phase-2 state tracks monitor cursors, seen items, change history, digest windows, delivery suppression reasons, and responsibility review history
     Note over Ego,PG: Responsibility cycles are open-ended current-plan exhaustion does not auto-complete the responsibility review-capable wakes can rearm the next cycle and overdue review is surfaced as operator-visible next wake state
-    Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, durable-work, or wake-only ingress before scheduler work begins
+    Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, assignment, or wake-only ingress before scheduler work begins
         else Task = input or feedback opportunity
             Ego->>Mem: recall and short-term summary
             Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
@@ -283,10 +283,10 @@ sequenceDiagram
             Note over Ego,Planner: HierarchicalEgoPlanner dispatches to typed L1 lanes based on trigger type (no text inspection)
             Note over Ego,Planner: InputPlanner uses InputIntentRouter (LLM classifier) then dispatches to typed L2 sub-planner
             Note over Ego,Planner: Durable-work routing stays under the existing L1 router. After route selection, dispatch is deterministic to generic lifecycle, recurrent-task, or responsibility planning
-            Note over Ego,Planner: Runtime lane config exposes durable_work_generic durable_work_recurrent_task and durable_work_responsibility, and the responsibility path can reserve a larger intake prompt budget
-            Note over Ego,Planner: Durable-work creation and management use typed DurableWorkCommand with LLM-resolved references (no regex heuristics)
+            Note over Ego,Planner: Runtime lane config exposes assignment_generic assignment_recurrent_task and assignment_responsibility, and the responsibility path can reserve a larger intake prompt budget
+            Note over Ego,Planner: Durable-work creation and management use typed AssignmentCommand with LLM-resolved references (no regex heuristics)
             Note over Ego,Planner: Responsibility creation uses bounded intake draft state inside Ego, while Id "be useful" planning can see a bounded reviewable-responsibility slate and route one selected item into a typed review command
-            Note over Ego,Planner: Durable-work-operation payload boundary is canonical SerializedDurableWorkCommand (command + typed work_item_reference), consumed directly by DurableWorkOperationActionPlugin
+            Note over Ego,Planner: Durable-work-operation payload boundary is canonical SerializedAssignmentCommand (command + typed work_item_reference), consumed directly by AssignmentOperationActionPlugin
             Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
             Planner-->>Ego: intend/plan/noop
             Ego->>Delib: maybeApplyPressureOverride (FINALIZE_NOW directly enqueues forced terminal; REQUEST_TOOL_THEN_FINALIZE produces soft hint)
@@ -378,7 +378,7 @@ sequenceDiagram
                             Note over SC,Ego: Feedback continuations and terminal thread resolution are decided only after typed feedback re-enters through SensoryCortex and StimulusIngressCoordinator; WAITING outcomes suspend the thread instead of auto-queuing a continuation
                             Note over Ego,Motor: contact_user delivery is channel-aware. Durable-work hints use canonical keys (dashboard, telegram), then resolver maps them to live delivery targets; Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
                             Note over ACAPI,Dash: Dashboard-approved staged executions can append a completion/answer message back into the originating chat session before root-session mapping is cleared
-                            Note over Ego,PG: Goal-origin WAITING without handles is rejected as a contract violation
+                            Note over Ego,PG: Assignment-origin WAITING without handles is rejected as a contract violation
                             Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
                             alt action = contact_user
                                 Ego->>Sched: clear pending continuation and action work for same root-session scope
@@ -421,7 +421,7 @@ sequenceDiagram
 
     Note over User,SC: Terminal stdin is control-only in interactive mode [exit command]. non-command text is not enqueued as chat input
     Note over User,SC: Interactive linguistic ingress currently comes from dashboard chat sessions or owner-only Telegram webhook updates
-    Note over Ego,GOBS: Gmail and Calendar are native read-only observe actions, intended for goals such as Morning Briefing and Inbox Management
+    Note over Ego,GOBS: Gmail and Calendar are native read-only observe actions, intended for assignments such as Morning Briefing and Inbox Management
 ```
 
 ---
@@ -430,22 +430,22 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    TS["TimerScheduler"] --> PM["DurableWorkRuntime"]
+    TS["TimerScheduler"] --> PM["AssignmentRuntime"]
     WM["WaitConditionMonitor (timeouts + async poll/event restore)"] --> PM
     AOR["AsyncOperationRegistry / Provider Adapters"] --> WM
     PM --> PSM["WorkItemStateMachine"]
-    PM --> PP["WorkPlanBuilder"]
+    PM --> PP["AssignmentCommandBuilder"]
     PM --> PV["WorkStepVerifier"]
     PM --> AJ["ActivationJournal"]
     PM --> EL["WorkEffectLedger"]
     PSM --> PCS["WorkItemCommand stream"]
-    PCS -->|persist| Store["WorkItemStore / goal-events.jsonl + goal-events.archive.jsonl + goal.json + goal-snapshot.json"]
-    PCS -->|work ready| Sig["DurableWorkCue"]
+    PCS -->|persist| Store["WorkItemStore / assignment-events.jsonl + assignment-events.archive.jsonl + assignment.json + assignment-snapshot.json"]
+    PCS -->|work ready| Sig["AssignmentCue"]
     TS -->|"cron tick after completed/failed recurring work item"| PSM
     PSM -->|"reset plan steps + clear produced keys"| PCS
     Sig --> Ego["Ego"]
     Ego -->|nextWorkFromCue| PM
-    Ego -->|durable-work-origin action outcomes| PM
+    Ego -->|assignment-origin action outcomes| PM
     Ego -->|beforeActionExecution gate| EL
 ```
 

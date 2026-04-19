@@ -176,11 +176,11 @@ class ApprovalUnitGapsTest {
 
         val resolver = DefaultApprovalChannelResolver(approvals = approvalConfig, statusProvider = statusProvider)
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session",
+            sessionId = "assignment-session",
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT))
 
         val decision = resolver.resolve(staged)
         assertNotNull(decision.target)
@@ -207,11 +207,11 @@ class ApprovalUnitGapsTest {
         )
         val resolver = DefaultApprovalChannelResolver(approvals = approvalConfig, statusProvider = statusProvider)
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session",
+            sessionId = "assignment-session",
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT))
 
         val decision = resolver.resolve(staged)
         assertNotNull(decision.target)
@@ -237,11 +237,11 @@ class ApprovalUnitGapsTest {
         )
         val resolver = DefaultApprovalChannelResolver(approvals = approvalConfig, statusProvider = statusProvider)
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session",
+            sessionId = "assignment-session",
             interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT))
 
         val decision = resolver.resolve(staged)
         assertEquals(null, decision.target)

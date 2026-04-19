@@ -262,7 +262,7 @@ class FinalizeNowTerminalPromotionTest {
             conversationContext = convCtx,
             groundingMetadata = GroundingMetadata(
                 requirement = GroundingRequirement.REQUIRED,
-                source = GroundingSource.DURABLE_WORK_STEP_POLICY,
+                source = GroundingSource.ASSIGNMENT_STEP_POLICY,
             ),
         )
 

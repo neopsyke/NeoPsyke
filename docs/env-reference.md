@@ -55,20 +55,20 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 
 ---
 
-## Goals
+## Assignments
 
 | Variable | Default | Description |
 |---|---|---|
-| `NEOPSYKE_GOALS_ENABLED` | from `agent-runtime.yaml` | Enable the goal subsystem. |
-| `NEOPSYKE_GOALS_WORKSPACE_ROOT` | `.neopsyke/goals` | Goal state and artifact persistence directory when using the bundled runtime defaults. |
-| `NEOPSYKE_GOALS_MAX_ACTIVE_GOALS` | `10` | Maximum concurrently active goals. |
-| `NEOPSYKE_GOALS_MAX_STEPS_PER_PLAN` | `20` | Maximum persisted steps in a goal plan. |
-| `NEOPSYKE_GOALS_ACTIONS_PER_CYCLE` | `5` | Maximum goal-origin actions per goal execution cycle. |
-| `NEOPSYKE_GOALS_SNAPSHOT_EVERY_N_EVENTS` | `50` | Goal snapshot cadence. |
-| `NEOPSYKE_GOALS_TIMER_RESOLUTION_MS` | `5000` | Timer wakeup resolution for scheduled goals. |
-| `NEOPSYKE_GOALS_CONDITION_CHECK_INTERVAL_MS` | `30000` | Poll interval for condition-based waits. |
-| `NEOPSYKE_GOALS_COMPLETED_RETENTION_DAYS` | `30` | Retention window for completed goal artifacts. |
-| `NEOPSYKE_GOALS_MAX_WORKSPACE_BYTES` | `10485760` | Workspace storage cap per goal root. |
+| `NEOPSYKE_ASSIGNMENTS_ENABLED` | from `agent-runtime.yaml` | Enable the assignment subsystem. |
+| `NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT` | `.neopsyke/assignments` | Assignment state and artifact persistence directory when using the bundled runtime defaults. |
+| `NEOPSYKE_ASSIGNMENTS_MAX_ACTIVE_ASSIGNMENTS` | `10` | Maximum concurrently active assignments. |
+| `NEOPSYKE_ASSIGNMENTS_MAX_STEPS_PER_PLAN` | `20` | Maximum persisted steps in an assignment plan. |
+| `NEOPSYKE_ASSIGNMENTS_ACTIONS_PER_CYCLE` | `5` | Maximum assignment-origin actions per assignment execution cycle. |
+| `NEOPSYKE_ASSIGNMENTS_SNAPSHOT_EVERY_N_EVENTS` | `50` | Assignment snapshot cadence. |
+| `NEOPSYKE_ASSIGNMENTS_TIMER_RESOLUTION_MS` | `5000` | Timer wakeup resolution for scheduled assignments. |
+| `NEOPSYKE_ASSIGNMENTS_CONDITION_CHECK_INTERVAL_MS` | `30000` | Poll interval for condition-based waits. |
+| `NEOPSYKE_ASSIGNMENTS_COMPLETED_RETENTION_DAYS` | `30` | Retention window for completed assignment artifacts. |
+| `NEOPSYKE_ASSIGNMENTS_MAX_WORKSPACE_BYTES` | `10485760` | Workspace storage cap per assignment root. |
 
 ---
 
@@ -316,7 +316,7 @@ These apply to NeoPsyke's native built-in website fetch action.
 | `NEOPSYKE_ACTION_CONTROL_CONTACT_USER_PER_ROOT_INPUT` | `5` | Per-root-input cap for `contact_user` deliveries. |
 | `NEOPSYKE_ACTION_CONTROL_REFLECTION_FAMILY_PER_ROOT_INPUT` | `2` | Per-root-input cap across reflection-family actions. |
 | `NEOPSYKE_ACTION_CONTROL_REFLECT_EVIDENCE_PER_ROOT_INPUT` | `1` | Per-root-input cap specifically for `reflect_evidence`. |
-| `NEOPSYKE_ACTION_CONTROL_GOAL_OPERATION_PER_ROOT_INPUT` | `3` | Per-root-input cap for `goal_operation` actions. |
+| `NEOPSYKE_ACTION_CONTROL_ASSIGNMENT_OPERATION_PER_ROOT_INPUT` | `3` | Per-root-input cap for `assignment_operation` actions. |
 | `NEOPSYKE_ACTION_CONTROL_COMMIT_PRIVATE_PER_TYPE_PER_ROOT_INPUT` | `3` | Per-root-input cap for private side-effecting commits of the same type. |
 | `NEOPSYKE_ACTION_CONTROL_COMMIT_STATEFUL_PER_TYPE_PER_ROOT_INPUT` | `2` | Per-root-input cap for stateful side-effecting commits of the same type. |
 | `NEOPSYKE_ACTION_CONTROL_COMMIT_PUBLIC_PER_TYPE_PER_ROOT_INPUT` | `1` | Per-root-input cap for public side-effecting commits of the same type. |

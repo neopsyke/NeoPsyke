@@ -293,8 +293,8 @@ class EgoAsyncFeedbackIntegrationTest {
                         urgency = Urgency.MEDIUM,
                         intentionKind = IntentionKind.PREPARE,
                         commitModePreference = CommitMode.APPROVAL_BACKED,
-                        actionType = ActionType.DURABLE_WORK_OPERATION,
-                        payload = """{"operation":"create"}""",
+                        actionType = ActionType.ASSIGNMENT_OPERATION,
+                        payload = """{"command":"create"}""",
                         summary = "illegal control-plane action",
                     )
 
@@ -343,13 +343,13 @@ class EgoAsyncFeedbackIntegrationTest {
                 }
             }
 
-            assertEquals("durable_work_operation", blockedEvent.data["action_type"])
+            assertEquals("assignment_operation", blockedEvent.data["action_type"])
             assertEquals("ACTION_TYPE_NOT_AVAILABLE", blockedEvent.data["reason_code"])
-            assertTrue(retryContinuations.single().contains("Action 'durable_work_operation' is not available"))
-            assertFalse((opportunityEvent.data["available_actions"] as List<*>).contains("durable_work_operation"))
+            assertTrue(retryContinuations.single().contains("Action 'assignment_operation' is not available"))
+            assertFalse((opportunityEvent.data["available_actions"] as List<*>).contains("assignment_operation"))
             assertTrue(
                 instrumentation.events.none {
-                    it.type == "action_proposed" && it.data["action_type"] == "durable_work_operation"
+                    it.type == "action_proposed" && it.data["action_type"] == "assignment_operation"
                 }
             )
         } finally {

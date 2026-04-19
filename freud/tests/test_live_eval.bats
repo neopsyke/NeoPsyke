@@ -17,7 +17,7 @@ set -euo pipefail
 printf '%s\n' "$*" >"${FREUD_TEST_ARGS_LOG:-/dev/null}"
 printf 'GRADLE_USER_HOME=%s\n' "${GRADLE_USER_HOME:-}" >"${FREUD_TEST_ENV_LOG:-/dev/null}"
 printf 'NEOPSYKE_LLM_CONFIG_FILE=%s\n' "${NEOPSYKE_LLM_CONFIG_FILE:-}" >>"${FREUD_TEST_ENV_LOG:-/dev/null}"
-printf 'NEOPSYKE_GOALS_WORKSPACE_ROOT=%s\n' "${NEOPSYKE_GOALS_WORKSPACE_ROOT:-}" >>"${FREUD_TEST_ENV_LOG:-/dev/null}"
+printf 'NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT=%s\n' "${NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT:-}" >>"${FREUD_TEST_ENV_LOG:-/dev/null}"
 cat >/dev/null
 mkdir -p "$(dirname "$NEOPSYKE_LOG_FILE")" "$(dirname "$NEOPSYKE_EVENT_LOG_FILE")"
 printf '%s\n' "stub log" >"$NEOPSYKE_LOG_FILE"
@@ -155,16 +155,16 @@ EOF
   grep -q "NEOPSYKE_LLM_CONFIG_FILE=$TEST_TMPDIR/llm-routing.yaml" "$ENV_LOG"
 }
 
-@test "live-eval isolates goals workspace inside the run directory by default" {
+@test "live-eval isolates assignments workspace inside the run directory by default" {
   run env \
     FREUD_LIVE_EVAL_NEOPSYKE_CMD="$NEOPSYKE_STUB" \
     FREUD_RUN_ROOT="$RUN_ROOT_REL" \
     FREUD_TEST_ARGS_LOG="$ARGS_LOG" \
     FREUD_TEST_ENV_LOG="$ENV_LOG" \
-    "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE" --goals
+    "$SCRIPTS_DIR/live-eval.sh" --input "$INPUT_FILE" --assignments
   [[ "$status" -eq 0 ]]
   latest_dir="$(find "$REPO_ROOT/$RUN_ROOT_REL" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
-  grep -q "NEOPSYKE_GOALS_WORKSPACE_ROOT=$latest_dir/artifacts/goals" "$ENV_LOG"
+  grep -q "NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT=$latest_dir/artifacts/assignments" "$ENV_LOG"
 }
 
 @test "live-eval extracts the final ego answer from noisy stdout" {

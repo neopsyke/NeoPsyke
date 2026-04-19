@@ -85,7 +85,7 @@ class RecordingSignalSource(
                     channelSurface = stimulus.conversationContext.security.channel.surface.name,
                     channelTransport = stimulus.conversationContext.security.channel.transport.name,
                     principalRole = stimulus.conversationContext.security.principal.role.name,
-                    goalsEnabled = System.getenv("NEOPSYKE_GOALS_ENABLED")?.trim()?.lowercase() != "false",
+                    assignmentsEnabled = System.getenv("NEOPSYKE_ASSIGNMENTS_ENABLED")?.trim()?.lowercase() != "false",
                 )
             )
         }

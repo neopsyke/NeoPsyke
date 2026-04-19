@@ -21,8 +21,8 @@ import ai.neopsyke.agent.memory.longterm.Logbook
 import ai.neopsyke.agent.memory.longterm.LogbookSummarizer
 import ai.neopsyke.agent.memory.shortterm.MemoryStore
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
-import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
-import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.assignments.NoopAssignmentGateway
+import ai.neopsyke.agent.assignments.AssignmentGateway
 import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
 import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.superego.Superego
@@ -84,7 +84,7 @@ object EgoAssembler {
         runId: String? = null,
         webSearchActionHandler: WebSearchActionHandler? = null,
         fetchTool: FetchTool? = null,
-        durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
+        assignmentGateway: AssignmentGateway = NoopAssignmentGateway,
         actionControlServiceFactory: (MotorCortex) -> ActionControlService = { NoopActionControlService },
         output: (String) -> Unit = {},
         conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
@@ -109,7 +109,7 @@ object EgoAssembler {
                 conversationOutput = conversationOutput,
                 evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = memory,
-                durableWorkGateway = durableWorkGateway,
+                assignmentGateway = assignmentGateway,
                 contactChannelPolicy = contactChannelPolicy,
             )
         )
@@ -128,8 +128,8 @@ object EgoAssembler {
             scratchpadFinalizer = scratchpadFinalizer,
             instrumentation = instrumentation,
             actionControlService = actionControlService,
-            goalRegistry = durableWorkGateway,
-            durableWorkGateway = durableWorkGateway,
+            assignmentRegistry = assignmentGateway,
+            assignmentGateway = assignmentGateway,
             evidenceArtifactStore = evidenceArtifactStore,
             planRefiner = plannerBuild.planRefiner,
             contactChannelSupplier = contactChannelPolicy?.let { { it.availableChannels() } } ?: { emptySet() },

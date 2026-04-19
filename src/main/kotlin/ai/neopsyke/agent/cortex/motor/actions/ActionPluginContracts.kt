@@ -13,8 +13,8 @@ import ai.neopsyke.agent.model.ExternalContentArtifact
 import ai.neopsyke.agent.model.InstructionTrust
 import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.agent.model.SuperegoContext
-import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
-import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.assignments.NoopAssignmentGateway
+import ai.neopsyke.agent.assignments.AssignmentGateway
 import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 
 /**
@@ -148,7 +148,7 @@ data class ActionPluginFactoryContext(
     val connectorRuntime: ConnectorRuntimeBoundary = ConnectorRuntimeBoundary.firstPartyBuiltin(),
     val evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     val reflectionMemoryRecorder: ReflectionMemoryRecorder,
-    val durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
+    val assignmentGateway: AssignmentGateway = NoopAssignmentGateway,
     val contactChannelPolicy: ContactChannelPolicy? = null,
 )
 

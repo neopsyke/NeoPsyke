@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.ego.planner.model
 
-enum class DurableWorkRouteTarget {
+enum class AssignmentRouteTarget {
     GENERIC,
     RECURRENT_TASK,
     RESPONSIBILITY,
@@ -18,9 +18,9 @@ sealed interface InputRoute {
 
     data class MultiStepTask(val reasoning: String) : InputRoute
 
-    data class DurableWork(
+    data class Assignment(
         val reasoning: String,
-        val target: DurableWorkRouteTarget = DurableWorkRouteTarget.GENERIC,
+        val target: AssignmentRouteTarget = AssignmentRouteTarget.GENERIC,
     ) : InputRoute
 
     data class ClarificationNeeded(val question: String) : InputRoute

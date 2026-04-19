@@ -185,7 +185,7 @@ The model catalog is YAML-only and supports source-review timestamps through `me
 
 ## 2. Agent Configuration (`config/agent-runtime.yaml`)
 
-This is the largest configuration file, covering the Ego planner, Superego, memory system, meta-reasoner, episodic logbook, goals, integrations, and runtime behavior.
+This is the largest configuration file, covering the Ego planner, Superego, memory system, meta-reasoner, episodic logbook, assignments, integrations, and runtime behavior.
 
 ### Planner (`agent.planner`)
 
@@ -203,7 +203,7 @@ This is the largest configuration file, covering the Ego planner, Superego, memo
 | `max_run_total_tokens` | `0` | Per-run total token cap (0 = unlimited). |
 | `max_run_tokens_per_provider` | `0` | Per-run token cap per provider (0 = unlimited). |
 | `max_run_tokens_per_role` | `0` | Per-run token cap per cognitive role (0 = unlimited). |
-| `max_plan_steps` | `6` | Maximum steps in a goal execution plan. |
+| `max_plan_steps` | `6` | Maximum steps in an assignment execution plan. |
 | `max_plans_per_input` | `2` | Maximum plan generations per input. |
 | `action_retry_budget_non_retryable_failures` | `3` | How many non-retryable action failures before giving up. |
 | `action_retry_cooldown_steps` | `10` | Steps to wait before retrying a failed action type. |
@@ -316,7 +316,7 @@ This is the durable authorization/staging subsystem used by the dashboard and by
 | `contact_user_per_root_input` | `5` | Per-root-input cap for terminal `contact_user` deliveries. |
 | `reflection_family_per_root_input` | `2` | Per-root-input cap across reflection-family actions. |
 | `reflect_evidence_per_root_input` | `1` | Per-root-input cap specifically for `reflect_evidence`. |
-| `goal_operation_per_root_input` | `3` | Per-root-input cap for `goal_operation` actions. |
+| `assignment_operation_per_root_input` | `3` | Per-root-input cap for `assignment_operation` actions. |
 | `commit_private_per_type_per_root_input` | `3` | Per-root-input cap for private side-effecting commits of the same type. |
 | `commit_stateful_per_type_per_root_input` | `2` | Per-root-input cap for stateful side-effecting commits of the same type. |
 | `commit_public_per_type_per_root_input` | `1` | Per-root-input cap for public side-effecting commits of the same type. |
@@ -352,20 +352,20 @@ This section configures native first-party tools that are shipped with NeoPsyke 
 | `call_timeout_ms` | `8000` | Timeout for native website fetch requests. |
 | `max_chars` | `4000` | Maximum sanitized characters returned from a fetched page. |
 
-### Goals (`agent.goals`)
+### Assignments (`agent.assignment`)
 
 | Key | Default | Description |
 |---|---|---|
-| `enabled` | `true` | Enable the goal subsystem. |
-| `workspace_root` | `.neopsyke/goals` | Where goal state and artifacts are persisted by the bundled runtime defaults. |
-| `max_active_goals` | `10` | Maximum concurrently active goals. |
-| `max_steps_per_plan` | `20` | Maximum persisted steps in a goal plan. |
-| `actions_per_cycle` | `5` | Maximum goal-origin actions per goal execution cycle. |
-| `snapshot_every_n_events` | `50` | Snapshot cadence for persisted goal state. |
-| `timer_resolution_ms` | `5000` | Polling resolution for timer-based goal wakeups. |
+| `enabled` | `true` | Enable the assignment subsystem. |
+| `workspace_root` | `.neopsyke/assignments` | Where assignment state and artifacts are persisted by the bundled runtime defaults. |
+| `max_active_assignments` | `10` | Maximum concurrently active assignments. |
+| `max_steps_per_plan` | `20` | Maximum persisted steps in an assignment plan. |
+| `actions_per_cycle` | `5` | Maximum assignment-origin actions per assignment execution cycle. |
+| `snapshot_every_n_events` | `50` | Snapshot cadence for persisted assignment state. |
+| `timer_resolution_ms` | `5000` | Polling resolution for timer-based assignment wakeups. |
 | `condition_check_interval_ms` | `30000` | Poll interval for condition-based waits. |
-| `completed_goal_retention_days` | `30` | Retention window for completed goal artifacts. |
-| `max_workspace_bytes` | `10485760` | Workspace storage limit per goal root. |
+| `completed_assignment_retention_days` | `30` | Retention window for completed assignment artifacts. |
+| `max_workspace_bytes` | `10485760` | Workspace storage limit per assignment root. |
 
 ### Integrations (`agent.native_integrations`)
 
@@ -571,7 +571,7 @@ actions:
   contact_user:
     directCommitEnabled: true
     autonomousCommitEnabled: true
-  goal_operation:
+  assignment_operation:
     directCommitEnabled: true
     autonomousCommitEnabled: true
     recurringRequiresApproval: true

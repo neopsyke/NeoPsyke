@@ -796,7 +796,7 @@
     <div style="display:flex;align-items:center;gap:10px;">
       <a class="ghost-btn" href="/" target="_blank" rel="noopener noreferrer">Conversations</a>
       <a class="ghost-btn" href="/metrics" target="_blank" rel="noopener noreferrer">Metrics</a>
-      <a class="ghost-btn" href="/goals" target="_blank" rel="noopener noreferrer">Goals</a>
+      <a class="ghost-btn" href="/assignments" target="_blank" rel="noopener noreferrer">Goals</a>
       <a class="ghost-btn" href="/action-control" target="_blank" rel="noopener noreferrer">Action Control</a>
       <div class="status" id="status">connecting...</div>
     </div>
@@ -1074,10 +1074,10 @@
     }
 
     function extractTimelineContent(event) {
-      const d = event.data || {};
-      switch (event.type) {
+        const d = event.data || {};
+        switch (event.type) {
         case "plan_created":
-          return (d.goal || "plan") + " (" + (d.step_count || 0) + " steps, " + (d.urgency || "normal") + ")";
+          return (d.assignment || "plan") + " (" + (d.step_count || 0) + " steps, " + (d.urgency || "normal") + ")";
         case "planner_decision":
           return d.decision || d.summary || d.action_type || null;
         case "planner_start":
@@ -1144,7 +1144,7 @@
           const trigger = String(d.trigger || "unknown");
           const rendered = String(d.rendered_context || "");
           const sectionCounts = [
-            ["goals", Array.isArray(d.active_goals) ? d.active_goals.length : 0],
+            ["goals", Array.isArray(d.active_assignments) ? d.active_assignments.length : 0],
             ["themes", Array.isArray(d.recent_scratchpad_themes) ? d.recent_scratchpad_themes.length : 0],
             ["updates", Array.isArray(d.recent_useful_actions_updates) ? d.recent_useful_actions_updates.length : 0],
             ["loops", Array.isArray(d.unresolved_open_loops) ? d.unresolved_open_loops.length : 0],
@@ -1592,7 +1592,7 @@
           return "<button class=\"scratchpad-item" + active + "\" data-root=\"" + escapeHtml(root) + "\">" +
             "<strong>root " + escapeHtml(root) + "</strong>" +
             "<span class=\"line\">v" + escapeHtml(item.version) + " · " + escapeHtml(item.section_count) + " sections · " + escapeHtml(item.evidence_count) + " evidence</span>" +
-            "<span class=\"line\">" + escapeHtml(short(item.goal_preview || "-", 96)) + "</span>" +
+            "<span class=\"line\">" + escapeHtml(short(item.assignment_preview || "-", 96)) + "</span>" +
             "</button>";
         }).join("");
         indexEl.querySelectorAll("button[data-root]").forEach((btn) => {
@@ -1644,7 +1644,7 @@
             "<div><strong>Sections</strong><br/>" + escapeHtml(snapshot.section_count) + "</div>" +
             "<div><strong>Evidence</strong><br/>" + escapeHtml(snapshot.evidence_count) + "</div>" +
           "</div>" +
-          "<div class=\"scratchpad-section\"><div class=\"scratchpad-section-title\">Goal</div><pre>" + escapeHtml(snapshot.goal || "") + "</pre></div>" +
+          "<div class=\"scratchpad-section\"><div class=\"scratchpad-section-title\">Assignment</div><pre>" + escapeHtml(snapshot.assignment || "") + "</pre></div>" +
           "<div class=\"scratchpad-versions\">" + versionsHtml + "</div>" +
           "<div class=\"scratchpad-section\"><div class=\"scratchpad-section-title\">Sections</div>" + sectionsHtml + "</div>" +
           "<div class=\"scratchpad-section\"><div class=\"scratchpad-section-title\">Evidence</div>" + evidenceHtml + "</div>";

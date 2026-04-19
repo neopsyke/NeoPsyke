@@ -1,7 +1,7 @@
 package ai.neopsyke.agent.ego.planner.input
 
 import ai.neopsyke.agent.config.AgentConfig
-import ai.neopsyke.agent.ego.planner.model.DurableWorkRouteTarget
+import ai.neopsyke.agent.ego.planner.model.AssignmentRouteTarget
 import ai.neopsyke.agent.ego.planner.model.InputRoute
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
 import ai.neopsyke.agent.model.ActionType
@@ -18,11 +18,11 @@ import kotlin.test.assertIs
 class InputIntentRouterTest {
 
     @Test
-    fun `durable work route parses explicit responsibility target`() {
+    fun `assignment route parses explicit responsibility target`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponseForCallSite(
                 "input_intent_router",
-                """{"route":"durable_work","durable_work_target":"responsibility","reasoning":"ongoing ownership"}"""
+                """{"route":"assignment","assignment_target":"responsibility","reasoning":"ongoing ownership"}"""
             )
         }
         val router = InputIntentRouter(
@@ -40,20 +40,20 @@ class InputIntentRouterTest {
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
-                availableActions = setOf(ActionType.DURABLE_WORK_OPERATION),
+                availableActions = setOf(ActionType.ASSIGNMENT_OPERATION),
             ),
         )
 
-        val durable = assertIs<InputRoute.DurableWork>(route)
-        assertEquals(DurableWorkRouteTarget.RESPONSIBILITY, durable.target)
+        val durable = assertIs<InputRoute.Assignment>(route)
+        assertEquals(AssignmentRouteTarget.RESPONSIBILITY, durable.target)
     }
 
     @Test
-    fun `legacy goal creation alias defaults to recurrent task target`() {
+    fun `legacy assignment creation alias defaults to recurrent task target`() {
         val llm = StubChatModelClient().apply {
             enqueueRawResponseForCallSite(
                 "input_intent_router",
-                """{"route":"goal_creation","reasoning":"legacy durable work alias"}"""
+                """{"route":"assignment_creation","reasoning":"legacy assignment alias"}"""
             )
         }
         val router = InputIntentRouter(
@@ -71,11 +71,11 @@ class InputIntentRouterTest {
             context = PlannerContext(
                 recentDialogue = emptyList(),
                 queue = QueueSnapshot(0, 0, 0),
-                availableActions = setOf(ActionType.DURABLE_WORK_OPERATION),
+                availableActions = setOf(ActionType.ASSIGNMENT_OPERATION),
             ),
         )
 
-        val durable = assertIs<InputRoute.DurableWork>(route)
-        assertEquals(DurableWorkRouteTarget.RECURRENT_TASK, durable.target)
+        val durable = assertIs<InputRoute.Assignment>(route)
+        assertEquals(AssignmentRouteTarget.RECURRENT_TASK, durable.target)
     }
 }

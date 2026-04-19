@@ -684,8 +684,8 @@ class EgoAgentTest {
     fun `duplicate plan emission is suppressed when identical plan hash is emitted`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
-            enqueueRawResponseForCallSite("task_decomposition", """{"goal":"Get pricing","steps":["step one","step two"],"urgency":"medium"}""")
-            enqueueRawResponseForCallSite("continuation", """{"decision":"plan","urgency":"medium","plan_goal":"Get pricing","plan_steps":["step one","step two"]}""")
+            enqueueRawResponseForCallSite("task_decomposition", """{"assignment":"Get pricing","steps":["step one","step two"],"urgency":"medium"}""")
+            enqueueRawResponseForCallSite("continuation", """{"decision":"plan","urgency":"medium","plan_assignment":"Get pricing","plan_steps":["step one","step two"]}""")
         }
         val instrumentation = RecordingInstrumentation()
         val agent = buildTestEgo(
@@ -718,9 +718,9 @@ class EgoAgentTest {
     fun `plan suppression recovery enqueues convergence thought instead of silently ending input`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
-            enqueueRawResponseForCallSite("task_decomposition", """{"goal":"Initial plan","steps":["step one"],"urgency":"medium"}""")
+            enqueueRawResponseForCallSite("task_decomposition", """{"assignment":"Initial plan","steps":["step one"],"urgency":"medium"}""")
             enqueueRawResponseForCallSite("continuation",
-                """{"decision":"plan","urgency":"medium","plan_goal":"Duplicate plan after first step","plan_steps":["step again"]}"""
+                """{"decision":"plan","urgency":"medium","plan_assignment":"Duplicate plan after first step","plan_steps":["step again"]}"""
             )
             enqueueRawResponseForCallSite("continuation",
                 """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"contact_user","action_payload":"final after suppression","action_summary":"converged"}"""
@@ -765,12 +765,12 @@ class EgoAgentTest {
     fun `convergence fallback explanation survives suppressed plan loops`() {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
-            enqueueRawResponseForCallSite("task_decomposition", """{"goal":"Verify pricing info","steps":["Search pricing page"],"urgency":"medium"}""")
+            enqueueRawResponseForCallSite("task_decomposition", """{"assignment":"Verify pricing info","steps":["Search pricing page"],"urgency":"medium"}""")
             enqueueRawResponseForCallSite("continuation",
-                """{"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}"""
+                """{"decision":"plan","urgency":"medium","plan_assignment":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}"""
             )
             enqueueRawResponseForCallSite("continuation",
-                """{"decision":"plan","urgency":"medium","plan_goal":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}"""
+                """{"decision":"plan","urgency":"medium","plan_assignment":"Verify pricing info","plan_steps":["Search pricing page","Summarize pricing"]}"""
             )
         }
         val instrumentation = RecordingInstrumentation()
@@ -1118,7 +1118,7 @@ class EgoAgentTest {
         val plannerLlm = StubChatModelClient().apply {
             enqueueRawResponseForCallSite("input_intent_router", """{"route":"multi_step_task","reasoning":"test"}""")
             enqueueRawResponseForCallSite("task_decomposition",
-                """{"goal":"Build final response in chunks","steps":["Synthesize chunk one","Synthesize chunk two","Finalize answer"],"urgency":"medium"}"""
+                """{"assignment":"Build final response in chunks","steps":["Synthesize chunk one","Synthesize chunk two","Finalize answer"],"urgency":"medium"}"""
             )
             enqueueRawResponseForCallSite("continuation",
                 """{"decision":"intend","intention_kind":"observe","commit_mode_preference":"not_applicable","urgency":"medium","action_type":"resolution_draft","action_payload":"Draft chunk one","action_summary":"capture chunk one"}"""
@@ -2135,7 +2135,7 @@ class EgoAgentTest {
                     is ai.neopsyke.agent.model.EgoTrigger.IncomingInput ->
                         ai.neopsyke.agent.model.EgoDecision.EnqueuePlan(
                             urgency = Urgency.MEDIUM,
-                            goal = "Investigate then answer",
+                            assignment = "Investigate then answer",
                             steps = listOf("Gather evidence", "Deliver answer"),
                         )
 

@@ -765,7 +765,7 @@ class ApprovalRuntime(
                 channelSurface = message.conversationContext.security.channel.surface.name,
                 channelTransport = message.conversationContext.security.channel.transport.name,
                 principalRole = message.conversationContext.security.principal.role.name,
-                goalsEnabled = System.getenv("NEOPSYKE_GOALS_ENABLED")?.trim()?.lowercase() != "false",
+                assignmentsEnabled = System.getenv("NEOPSYKE_ASSIGNMENTS_ENABLED")?.trim()?.lowercase() != "false",
             )
         )
         val seq = channel.nextSequenceIndex()

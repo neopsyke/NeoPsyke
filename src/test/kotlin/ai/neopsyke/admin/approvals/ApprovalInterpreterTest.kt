@@ -121,7 +121,7 @@ class ApprovalInterpreterTest {
         interpreter.classify(
             ApprovalInterpreterInput(
                 reply = "looks good",
-                canonicalSummary = "action: durable_work_operation",
+                canonicalSummary = "action: assignment_operation",
                 approvalContextText = "Plan:\n1. Fetch weather\n2. Send summary",
                 sessionId = "chat-1",
                 rootInputId = "root-1",
@@ -129,7 +129,7 @@ class ApprovalInterpreterTest {
         )
 
         val userMessage = client.lastMessages.last().content
-        assertTrue(userMessage.contains("durable_work_operation"), "Canonical summary should be in the prompt")
+        assertTrue(userMessage.contains("assignment_operation"), "Canonical summary should be in the prompt")
         assertTrue(userMessage.contains("looks good"), "Reply should be in the prompt")
         assertFalse(userMessage.contains("Fetch weather"), "Approval context should not be in the prompt")
     }

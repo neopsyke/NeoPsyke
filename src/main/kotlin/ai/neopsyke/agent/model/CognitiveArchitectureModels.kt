@@ -59,7 +59,7 @@ data class CognitiveThread(
     val securityContext: CognitiveThreadSecurityContext =
         CognitiveThreadSecurityContext.fromConversation(ConversationContext.default().security),
     val workItemId: String? = null,
-    val goalRunId: String? = null,
+    val assignmentRunId: String? = null,
     val rootStimulusId: String? = null,
     val lastUpdatedAt: Instant,
     val metadata: Map<String, String> = emptyMap(),
@@ -95,7 +95,7 @@ data class CognitiveThreadSnapshot(
 enum class CognitiveThreadKind {
     CONVERSATION,
     DRIVE,
-    DURABLE_WORK_DIRECTED,
+    ASSIGNMENT_DIRECTED,
 }
 
 enum class CognitiveThreadStatus {
@@ -118,7 +118,7 @@ data class Opportunity(
         CognitiveThreadSecurityContext.fromConversation(ConversationContext.default().security),
     val rootStimulusId: String? = null,
     val workItemId: String? = null,
-    val goalRunId: String? = null,
+    val assignmentRunId: String? = null,
     val allowedIntentions: Set<IntentionKind> = emptySet(),
     val allowedCommitModes: Set<CommitMode> = setOf(CommitMode.NOT_APPLICABLE),
     val availableActions: Set<ActionType> = emptySet(),
@@ -145,7 +145,7 @@ data class Intention(
     val commitMode: CommitMode = CommitMode.NOT_APPLICABLE,
     val rootStimulusId: String? = null,
     val workItemId: String? = null,
-    val goalRunId: String? = null,
+    val assignmentRunId: String? = null,
     val metadata: Map<String, String> = emptyMap(),
 )
 

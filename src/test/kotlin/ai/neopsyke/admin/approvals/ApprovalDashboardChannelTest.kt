@@ -309,10 +309,10 @@ class ApprovalDashboardChannelTest {
     @Test
     fun `7 channel specific liveness eligibility semantics`() = runBlocking {
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session", interlocutor = Interlocutor.named("System"),
+            sessionId = "assignment-session", interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT))
         // Dashboard requires live subscriber — it is deliverable but not live
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(dashboardRequiresLiveSubscriber = true))
         withRuntime(staged, config = config) { runtime, store, _, _ ->
@@ -334,10 +334,10 @@ class ApprovalDashboardChannelTest {
     @Test
     fun `8 dashboard not open does not win non conversation routing as live`() = runBlocking {
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session", interlocutor = Interlocutor.named("System"),
+            sessionId = "assignment-session", interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT))
         // Dashboard requires live subscriber; channel priority prefers dashboard
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(
             dashboardRequiresLiveSubscriber = true,

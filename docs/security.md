@@ -31,7 +31,7 @@ document and the code diverge, the code wins.
 ## 2. Motivation
 
 NeoPsyke is built as an agent that can reason, plan, communicate, mutate its
-own persistent goal system, and execute external actions. That combination is
+own persistent assignment system, and execute external actions. That combination is
 useful, but it creates a real security problem:
 
 - the model reasons over mixed trusted and untrusted content
@@ -142,7 +142,7 @@ NeoPsyke distinguishes:
 - `UNTRUSTED_INSTRUCTION`
 
 This is central to action authorization. Some actions, such as
-`goal_operation` and `email_send`, are explicitly constrained to trusted
+`assignment_operation` and `email_send`, are explicitly constrained to trusted
 instruction only.
 
 ### 4.4 Data Trust and Provenance
@@ -189,13 +189,13 @@ Configurable via `agent.policy_scope_id` in `agent-runtime.yaml` or
 The agent asks for human approval when the situation calls for it.
 
 - Owner on a direct channel can autonomously execute private and stateful
-  actions (contact user, reflect, goal operations) and directly commit
+  actions (contact user, reflect, assignment operations) and directly commit
   observe-class actions (web search, memory recall).
 - Group and shared-workspace channels force approval-backed commit for all
   side-effecting actions.
 - External participants are always restricted to approval-backed commit.
   Control-plane actions are hidden from the planner entirely.
-- Control-plane actions (goal mutations, runtime operations) are only visible
+- Control-plane actions (assignment mutations, runtime operations) are only visible
   to owner, admin, or internal principals on direct, admin, or automation
   channels with trusted instructions.
 
@@ -258,7 +258,7 @@ Implemented examples in
 
 - stdin chat input is treated as an owner direct trusted instruction source
 - `id` cue signals are treated as trusted internal automation
-- `goal-runtime` cues are treated as trusted internal automation
+- `assignment-runtime` cues are treated as trusted internal automation
 - `action-feedback` cues are treated as trusted internal automation bound to the originating root input
 
 `SensoryCortex.nextSignal()` is now the mandatory normalization boundary for
@@ -303,14 +303,14 @@ thread's trust degrades and stays degraded for the lifetime of that root input.
 This ensures that externally tainted content cannot later be treated as trusted
 material within the same reasoning chain.
 
-The continuity model extends to goal-runtime work:
+The continuity model extends to assignment-runtime work:
 
-- goal step resumptions now reuse a stable per-step root id
-- goal work is carried on thread continuations rather than a dedicated
-  goal-work queue category
-- waiting or blocked goal threads preserve their security frame across
+- assignment step resumptions now reuse a stable per-step root id
+- assignment work is carried on thread continuations rather than a dedicated
+  assignment-work queue category
+- waiting or blocked assignment threads preserve their security frame across
   suspend/resume cycles instead of rebuilding from scratch on every wake
-- terminal goal cycles resolve or fail the owning thread explicitly
+- terminal assignment cycles resolve or fail the owning thread explicitly
 
 ### 5.4 Security Through the Cognitive Pipeline
 
@@ -365,7 +365,7 @@ outcomes:
 Scratchpad boundary layering adds:
 
 - thread workspaces now preserve thread-scoped context and evidence across
-  wait/resume for active goal roots
+  wait/resume for active assignment roots
 - intention drafts are isolated from normal planner prompt summaries and
   session digests
 - terminal final-pass rewriting can still use recent intention drafts for the
@@ -459,7 +459,7 @@ Examples from current plugins:
   - private commit
   - direct commit allowed
   - autonomous commit supported
-- `goal_operation`
+- `assignment_operation`
   - control-plane
   - trusted instruction only
   - trusted argument data only
@@ -482,7 +482,7 @@ Examples from current plugins:
 Relevant code:
 
 - [ContactUserActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/ContactUserActionPlugin.kt)
-- [GoalOperationActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/GoalOperationActionPlugin.kt)
+- [AssignmentOperationActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/AssignmentOperationActionPlugin.kt)
 - [MicrosoftGraphEmailActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/email/MicrosoftGraphEmailActionPlugin.kt)
 - [ReflectActionPlugin.kt](src/main/kotlin/ai/neopsyke/agent/cortex/motor/actions/plugin/builtin/ReflectActionPlugin.kt)
 
@@ -565,10 +565,10 @@ Current default rules:
 - `contact_user`
   - direct commit enabled
   - autonomous commit enabled
-- `goal_operation`
+- `assignment_operation`
   - direct commit enabled
   - autonomous commit enabled
-  - recurring goal create/revise requires approval
+  - recurring assignment create/revise requires approval
 - `email_send`
   - direct commit disabled
   - autonomous commit disabled

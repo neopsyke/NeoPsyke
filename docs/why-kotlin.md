@@ -8,11 +8,11 @@ When coding agents generate or modify code, the compiler catches type errors, nu
 
 ## The language fits the domain
 
-Kotlin's sealed class hierarchies are a natural match for this architecture. Stimulus families, percept types, action types, gate decisions, goal lifecycle states — the entire cognitive model is built on typed hierarchies. Sealed classes give exhaustive `when` expressions that the compiler enforces: add a new stimulus type and the compiler tells you every place that needs to handle it. Data classes give concise domain models. Extension functions attach behavior close to where it's used without deep inheritance trees.
+Kotlin's sealed class hierarchies are a natural match for this architecture. Stimulus families, percept types, action types, gate decisions, assignment lifecycle states — the entire cognitive model is built on typed hierarchies. Sealed classes give exhaustive `when` expressions that the compiler enforces: add a new stimulus type and the compiler tells you every place that needs to handle it. Data classes give concise domain models. Extension functions attach behavior close to where it's used without deep inheritance trees.
 
 ## Structured concurrency for a concurrent architecture
 
-The agent has natural concurrency: the Id pulse loop runs on its own timer, goal triggers fire independently, LLM calls are I/O-bound, tool execution can block, and the dashboard streams SSE events. Kotlin coroutines handle this with structured concurrency — no thread pool tuning, no callback hell, no event loop surprises. The JVM underneath provides real parallelism, not GIL-constrained threading.
+The agent has natural concurrency: the Id pulse loop runs on its own timer, assignment triggers fire independently, LLM calls are I/O-bound, tool execution can block, and the dashboard streams SSE events. Kotlin coroutines handle this with structured concurrency — no thread pool tuning, no callback hell, no event loop surprises. The JVM underneath provides real parallelism, not GIL-constrained threading.
 
 ## Pragmatism
 

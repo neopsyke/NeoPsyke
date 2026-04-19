@@ -47,19 +47,19 @@ cognitive_roles:
       task_decomposition:
         provider: groq
         model: openai/gpt-oss-20b
-      durable_work_generic:
+      assignment_generic:
         provider: groq
         model: openai/gpt-oss-20b
-      durable_work_recurrent_task:
+      assignment_recurrent_task:
         provider: groq
         model: openai/gpt-oss-20b
-      durable_work_responsibility:
+      assignment_responsibility:
         provider: groq
         model: openai/gpt-oss-120b
-      goal_creation:
+      assignment_creation:
         provider: groq
         model: openai/gpt-oss-20b
-      goal_management:
+      assignment_management:
         provider: groq
         model: openai/gpt-oss-20b
       deferred_step:
@@ -68,7 +68,7 @@ cognitive_roles:
       feedback:
         provider: groq
         model: openai/gpt-oss-20b
-      goal_work:
+      assignment:
         provider: groq
         model: openai/gpt-oss-20b
       impulse:

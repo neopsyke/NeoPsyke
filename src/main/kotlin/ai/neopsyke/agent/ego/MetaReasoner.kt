@@ -281,14 +281,14 @@ class LlmMetaReasoner(
             is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
-            is EgoTrigger.DurableWork -> "durable-work"
+            is EgoTrigger.Assignment -> "assignment"
         }
         val triggerText = when (trigger) {
             is EgoTrigger.IncomingInput -> trigger.input.content
             is EgoTrigger.Continuation -> trigger.continuation.content
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.feedbackContent
             is EgoTrigger.IncomingImpulse -> trigger.impulse.prompt
-            is EgoTrigger.DurableWork -> trigger.workUnit.stepDescription
+            is EgoTrigger.Assignment -> trigger.workUnit.stepDescription
         }
         val dialogue = context.recentDialogue
             .takeLast(8)

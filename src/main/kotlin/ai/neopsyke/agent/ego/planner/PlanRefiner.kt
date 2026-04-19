@@ -21,8 +21,8 @@ private val logger = KotlinLogging.logger {}
 
 enum class PlanKind {
     INLINE_EGO,
-    DURABLE_WORK_CREATE,
-    DURABLE_WORK_REVISE,
+    ASSIGNMENT_CREATE,
+    ASSIGNMENT_REVISE,
 }
 
 enum class TerminalPolicy {
@@ -49,7 +49,7 @@ data class ActionSummary(
 data class PlanRefinementRequest(
     val planKind: PlanKind,
     val terminalPolicy: TerminalPolicy,
-    val goal: String,
+    val assignment: String,
     val instruction: String,
     val completionCriteria: String = "",
     val steps: List<PlanStepCandidate>,
@@ -209,7 +209,7 @@ class LlmPlanRefiner(
         appendLine("- Do not reject a plan just because it is messy.")
         appendLine("- Repair malformed or partial structure when meaning is still recoverable.")
         appendLine("- Prefer conservative edits over aggressive rewrites.")
-        appendLine("- Do not invent new requirements unless strongly implied by the goal, context, or existing steps.")
+        appendLine("- Do not invent new requirements unless strongly implied by the assignment, context, or existing steps.")
         appendLine("- If uncertain, keep more of the original plan rather than dropping intent.")
         appendLine("- Return one canonical typed plan every time.")
         appendLine()
@@ -229,9 +229,9 @@ class LlmPlanRefiner(
                 appendLine("6. Terminal policy: user delivery is controlled by the work item runtime; do not add or require a final delivery step.")
         }
 
-        if (request.planKind == PlanKind.DURABLE_WORK_CREATE && request.cronExpression != null) {
-            appendLine("7. Scheduling guard: this is a recurring scheduled goal (cron: ${request.cronExpression}). " +
-                "Scheduling/registration is handled by the runtime at goal creation time. " +
+        if (request.planKind == PlanKind.ASSIGNMENT_CREATE && request.cronExpression != null) {
+            appendLine("7. Scheduling guard: this is a recurring scheduled assignment (cron: ${request.cronExpression}). " +
+                "Scheduling/registration is handled by the runtime at assignment creation time. " +
                 "Do NOT add steps to create, register, or schedule the work item — only include steps for the actual work payload.")
         }
         appendLine("${if (request.cronExpression != null) "8" else "7"}. Recoverability: if the plan is malformed or underspecified but the intended meaning is recoverable, repair it instead of rejecting it.")
@@ -250,7 +250,7 @@ class LlmPlanRefiner(
     }
 
     private fun buildUserPrompt(request: PlanRefinementRequest): String = buildString {
-        appendLine("Goal: ${request.goal}")
+        appendLine("Assignment: ${request.assignment}")
         appendLine("Instruction: ${request.instruction}")
         if (request.completionCriteria.isNotBlank()) {
             appendLine("Completion criteria: ${request.completionCriteria}")

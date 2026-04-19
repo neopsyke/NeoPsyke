@@ -58,7 +58,7 @@ class TaskDecompositionPlanner(
                 floorTokens = 16,
                 content = """
                     JSON schema:
-                    {"goal":"overall objective","steps":["step 1 directive","step 2 directive"],"urgency":"low|medium|high"}
+                    {"assignment":"overall assignment","steps":["step 1 directive","step 2 directive"],"urgency":"low|medium|high"}
                 """.trimIndent()
             ),
             SharedPromptSections.recentDialogueSection(context),
@@ -88,7 +88,7 @@ class TaskDecompositionPlanner(
             return EgoDecision.Noop("TaskDecompositionPlanner parse failure.")
         }
 
-        val goal = payload.goal?.trim().orEmpty()
+        val assignment = payload.assignment?.trim().orEmpty()
         val steps = payload.steps
             ?.map { it.trim() }
             ?.filter { it.isNotBlank() }
@@ -96,19 +96,19 @@ class TaskDecompositionPlanner(
             ?.map { TextSecurity.clamp(it, config.planner.maxPlanStepDescriptionChars) }
             .orEmpty()
 
-        if (goal.isBlank() || steps.isEmpty()) {
-            return EgoDecision.Noop("TaskDecompositionPlanner returned plan with missing goal or empty steps.")
+        if (assignment.isBlank() || steps.isEmpty()) {
+            return EgoDecision.Noop("TaskDecompositionPlanner returned plan with missing assignment or empty steps.")
         }
 
         return EgoDecision.EnqueuePlan(
             urgency = Urgency.fromRaw(payload.urgency),
-            goal = TextSecurity.clamp(goal, config.planner.maxThoughtChars),
+            assignment = TextSecurity.clamp(assignment, config.planner.maxThoughtChars),
             steps = steps,
         )
     }
 
     private data class TaskDecompPayload(
-        val goal: String? = null,
+        val assignment: String? = null,
         val steps: List<String>? = null,
         val urgency: String? = null,
     )
@@ -120,9 +120,9 @@ class TaskDecompositionPlanner(
                 {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["goal", "steps", "urgency"],
+                  "required": ["assignment", "steps", "urgency"],
                   "properties": {
-                    "goal": { "type": ["string", "null"], "maxLength": 600 },
+                    "assignment": { "type": ["string", "null"], "maxLength": 600 },
                     "steps": { "type": ["array", "null"], "items": { "type": "string", "maxLength": 120 }, "maxItems": 6 },
                     "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] }
                   }
@@ -133,9 +133,9 @@ class TaskDecompositionPlanner(
                 {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["goal", "steps", "urgency"],
+                  "required": ["assignment", "steps", "urgency"],
                   "properties": {
-                    "goal": { "type": ["string", "null"] },
+                    "assignment": { "type": ["string", "null"] },
                     "steps": { "type": ["array", "null"], "items": { "type": "string" } },
                     "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] }
                   }

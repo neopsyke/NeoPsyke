@@ -42,7 +42,7 @@ data class RecordedContext(
     @param:JsonProperty("channel_surface") val channelSurface: String = "DIRECT",
     @param:JsonProperty("channel_transport") val channelTransport: String = "CHAT",
     @param:JsonProperty("principal_role") val principalRole: String = "OWNER",
-    @param:JsonProperty("goals_enabled") val goalsEnabled: Boolean = false,
+    @param:JsonProperty("assignments_enabled") val assignmentsEnabled: Boolean = false,
 )
 
 /**

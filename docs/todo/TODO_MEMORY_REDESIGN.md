@@ -97,7 +97,7 @@ Already in place:
   relation-imprint paths become explicit in memory-core.
 - Wire `MemoryEventType.CONSOLIDATION_RUN` when `Hippocampus.consolidate(...)`
   is implemented and invoked by a bounded background path.
-- Wire `MemoryEventType.GOAL_UPDATED` wherever durable goal-state changes can
+- Wire `MemoryEventType.ASSIGNMENT_UPDATED` wherever durable assignment-state changes can
   be journaled without changing current Ego logic.
 - Wire `MemoryEventType.PREFERENCE_REINFORCED` once preference reinforcement
   can be distinguished from first-time imprint with confidence.

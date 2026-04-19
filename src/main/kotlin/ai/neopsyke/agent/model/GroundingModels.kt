@@ -24,8 +24,8 @@ enum class GroundingSource {
     /** LLM-based classifier for ambiguous routes. */
     INPUT_CLASSIFIER,
 
-    /** Typed policy on a goal step / activation. */
-    DURABLE_WORK_STEP_POLICY,
+    /** Typed policy on an assignment step / activation. */
+    ASSIGNMENT_STEP_POLICY,
 
     /** Inherited from an upstream envelope (continuation, feedback, etc.). */
     INHERITED,
