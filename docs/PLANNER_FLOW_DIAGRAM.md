@@ -2,8 +2,11 @@
 
 Current planner architecture as of 2026-04-18.
 
-This file describes the runtime planner flow implemented under
+This file describes the planner slice of the runtime implemented under
 `src/main/kotlin/ai/neopsyke/agent/ego/planner/**`.
+For the diagram index and non-planner subsystem views, see
+[`AGENT_LOGIC_DIAGRAM.md`](../AGENT_LOGIC_DIAGRAM.md) and the linked files
+under `docs/agent-logic/`.
 
 ## Signal-to-Planner Pipeline
 
@@ -243,7 +246,7 @@ flowchart TB
     next_loop -.-> force_terminal
 ```
 
-## Full End-to-End Flow (Single Input)
+## Planner Slice Through One Input
 
 ```mermaid
 sequenceDiagram

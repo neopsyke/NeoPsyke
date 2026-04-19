@@ -1,13 +1,13 @@
 # Agent Logic Diagram (Living Document)
 
-This file complements `AGENT_LOGIC_SUMMARY.md` with simple, editable Mermaid diagrams.
-Keep diagrams high signal: small, readable, and updated as runtime logic evolves.
+This file complements `AGENT_LOGIC_SUMMARY.md` with small, editable Mermaid diagrams.
+Keep this file as the landing page for the diagram set. Put detailed subsystem diagrams in the split docs under `docs/agent-logic/`.
 
 ---
 
 ## L0: System-Level Component View
 
-High-level view of the six major subsystems and their interactions.
+High-level view of the major subsystems and their interactions.
 
 ```mermaid
 flowchart LR
@@ -29,144 +29,9 @@ flowchart LR
 
 ---
 
-## L1: Full Component View
-
-Detailed component wiring showing all runtime components and their connections.
-
-```mermaid
-flowchart LR
-    U["User / Web UI"] --> SC["SensoryCortex (typed cognitive stimuli ingress)"]
-    TG["Telegram Owner Chat"] --> TWH["TelegramWebhookBridge"]
-    TG --> TLP["TelegramPollingBridge"]
-    TWH --> SC
-    TLP --> SC
-    GOU["Google OAuth Browser Flow"] --> GOA["GoogleWorkspaceOAuthBridge"]
-    SC --> E["Ego"]
-    NoteCtx["ConversationContext(sessionId required, unknown interlocutor resolved at sensory boundary, security context carried end-to-end)"] --> SC
-
-    E --> AS["AttentionScheduler"]
-    AS --> E
-    ID["Id (Autonomous Drives)"] --> AS
-    E --> ID
-
-    E --> P["HierarchicalEgoPlanner (L0)"]
-    P --> IL["InputPlanner (L1)"]
-    IL --> IR["InputIntentRouter (L2)"]
-    IL --> DRP["DirectResponder"]
-    IL --> GAP["GeneralActionPlanner"]
-    IL --> TDP["TaskDecompositionPlanner"]
-    IL --> GP["AssignmentCommandBuilder"]
-    IL --> CLR["ClarificationNeeded (→ contact_user)"]
-    IL --> NOP["Noop (unactionable input)"]
-    P --> PP["ProgressionPlanner (L1)"]
-    P --> GWP["AssignmentPlanner (L1)"]
-    P --> IP["ImpulsePlanner (L1)"]
-    E --> TV["GroundingGate (Typed Evidence Gate)"]
-    E --> S["Superego"]
-    S --> S1["SingleStage Review Engine (DeterministicConscience + LLM)"]
-    S --> S2["TwoStageReview Escalation Engine"]
-    E --> ACP["ActionAuthorizationPolicy (YAML)"]
-    E --> ACS["ActionControlService"]
-    E --> ACW["AutonomousWorker"]
-    ACS --> ACDB["ActionControl SQLite (staged / auth / receipts)"]
-    ACW --> ACS
-    E --> AR["ActionRegistry (ServiceLoader Discovery)"]
-    AR --> CR["Connector Runtime (curated catalog + local install state + stdio host)"]
-    E --> M["MotorCortex"]
-    E --> BG["LLM Token Budget Gate"]
-    E --> MCat["Model Catalog (ROI token_weight)"]
-
-    E --> DE["DeliberationEngine"]
-    DE --> MR["LlmMetaReasoner"]
-    MR -.-> MRF["MetaReasoner Fallback (optional, on repeated technical failures)"]
-
-    E --> MC["MemorySystem"]
-    MC --> MS["MemoryStore (Short-term)"]
-    MC --> H["Hippocampus (Long-term facade: recall/imprint/health)"]
-    MC --> LTM["LongTermMemoryAdvisor"]
-    MC --> LB["Logbook (Episodic backend, SQLite+FTS5)"]
-    LB -.->|"event-type narrative normalization"| MC
-    MC --> RL["Reflection Lessons (Recall + Imprint Filters)"]
-    MC -.->|"temporal intent -> episodic recall + vector cues"| LB
-    E --> TWS["ScratchpadStore (Thread Workspace + Intention Drafts)"]
-    E --> TWF["ScratchpadFinalizer (Noop or LLM)"]
-    E --> PR["PlanRefiner (LLM or Noop)"]
-    E --> PG["AssignmentGateway (optional durable runtime boundary)"]
-    PG --> PM["AssignmentRuntime"]
-    PM --> DWP["DeterministicAssignmentPlanBuilder (fallback only)"]
-    PM --> PV["WorkStepVerifier"]
-    PM --> AOR["AsyncOperationRegistry"]
-    PM --> PS["WorkItemStateMachine + WorkItemStore"]
-
-    AR --> AP["Action Plugins (self-described)"]
-    CR --> AP
-    AP --> M
-    AP -.->|"structured effects; reflection emits durable-memory-save on success"| MC
-    M --> SC
-
-    M --> WS["Web Search Handler/Engine"]
-    CfgWS["WebSearch Provider Config"] --> WS
-    M --> MF["Fetch Tool"]
-    M --> EM["Email Send (Microsoft Graph)"]
-    M --> COG["ConversationOutputGateway"]
-    COG --> TGA["Telegram Bot API"]
-    TWH -.-> GAUTH["Native OAuth Auth Primitives"]
-    GOA --> GCS["GoogleWorkspaceCredentialStore (encrypted)"]
-    GOA --> GAP["Google OAuth + Gmail Profile Verification"]
-    M --> GOBS["Native Google Observe Actions"]
-    GOBS --> GAP
-    WS --> PID["PromptInjectionDefense"]
-    MT --> PID
-    MF --> PID
-    PID --> E
-
-    BG --> P
-    BG --> S
-    BG --> MR
-    BG --> LTM
-    BG --> WS
-    MCat --> S
-    MCat --> LTM
-
-    E --> I["InstrumentationBus + Metrics"]
-    I --> DS["DashboardStateStore"]
-    DS --> CP["Conversations Page (/) + Chat API (/api/chat/*)"]
-    DS --> OP["Observability Page (/dashboard) + Obs API (/api/obs/*)"]
-    DS --> OT["Thread Inspection (/api/obs/threads*)"]
-    DS --> OX["Action Control Page (/action-control)"]
-    DS --> ACAPI["Action Control API + SSE (/api/action-control/*)"]
-```
-
----
-
-## L1: Plan Refinement and Durable Work Plan Ownership
-
-```mermaid
-flowchart TD
-    subgraph "Inline Ego Plans"
-        P1["Planner lane returns\nEgoDecision.EnqueuePlan"] --> PR1["PlanRefiner.refine()"]
-        PR1 --> DD["DecisionDispatcher\n(hash/dedup/enqueue)"]
-    end
-    subgraph "Durable Work CREATE"
-        GP["Assignment planner generates\nAssignmentCommand.Create\nwith planSteps"] --> PR2["PlanRefiner.refine()"]
-        PR2 --> FI["EgoDecision.FormIntention\n(CREATE payload with refined plan)"]
-        FI --> AC["ActionControlService\n(stage with approvalContext)"]
-        AC --> AR["ApprovalRuntime\n(shows plan in prompt)"]
-        AR -->|"APPROVE"| DWR["AssignmentRuntime\n(uses pre-built plan)"]
-        AR -->|"DENY_AND_REISSUE"| RI["Reissue to Ego\n(re-plan with feedback)"]
-    end
-    subgraph "Durable Work REVISE_PLAN"
-        REV["Ego builds revised plan\nfrom work-item context"] --> PR3["PlanRefiner.refine()"]
-        PR3 --> FI2["EgoDecision.FormIntention\n(REVISE_PLAN with plan)"]
-        FI2 --> DWR2["AssignmentRuntime\n(applies supplied plan)"]
-    end
-```
-
----
-
 ## L1: Main Loop Sequence (Simplified)
 
-Clean overview of the per-input happy path without implementation detail.
+Clean overview of the per-input happy path without subsystem detail.
 
 ```mermaid
 sequenceDiagram
@@ -188,11 +53,11 @@ sequenceDiagram
         Ego->>Sched: nextTask()
         Sched-->>Ego: opportunity / intention / action
 
-        alt Opportunity (input/feedback/impulse/assignment)
+        alt Opportunity (input / feedback / impulse / assignment)
             Ego->>Mem: recall context
             Ego->>Planner: decide(context)
             Planner-->>Ego: intend / plan / noop
-            Ego->>Sched: enqueue intentions
+            Ego->>Sched: enqueue continuations or intentions
         else Continuation
             Ego->>Planner: decide(continuation context)
             Planner-->>Ego: decision
@@ -217,333 +82,24 @@ sequenceDiagram
 
 ---
 
-## L2: Full Loop Sequence (Per Input)
+## Diagram Map
 
-Complete sequence with all notes and edge cases. Read L1 first for orientation.
+Detailed diagrams now live in separate area docs.
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant SC as SensoryCortex
-    participant Ego
-    participant Sched as AttentionScheduler
-    participant Planner as HierarchicalEgoPlanner
-    participant Sup as Superego
-    participant AIR as ApprovalRuntime
-    participant Motor as MotorCortex
-    participant Delib as DeliberationEngine
-    participant CTS as CognitiveThreadStore
-    participant Mem as MemorySystem
-    participant TWS as ScratchpadStore
-    participant Dash as DashboardStateStore/API
-    participant TG as Telegram Bot API
-
-    User->>SC: Web chat input text
-    SC->>Ego: StimulusReceived (stimulus + percept)
-    Note over SC,Ego: Stimulus carries ConversationContext [sessionId + security], provenance, rootInputId [identity], receivedAtMs [timing]; session replay restores the recorded security frame instead of inferring a fresh default
-    Ego->>CTS: bind percept to root-scoped cognitive thread
-    CTS-->>Ego: cognitiveThreadId + thread trust state
-    Ego->>Dash: emit cognitive_thread_updated
-    CTS-->>Ego: policy-shaped Opportunity\n(intentions + commit modes + planner-visible action surface)
-    Ego->>Sched: enqueue ScheduledOpportunity(opportunity + trigger)
-    Ego->>Dash: emit opportunity_enqueued
-    Note over CTS,Dash: Thread snapshots are retained for live and terminal roots and exposed through /api/obs/threads
-
-    loop While pending work and step limit not reached
-        Ego->>Sched: nextTask()
-        Sched-->>Ego: ScheduledOpportunity/intention/action
-        Ego->>Ego: activateSession(task.conversationContext)
-        Ego->>Delib: startStep()
-
-        alt Task = impulse opportunity
-    Note over Ego,Mem: Id-driven recall/planning can see shared ambient context: assignments, scratchpad themes, useful updates, open loops, and recent exact learning topics
-    Note over Ego,Mem: Ambient context is a cached best-effort snapshot, not a real-time synchronized view
-            Ego->>Planner: decide(context + idState)
-            Planner-->>Ego: intend/plan/noop
-            Ego->>Sched: enqueue impulse-derived work with origin=ID
-            Note over Ego,Sched: Impulse final result is deferred until all work for root_impulse_id drains
-        else Task = assignment opportunity
-            Ego->>PG: finalizeAssignmentCycle(rootInputId) after queues drain for that work root
-    Note over Ego,PG: Durable runtime resumes from stable per-step roots, records activation boundaries in an activation journal, and may re-emit assignment cues for resumable steps
-    Note over Ego,PG: Durable-work wakes are typed [cron_due, overdue_check, id_review, manual_review, wait_resolved, recovery, etc.] and the activation context carries those wake reasons into Ego
-    Note over Ego,PG: Runtime-owned phase-2 state tracks monitor cursors, seen items, change history, digest windows, delivery suppression reasons, and responsibility review history
-    Note over Ego,PG: Responsibility cycles are open-ended current-plan exhaustion does not auto-complete the responsibility review-capable wakes can rearm the next cycle and overdue review is surfaced as operator-visible next wake state
-    Note over SC,Ego: StimulusIngressCoordinator classifies post-sensory stimuli into input, feedback, assignment, or wake-only ingress before scheduler work begins
-        else Task = input or feedback opportunity
-            Ego->>Mem: recall and short-term summary
-            Note over Ego,Mem: Planner context now includes targeted reflection-lesson recall
-            Ego->>TWS: create or update thread workspace and index summary
-            Ego->>Dash: emit scratchpad_head (with optional debug snapshot)
-            Note over Ego,Planner: For Id-origin thoughts, Ego reapplies Id convergence state and action filtering before planner decide internalize without escalation removes contact_user and reflect_internal so planner-visible terminal reflection stays evidence-bound
-            Note over Ego,Planner: Planner-visible actions are prefiltered by conversation instruction trust, current thread data trust, and action contract metadata before prompt build
-            Note over Ego,Planner: Layered early policy shaping now also applies policy-scope, channel-surface, principal-role, and action-effect rules before proposal time control-plane actions are hidden from non-admin/non-internal surfaces and restricted scopes lose direct/autonomous commit semantics early
-            Ego->>Planner: decide(context)
-            Note over Ego,Planner: PromptBudgetAllocator reserves required-core/context floors with message-overhead accounting, trims optional first, and emits prompt_budget_allocation
-            Note over Ego,Planner: Planner prompt includes conversation security summary, thread trust state, percept summary/family, opportunity summary/kind, allowed intentions/commit modes, and trigger provenance summary untrusted external content is framed as data, not instruction
-            Note over Ego,Planner: HierarchicalEgoPlanner dispatches to typed L1 lanes based on trigger type (no text inspection)
-            Note over Ego,Planner: InputPlanner uses InputIntentRouter (LLM classifier) then dispatches to typed L2 sub-planner
-            Note over Ego,Planner: Durable-work routing stays under the existing L1 router. After route selection, dispatch is deterministic to generic lifecycle, recurrent-task, or responsibility planning
-            Note over Ego,Planner: Runtime lane config exposes assignment_generic assignment_recurrent_task and assignment_responsibility, and the responsibility path can reserve a larger intake prompt budget
-            Note over Ego,Planner: Durable-work creation and management use typed AssignmentCommand with LLM-resolved references (no regex heuristics)
-            Note over Ego,Planner: Responsibility creation uses bounded intake draft state inside Ego, while Id "be useful" planning can see a bounded reviewable-responsibility slate and route one selected item into a typed review command
-            Note over Ego,Planner: Durable-work-operation payload boundary is canonical SerializedAssignmentCommand (command + typed work_item_reference), consumed directly by AssignmentOperationActionPlugin
-            Note over Ego,Planner: Planner requests schema-enforced structured output. LLM layer owns compatibility degradation from strict to relaxed to prompt-only JSON. Parse failures do truncation-budget retry then strict-JSON retry before noop fallback
-            Planner-->>Ego: intend/plan/noop
-            Ego->>Delib: maybeApplyPressureOverride (FINALIZE_NOW directly enqueues forced terminal; REQUEST_TOOL_THEN_FINALIZE produces soft hint)
-            Note over Ego: Runtime opportunity guard rejects invalid intention kind, action surface, or commit-mode violations before scheduling execution work
-            Ego->>Sched: enqueue continuations or explicit intentions
-            Note over Ego,Sched: Planner now forms explicit lifecycle-aware continuations and intentions directly; plan steps and recovery/follow-up work are queued as typed continuations, not as generic defer loops
-            Note over Ego,Sched: Plans gated by budget, pressure, hash dedup, pending-plan check
-            Note over Ego,Planner: Redundancy is planner-side soft cost control [prompt and verifier], with telemetry event external_action_redundancy_signal
-            Note over Ego,Planner: Action verifier has been removed from the planner architecture. Planner correctness is achieved through typed lane design, constraint validation, and existing runtime controls (superego review, action authorization policy). See docs/specs/TYPED_HIERARCHICAL_PLANNER_REDESIGN.md Rule 8
-            Note over Ego,Planner: Follow-up evidence thoughts explicitly request one raw JSON planner decision and forbid tool/function wrappers
-        else Task = continuation
-            Ego->>Ego: rebuild continuation context from queued continuation
-            Ego->>Planner: decide(context for continuation)
-            Note over Ego,Sched: Non-Id continuation chains carry fallback permission by default; if repeated continuations hit max passes, Ego converts the chain into a fallback contact_user action instead of ending silently
-        else Task = intention
-            Ego->>Ego: materialize PendingAction with intention metadata
-            Note over Ego: PendingAction now carries intentionId, intentionKind, and requestedCommitMode
-        else Task = action
-            alt Fallback explanation action
-                Ego->>Motor: execute (bypass Superego)
-                Note over Ego,ACS: Bypass execution is still mirrored into durable staged/receipt state
-            else Normal action
-                Ego->>TV: review(action, typed grounding metadata + evidence state)
-                Note over Ego,TV: GroundingGate reads action.groundingMetadata (set at input classification), evidence state, and forced-terminal marker
-                alt grounding gate deny
-                    TV-->>Ego: deny (GROUNDING_EVIDENCE_REQUIRED or TECH_GROUNDING_EVIDENCE_FAILURE)
-                    Ego->>Sched: enqueue evidence-gathering or retry continuation
-                    Ego->>Mem: maybeRecordReflectionLesson(filtered)
-                else grounding gate allow
-                    Note over Ego,TV: If grounding required but evidence tools unavailable, gate returns graceful allow [GROUNDING_EVIDENCE_UNAVAILABLE_GRACEFUL]
-                    Ego->>Sup: deterministic checks + authorization policy
-                    alt deterministic deny
-                        Sup-->>Ego: deny (hard deny)
-                        Ego->>Sched: enqueue safe-alternative continuation
-                        Ego->>Mem: maybeRecordReflectionLesson(filtered)
-                    else deterministic pass
-                        alt action = id-origin reflect
-                            Note over Ego,Sup: Internal-only reflect_internal bypasses LLM Superego review after deterministic payload validation trusted-data only. reflect_evidence remains evidence-bound
-                            Sup-->>Ego: allow
-                        else all other actions
-                            Ego->>Sup: llm review(action)
-                            Note over Ego,Sup: Stage-1 uses cheaper model from catalog when two-stage is enabled
-                            Note over Ego,Sup: Superego prompt build uses same prompt allocator contract, includes action-origin context, and emits prompt_budget_allocation
-                            Note over Ego,Sup: Escalate on low confidence, policy-risk, or technical fallback
-                            Note over Ego,Sup: Superego completion max_tokens is a generous fixed cap from config (safety net, not guidance)
-                            Note over Ego,Sup: Structured output is schema-enforced [response_format=json_schema]
-                            Note over Ego,Sup: Stage parse failures trigger one schema-enforced retry before default deny
-                            Sup-->>Ego: allow or deny (with reason_code on deny)
-                        end
-                        alt allow
-                            alt action = resolution_draft
-                                Ego->>TWS: record active draft-sequence chunk
-                                Note over Ego,TWS: Draft chunks are internal only, excluded from planner prompt summaries, and no user-visible assistant turn is emitted
-                            else action = contact_user
-                                Ego->>TWS: final-pass compilation from thread workspace + active draft sequence
-                                Note over Ego,CTS: Before clearing per-input ephemera, normal completion marks the owning cognitive thread RESOLVED and keeps a bounded terminal snapshot
-                                Ego->>TWF: rewrite candidate payload (if enabled)
-                                Note over Ego,TWS: Final-pass skip requires both no evidence and insufficient drafts [less than max of 2 or activation_min_plan_steps]; draft sequence resets when cognition leaves answer-drafting work
-                        Note over Ego,TWF: Apply workspace-confidence gate first, then model-confidence gate
-                            end
-                            Ego->>ACS: stage / authorize / commit
-                            alt stage required
-                                ACS->>ACDB: save staged action
-                                ACS->>ACDB: save signal/background ledger entry
-                                ACS-->>Ego: staged action (WAITING_AUTHORIZATION or READY)
-                                Note over Ego: Action review emits explicit intention transitions for STAGE and, when needed, REQUEST_AUTHORIZATION
-                                Ego->>AIR: notify approval runtime
-                                AIR->>ACDB: persist approval request + audit trail
-                                AIR->>AIR: resolve owner channel (same-channel or shared resolver/default fallback)
-                                Note over AIR: Telegram non-conversation routing counts as deliverable/live only after successful startup ACK delivery (approval-startup-ack)
-                                AIR->>Dash: deliver chat-native approval prompt
-                                AIR->>TG: deliver Telegram approval prompt (if selected channel)
-                                Note over AIR,ACDB: If no eligible owner channel exists, AIR persists an unrouted fail-closed approval artifact and leaves the staged action blocked until expiry/manual resolution
-                                Note over AIR,Owner: Refreshed prompts surface a short approval ref; replies to later prompt versions must include the current ref
-                                Note over AIR,Owner: Approval/denial is hash-bound to the staged action; hash drift supersedes the request and issues a replacement prompt
-                                Note over Sched,Ego: Blocked roots are skipped by the scheduler until the approval runtime resolves the request, then the root leaves BLOCKED on terminal denial/expiry
-                                Note over Dash,ACAPI: Dashboard action-control page watches a dedicated SSE lane and refreshes on staged/authorization lifecycle updates rather than polling
-                                Note over ACW,ACS: Background autonomous worker polls SQL-filtered runnable READY actions, preserving same-thread order [threadSequence] and same-target serialization [executionKey] before atomic claim + execute
-                        else direct commit allowed
-                                ACS->>ACDB: save staged action + authorization
-                                ACS->>Motor: execute(action, authorization)
-                                Motor-->>ACS: outcome
-                                Motor->>SC: emit ActionFeedbackCue (non-contact outcomes)
-                                SC->>Ego: FeedbackReceived(cue)
-                                ACS->>ACDB: save receipt + ledger + final staged status
-                                ACS-->>Ego: executed outcome
-                            end
-                            Note over Ego,Motor: Actions may complete immediately or return WAITING + async operation handles
-                            Note over SC,Ego: Feedback continuations and terminal thread resolution are decided only after typed feedback re-enters through SensoryCortex and StimulusIngressCoordinator; WAITING outcomes suspend the thread instead of auto-queuing a continuation
-                            Note over Ego,Motor: contact_user delivery is channel-aware. Durable-work hints use canonical keys (dashboard, telegram), then resolver maps them to live delivery targets; Telegram sessions send through Bot API, dashboard sessions continue through local/dashboard delivery
-                            Note over ACAPI,Dash: Dashboard-approved staged executions can append a completion/answer message back into the originating chat session before root-session mapping is cleared
-                            Note over Ego,PG: Assignment-origin WAITING without handles is rejected as a contract violation
-                            Ego->>Ego: PromptInjectionDefense sanitize untrusted tool output
-                            alt action = contact_user
-                                Ego->>Sched: clear pending continuation and action work for same root-session scope
-                                Ego->>TWS: capture session digest for resolved input
-                                Ego->>TWS: destroy workspace for resolved input
-                                Note over Ego,Dash: Workspace telemetry carries root_input_id [identity] and root_input_received_at_ms [timing]
-                                Ego->>Dash: drawer reads full snapshots via /api/obs/workspace/{rootId}
-                                Ego->>Mem: maybeAssessLongTermMemory(post_terminal_answer, forced)
-                            end
-                            Ego->>TWS: record non-contact_user/non-resolution_draft action outcomes/evidence
-                            Note over Ego,TWS: External evidence is stored as typed artifacts first and rendered into scratchpad with trust/source labels
-                            Ego->>PG: onActionExecuted / allowFollowUp (generic action lifecycle observer)
-                            Note over Ego,Sched: Id-origin satisfying actions clear remaining same-root queued work before any follow-up can be enqueued
-                            Ego->>Sched: enqueue follow-up continuation (for evidence actions)
-                            Ego->>Mem: maybeAssessLongTermMemory(post_allowed_action, optional force)
-                            Note over Ego,Mem: Blocked imprints emit long_term_memory_persistence_skipped [reason_code, reason_detail] for timeline visibility
-                        else deny
-                            Ego->>ACS: save durable denial/refusal ledger entry
-                            Ego->>Sched: enqueue safe-alternative continuation
-                            Ego->>Mem: maybeRecordReflectionLesson(filtered)
-                        end
-                    end
-                end
-            end
-        end
-
-        Ego->>Delib: maybeForceTerminalAnswer
-        Note over Ego,Delib: Deliberation state is session-scoped evidence, root-session thread trust is sticky for the request, and action control rate limits are enforced per root-session scope
-        Note over Ego,Delib: Meta-reasoner output is schema-enforced. repeated empty-content or schema-validation failures can trigger optional fallback endpoint
-        Ego->>Mem: maybeAssessLongTermMemory(interval or explicit remember-intent)
-        Note over Ego,Mem: Episodic recall filters session/interlocutor only when explicitly requested by user input
-        Note over Ego,Mem: Memory-advisor completion max_tokens is a generous fixed cap from config (safety net, not guidance)
-        Note over Ego,Mem: Long dialogue/recall blocks are compressed before advisor prompt
-        Note over Ego,Mem: Saved durable memories are normalized to first-person agent perspective before imprint
-        Note over Ego,Mem: Episodic logbook entries carry active channel/principal/policy-scope metadata
-        Note over Ego,Mem: INTERNAL latest-salient turns switch long-term assessment into self-origin mode. reasons/tags/source are normalized away from user-preference framing
-        Note over Ego,Mem: MCP fact/reference subject is stamped as "me" for agent-authored durable memories
-        Note over Ego,Mem: Successful learning reflections track exact recent topic fingerprints. only learning retrieval uses them as freshness pressure, while other needs may still reuse the same topic context
-    end
-
-    Note over User,SC: Terminal stdin is control-only in interactive mode [exit command]. non-command text is not enqueued as chat input
-    Note over User,SC: Interactive linguistic ingress currently comes from dashboard chat sessions or owner-only Telegram webhook updates
-    Note over Ego,GOBS: Gmail and Calendar are native read-only observe actions, intended for assignments such as Morning Briefing and Inbox Management
-```
-
----
-
-## L1: Durable Work Boundary
-
-```mermaid
-flowchart LR
-    TS["TimerScheduler"] --> PM["AssignmentRuntime"]
-    WM["WaitConditionMonitor (timeouts + async poll/event restore)"] --> PM
-    AOR["AsyncOperationRegistry / Provider Adapters"] --> WM
-    PM --> PSM["WorkItemStateMachine"]
-    PM --> PP["AssignmentCommandBuilder"]
-    PM --> PV["WorkStepVerifier"]
-    PM --> AJ["ActivationJournal"]
-    PM --> EL["WorkEffectLedger"]
-    PSM --> PCS["WorkItemCommand stream"]
-    PCS -->|persist| Store["WorkItemStore / assignment-events.jsonl + assignment-events.archive.jsonl + assignment.json + assignment-snapshot.json"]
-    PCS -->|work ready| Sig["AssignmentCue"]
-    TS -->|"cron tick after completed/failed recurring work item"| PSM
-    PSM -->|"reset plan steps + clear produced keys"| PCS
-    Sig --> Ego["Ego"]
-    Ego -->|nextWorkFromCue| PM
-    Ego -->|assignment-origin action outcomes| PM
-    Ego -->|beforeActionExecution gate| EL
-```
-
----
-
-## L1: Convergence and Fallback States
-
-```mermaid
-stateDiagram-v2
-    [*] --> Processing
-
-    Processing --> Planning: input/continuation task
-    Planning --> ActionQueued: decision=intend
-    Planning --> ContinuationQueued: decision=continuation/plan/noop-retry
-    Planning --> ContinuationQueued: plan suppressed (budget/pressure/hash/pending) -> convergence/recovery continuation
-
-    ActionQueued --> GroundingReview: non-fallback action
-    ActionQueued --> Executing: fallback explanation action
-    GroundingReview --> Denied: grounding gate deny
-
-    GroundingReview --> PolicyReview: grounding gate allow
-    PolicyReview --> Denied: deterministic hard deny / contract deny / superego deny
-    Denied --> ContinuationQueued: enqueue safe alternative continuation
-    Note right of ContinuationQueued: Repeat-denied payload block is skipped for technical or transient denial reasons (prefer reason_code classification) reflection lessons persist only for non-technical and non-system denials
-
-    PolicyReview --> Executing: allow_commit
-    PolicyReview --> Executing: allow_stage (legacy runtime compatibility path)
-    Executing --> ContinuationQueued: action=resolution_draft (plan continues)
-    Executing --> EvidenceObserved: external action succeeded
-    Executing --> EvidenceMissing: tool/provider failure
-    Executing --> WebSearchUnavailable: web search init/config failure
-    WebSearchUnavailable --> ContinuationQueued: planner uses remaining available actions
-    EvidenceObserved --> ContinuationQueued: feedback-driven continuation
-    EvidenceMissing --> ContinuationQueued: retry/adjust continuation
-    EvidenceMissing --> ActionDisabled: retry-budget cooldown trips (non-retryable action failures)
-    ActionDisabled --> ContinuationQueued: planner uses remaining available actions
-
-    Processing --> HighPressure: pressure threshold reached
-    HighPressure --> ForcedTerminal: force terminal contact_user enqueue
-    ForcedTerminal --> Executing
-
-    Processing --> StepLimit: max loop steps with pending work
-    StepLimit --> FallbackAttempt: dequeue fallback explanation action
-    StepLimit --> Complete: force-deny active impulse lifecycles
-    FallbackAttempt --> Executing
-
-    Executing --> CleanupResolvedInput: action=contact_user clears same-input queued work + destroys scratchpad
-    CleanupResolvedInput --> Complete
-    Processing --> Complete: queues drained
-    Complete --> [*]
-```
-
----
-
-## L2: Startup Memory Gate
-
-```mermaid
-flowchart LR
-    A["runInteractiveMode"] --> B["Resolve memory mode from memory-runtime.yaml"]
-    B -->|memory=off| C["NoopHippocampus (memory unavailable)"]
-    B -->|memory=default| D["Check managed HTTP provider health"]
-    D -->|healthy| E["Provider-backed Hippocampus enabled"]
-    D -->|unhealthy| F["Install managed provider artifact if needed,\nstart provider command, wait for /v1/health"]
-    F -->|pass| E
-    F -->|fail| C
-    B -->|memory=external| X["Check external HTTP provider health"]
-    X -->|healthy| E
-    X -->|unhealthy/unsupported| C
-    E --> Z["Register managed closeables with JVM shutdown hook\nso Ctrl-C / SIGTERM also closes the provider process"]
-    E --> H["Emit action_capabilities(memory=available)"]
-    C --> G["Emit action_capabilities(memory=unavailable + warning)"]
-```
-
----
-
-## L2: Startup LLM Provider Health Gate
-
-```mermaid
-flowchart LR
-    A["runInteractiveMode"] --> B["Per-role provider health probe: GET base_url/models"]
-    B --> C["Normalize URL join (trim trailing slash)"]
-    C --> D{"Provider is Google and probe is HTTP 404?"}
-    D -->|yes| E["Fallback probe: GET /v1beta/models (native Gemini endpoint)"]
-    D -->|no| F["Report initial probe status"]
-    E --> G["Report fallback status"]
-    F --> H{"Unavailable and retryable?"}
-    G --> H
-    H -->|yes| I["Retry health probe once"]
-    H -->|no| J{"Role is optional meta_reasoner_fallback?"}
-    I --> J
-    J -->|yes + still unavailable| K["Warn and disable fallback for this run"]
-    J -->|no| L["Required role unavailable -> abort startup"]
-```
+| Area | File | Scope |
+|---|---|---|
+| Input and thread binding | [docs/agent-logic/INPUT_AND_THREADING_DIAGRAM.md](docs/agent-logic/INPUT_AND_THREADING_DIAGRAM.md) | Channel ingress, security/context binding, thread creation, scheduler handoff |
+| Planner | [docs/PLANNER_FLOW_DIAGRAM.md](docs/PLANNER_FLOW_DIAGRAM.md) | Typed trigger routing, L1/L2 planner lanes, post-planner dispatch |
+| Split ego loop | [docs/agent-logic/EGO_LOOP_DIAGRAM.md](docs/agent-logic/EGO_LOOP_DIAGRAM.md) | Per-input loop split into queueing, planning branches, and completion |
+| Action review and execution | [docs/agent-logic/ACTION_REVIEW_AND_EXECUTION_DIAGRAM.md](docs/agent-logic/ACTION_REVIEW_AND_EXECUTION_DIAGRAM.md) | Grounding, superego review, staging, approvals, execution, feedback re-entry |
+| Durable work runtime | [docs/agent-logic/DURABLE_WORK_DIAGRAM.md](docs/agent-logic/DURABLE_WORK_DIAGRAM.md) | Assignment boundary, wake reasons, plan ownership, assignment feedback |
+| Memory and startup gates | [docs/agent-logic/MEMORY_AND_STARTUP_DIAGRAM.md](docs/agent-logic/MEMORY_AND_STARTUP_DIAGRAM.md) | Memory subsystem wiring, per-loop recall/assessment, startup health gates |
+| Convergence and fallback | [docs/agent-logic/CONVERGENCE_AND_FALLBACK_DIAGRAM.md](docs/agent-logic/CONVERGENCE_AND_FALLBACK_DIAGRAM.md) | Pressure, step limits, denial/retry, fallback terminal paths |
 
 ---
 
 ## Edit Rules
 - Keep this file synced with `AGENT_LOGIC_SUMMARY.md`.
 - Source of truth is the code, not this document.
-- Prefer updating existing diagrams over adding a large monolith.
-- If behavior changes, update only affected diagram sections and labels.
+- Keep this landing page small; detailed diagrams belong in the split area docs.
+- If behavior changes, update only the affected diagrams and links.

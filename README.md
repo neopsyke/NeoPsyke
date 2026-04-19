@@ -338,7 +338,7 @@ Each cognitive role (planner, superego primary/escalation, action verifier, meta
 | [docs/telegram-setup.md](docs/telegram-setup.md) | Telegram bot setup (webhook/polling, owner filtering) |
 | `AGENTS.md` | Instructions for coding agents working in this repository |
 | `AGENT_LOGIC_SUMMARY.md` | Current runtime logic reference |
-| `AGENT_LOGIC_DIAGRAM.md` | Visual flow of the current agent loop |
+| `AGENT_LOGIC_DIAGRAM.md` | Visual index for the current agent loop and split subsystem diagrams |
 | [examples/runtime-config/](examples/runtime-config/) | Ready-to-use external overlay examples for fast start |
 
 ## Project structure
