@@ -1,7 +1,42 @@
 # Convergence and Fallback Diagram
 
-This file covers how the loop ends, retries, and forces terminal behavior.
-For planner dispatch mechanics, see [../PLANNER_FLOW_DIAGRAM.md](../PLANNER_FLOW_DIAGRAM.md).
+This file covers how the loop measures progress, increases pressure, retries, and forces terminal behavior.
+For the unified runtime entrypoint, see [../../AGENT_RUNTIME_LOGIC.md](../../AGENT_RUNTIME_LOGIC.md).
+
+## L1: Deliberation and Convergence
+
+- Files: `src/main/kotlin/ai/neopsyke/agent/ego/DeliberationEngine.kt`, `DeliberationProgressMonitor.kt`, `MetaReasoner.kt`
+
+### Pressure Tracking
+- `DeliberationState` tracks:
+  - step index
+  - `DecisionPressure`
+  - stale streak
+  - progress score
+  - denial count
+  - steps since new evidence
+  - repeat signature hits
+  - noop streak
+  - model error streak
+- `DecisionPressure` combines baseline pressure with step, stale, denial, repeat, noop, model error, and evidence-gap pressure, then subtracts progress relief.
+- Decision signatures are tracked over a sliding window to detect loops.
+
+### Pressure Drives
+- `MetaReasoner` runs on cadence based on step count, interval, and pressure.
+- `maybeApplyPressureOverride()` can:
+  - force terminal answer now
+  - request one more tool-oriented continuation before finalizing
+  - let the planner decision pass through unchanged
+- `maybeForceTerminalAnswer()` acts as the backstop when circular pressure, model-error streak, or noop streak crosses the configured limits.
+
+### Action Retry Budget
+- Per-input-scope cooldown and circuit breaker for action types.
+- Non-retryable failures increment the counter.
+- Reaching the budget disables the action type for a cooldown window.
+
+### State Scoping
+- Deliberation state is session-scoped.
+- Evidence progress and action cooldowns are scoped by `(rootInputId, sessionId)`.
 
 ## L1: Convergence and Fallback States
 
@@ -49,6 +84,20 @@ stateDiagram-v2
     Processing --> Complete: queues drained
     Complete --> [*]
 ```
+
+### L2: Meta-Reasoner Details
+
+- Uses schema-enforced structured output.
+- Locally clamps `reason` length.
+- Can retry with relaxed schema after schema-validation failures.
+- Uses empty-content retry with adaptive completion-budget increase.
+- Can fail over to the optional `meta_reasoner_fallback`.
+- Completion budget is a fixed safety cap rather than output guidance.
+- Verdicts:
+  - `CONTINUE`
+  - `CONTINUE_WITH_CONSTRAINTS`
+  - `FINALIZE_NOW`
+  - `REQUEST_TOOL_THEN_FINALIZE`
 
 ## L1: Endgame Trigger Map
 

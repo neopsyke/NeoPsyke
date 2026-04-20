@@ -337,8 +337,8 @@ Each cognitive role (planner, superego primary/escalation, action verifier, meta
 | [docs/why-kotlin.md](docs/why-kotlin.md) | Why Kotlin instead of Python |
 | [docs/telegram-setup.md](docs/telegram-setup.md) | Telegram bot setup (webhook/polling, owner filtering) |
 | `AGENTS.md` | Instructions for coding agents working in this repository |
-| `AGENT_LOGIC_SUMMARY.md` | Current runtime logic reference |
-| `AGENT_LOGIC_DIAGRAM.md` | Visual index for the current agent loop and split subsystem diagrams |
+| `AGENT_RUNTIME_LOGIC.md` | Unified runtime logic reference and entrypoint to the split area docs |
+| [docs/agent-logic/](docs/agent-logic/) | Focused runtime logic docs by area: input, planner, memory, durable work, observability, and more |
 | [examples/runtime-config/](examples/runtime-config/) | Ready-to-use external overlay examples for fast start |
 
 ## Project structure

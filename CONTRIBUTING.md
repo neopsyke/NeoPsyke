@@ -39,8 +39,8 @@ request first so the direction is clear before implementation.
 - Follow the existing Kotlin style and package structure.
 - Keep functions and modules explicit and readable.
 - If you change core control flow or runtime behavior, update both:
-  - [AGENT_LOGIC_SUMMARY.md](AGENT_LOGIC_SUMMARY.md)
-  - [AGENT_LOGIC_DIAGRAM.md](AGENT_LOGIC_DIAGRAM.md)
+  - [AGENT_RUNTIME_LOGIC.md](AGENT_RUNTIME_LOGIC.md)
+  - the affected area docs under [docs/agent-logic/](docs/agent-logic/)
 - If you change deterministic eval behavior, update the relevant Freud
   scenarios and fixtures as part of the same change.
 

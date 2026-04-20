@@ -1,20 +1,31 @@
 # Planner Flow Diagram
 
-Current planner architecture as of 2026-04-18.
+Current planner architecture as of 2026-04-19.
 
-This file describes the planner slice of the runtime implemented under
-`src/main/kotlin/ai/neopsyke/agent/ego/planner/**`.
-For the diagram index and non-planner subsystem views, see
-[`AGENT_LOGIC_DIAGRAM.md`](../AGENT_LOGIC_DIAGRAM.md) and the linked files
-under `docs/agent-logic/`.
+This file covers the planner slice of the runtime implemented under `src/main/kotlin/ai/neopsyke/agent/ego/planner/**`.
+For the unified runtime entrypoint, see [../../AGENT_RUNTIME_LOGIC.md](../../AGENT_RUNTIME_LOGIC.md).
+
+## L1: Planner (HierarchicalEgoPlanner)
+
+- Files: `src/main/kotlin/ai/neopsyke/agent/ego/planner/**`
+- The old monolithic `LlmEgoPlanner` has been deleted. A test-only shim remains under `src/test/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt` for backward-compatible test signatures.
+
+### Decision Types
+- `FormIntention(urgency, intentionKind, commitModePreference, actionType, payload, summary)` -> execute an action
+- `EnqueueContinuation(urgency, continuation)` -> queue typed resumable work
+- `EnqueuePlan(urgency, assignment, steps)` -> multi-step typed plan
+- `Noop(reason, parseFailureShortCircuit?, deniedActionType?, deniedActionPayload?, denialReasonCode?)` -> no action
+
+### Plan Refinement
+- File: `src/main/kotlin/ai/neopsyke/agent/ego/planner/PlanRefiner.kt`
+- All plans, both inline Ego plans and assignment plans, pass through a single bounded refinement step before commit.
+- `LlmPlanRefiner` makes one LLM call to repair or validate plans and follows the standard retry, validation, and fallback contract.
+- `NoopPlanRefiner` is used for tests and when plan refinement is disabled.
+- On failure, the runtime accepts the original plan when meaning is preserved and mechanical boundary checks still pass.
 
 ## Signal-to-Planner Pipeline
 
-External events enter through `SensoryCortex`, are routed by
-`StimulusIngressCoordinator`, queued in `AttentionScheduler`, and dispatched by
-`Ego` to the planner. The planner returns an `EgoDecision`, which
-`DecisionDispatcher` turns into queued continuations, queued intentions, plan
-step continuations, or fallback explanation behavior.
+External events enter through `SensoryCortex`, are routed by `StimulusIngressCoordinator`, queued in `AttentionScheduler`, and dispatched by `Ego` to the planner. The planner returns an `EgoDecision`, which `DecisionDispatcher` turns into queued continuations, queued intentions, plan-step continuations, or fallback explanation behavior.
 
 ```mermaid
 flowchart TB
@@ -74,11 +85,12 @@ flowchart TB
     end
 ```
 
-## HierarchicalEgoPlanner (L0 Router)
+## L0: HierarchicalEgoPlanner (Entry Point)
 
-Each `Ego.process*()` method creates an `EgoTrigger` and calls
-`planner.decide(trigger, context)`. `HierarchicalEgoPlanner` deterministically
-routes on the sealed trigger type. It does not inspect free text.
+- Single planner entry point behind `Ego.Planner`.
+- Dispatch is typed: `when (trigger)` over the sealed `EgoTrigger` variants.
+- No deterministic routing is performed on free text.
+- Each L1 lane has its own runtime config entry and emits planner telemetry.
 
 ```mermaid
 flowchart TB
@@ -93,7 +105,7 @@ flowchart TB
 
 ### Trigger-to-Lane Mapping
 
-| Trigger | Origin | L1 Lane | LaneId |
+| Trigger | Origin | L1 lane | LaneId |
 |---------|--------|---------|--------|
 | `IncomingInput` | User / external chat ingress | `InputPlanner` | `INPUT_INTENT_ROUTER` |
 | `Continuation` | Internal queue | `ProgressionPlanner` | `PROGRESSION` |
@@ -101,13 +113,25 @@ flowchart TB
 | `Assignment` | Durable-work wake / step activation | `AssignmentLanePlanner` | `ASSIGNMENT` |
 | `IncomingImpulse` | Id drive activation | `ImpulsePlanner` | `IMPULSE` |
 
+## L1: Planner Lanes
+
+| Lane | Trigger | File |
+|------|---------|------|
+| `InputPlanner` | `IncomingInput` | `lane/InputPlanner.kt` |
+| `ProgressionPlanner` | `Continuation`, `ActionFeedback` | `lane/ProgressionPlanner.kt` |
+| `AssignmentPlanner` | `Assignment` | `lane/AssignmentPlanner.kt` |
+| `ImpulsePlanner` | `IncomingImpulse` | `lane/ImpulsePlanner.kt` |
+
+Each lane:
+- has its own narrower system prompt
+- uses `PlannerRuntime` for model calls, retries, circuit breaking, and schema fallback
+- parses typed lane-specific decision models before mapping back to `EgoDecision`
+- validates allowed intentions, commit modes, and available actions
+- emits per-lane prompt-budget telemetry
+
 ## InputPlanner (L1) -- Router, Grounding, L2 Dispatch
 
-`InputPlanner` is the only L1 lane with an internal semantic routing stage. It:
-
-1. Calls `InputIntentRouter`
-2. Always calls `GroundingClassifier`
-3. Dispatches to the selected L2 planner or handles inline clarification/noop
+`InputPlanner` is the only L1 lane with an internal semantic routing stage. It calls `InputIntentRouter`, always calls `GroundingClassifier`, and then dispatches to the selected L2 sub-planner or handles clarification/noop inline.
 
 ```mermaid
 flowchart TB
@@ -143,46 +167,72 @@ flowchart TB
     decision["EgoDecision"]
 ```
 
+### L2: InputPlanner Sub-Planners
+- `InputIntentRouter` -> semantic classifier returning typed `InputRoute`
+- `DirectResponder` -> terminal answers from current context
+- `GeneralActionPlanner` -> single-action planning with full constraint validation
+- `TaskDecompositionPlanner` -> multi-step plan decomposition
+- `AssignmentCommandBuilder` -> typed assignment creation and management with LLM reference resolution
+
+Dispatch from `InputRoute` to the sub-planner is deterministic on typed LLM output.
+
 ### InputIntentRouter Routes
 
-`InputIntentRouter` maps free-text user input to typed routes. The router may
-also set an assignment target for the `Assignment` route.
-
-| Route | Target / Meaning | L2 handling | Typical result |
+| Route | Target / meaning | L2 handling | Typical result |
 |-------|------------------|-------------|----------------|
-| `DirectResponse` | Answer directly from current context | `DirectResponder` | `FormIntention(CONTACT_USER)` or `Noop` |
+| `DirectResponse` | Answer from current context | `DirectResponder` | `FormIntention(CONTACT_USER)` or `Noop` |
 | `GeneralAction` | One explicit next action | `GeneralActionPlanner` | `FormIntention(...)` or `Noop` |
 | `MultiStepTask` | Ordered multi-stage task | `TaskDecompositionPlanner` | `EnqueuePlan` or `Noop` |
 | `Assignment` | Persistent work interaction | `AssignmentCommandBuilder` | `FormIntention(ASSIGNMENT_OPERATION)` or `FormIntention(CONTACT_USER)` or `Noop` |
-| `ClarificationNeeded` | Route ambiguity or missing user intent | inline | `FormIntention(CONTACT_USER)` |
+| `ClarificationNeeded` | Missing or ambiguous intent | inline | `FormIntention(CONTACT_USER)` |
 | `Noop` | No actionable intent | inline | `Noop` |
 
-For `Assignment`, `assignment_target` is one of:
+For `Assignment`, `assignment_target` is one of `generic`, `recurrent_task`, or `responsibility`.
 
-- `generic`
-- `recurrent_task`
-- `responsibility`
+### L2: Assignment Semantics (Typed)
+- Assignment creation and management emit typed `AssignmentCommand` variants.
+- Assignment references are LLM-resolved and represented as typed `WorkItemReference` variants.
+- Planner payloads use a canonical serialized typed boundary: `SerializedAssignmentCommand`.
+- `AssignmentOperationActionPlugin` validates and executes typed commands without text heuristics.
+- Ambiguous or unresolved references trigger clarification or failure, never silent guessing.
 
 ### GroundingClassifier
 
-`GroundingClassifier` runs after route selection and before L2 dispatch.
-
+- Runs after route selection and before L2 dispatch.
 - Deterministic `NOT_REQUIRED` prefilter:
   - `InputRoute.Assignment`
   - `InputRoute.ClarificationNeeded`
   - `InputRoute.Noop`
-- LLM classification:
+- LLM classification for:
   - `InputRoute.DirectResponse`
   - `InputRoute.GeneralAction`
   - `InputRoute.MultiStepTask`
+- Result is copied into grounded `PendingInput` and `PlannerContext.groundingMetadata`.
 
-The result is propagated onto the grounded `PendingInput` and copied into
-`PlannerContext.groundingMetadata`.
+### L2: Prompt Budget and Assembly
+- `PromptBudgetAllocator` reserves required-core and context floors with message-overhead accounting.
+- `SharedPromptSections` provides reusable prompt sections across lanes.
+- Each lane has its own prompt profile.
+- `prompt_budget_allocation` telemetry is emitted per lane.
+
+### L2: Structured Output and Parse Recovery
+- Lanes request schema-enforced structured output.
+- `StructuredOutputHandler` parses JSON with escape-repair fallback.
+- On parse failure: truncation retry, then strict-JSON retry.
+- Per-lane circuit breaker short-circuits to `Noop` after repeated parse failures.
+- `PlannerRuntime` owns retry, provider-side schema fallback, and circuit breaking.
+
+### L2: Action Verifier
+- Removed from the redesigned planner path.
+- Planner correctness comes from lane design, typed outputs, and downstream runtime controls.
+
+### L2: Redundancy Handling
+- Planner treats repeated external calls as low-value unless refresh or retry is explicitly needed.
+- `Ego` emits `external_action_redundancy_signal` as a soft cost-control signal.
 
 ## L1 Lane Decision Capabilities
 
-Planner lanes do not currently emit `EgoDecision.EnqueueContinuation`
-themselves. That shape is introduced later by deliberation-pressure overrides.
+Planner lanes do not currently emit `EgoDecision.EnqueueContinuation` directly; that shape is introduced later by deliberation pressure overrides.
 
 | EgoDecision | InputPlanner | ProgressionPlanner | AssignmentLanePlanner | ImpulsePlanner |
 |-------------|:-----------:|:------------------:|:----------------------:|:-------------:|
@@ -202,8 +252,7 @@ themselves. That shape is introduced later by deliberation-pressure overrides.
 
 ## Post-Planner Pipeline
 
-After `planner.decide(...)`, `Ego` lets `DeliberationEngine` apply pressure
-overrides, then passes the final `EgoDecision` to `DecisionDispatcher`.
+After `planner.decide(...)`, `Ego` lets `DeliberationEngine` apply pressure overrides and then passes the final `EgoDecision` to `DecisionDispatcher`.
 
 ```mermaid
 flowchart TB
@@ -308,8 +357,7 @@ sequenceDiagram
 
 ## Circuit Breaker Coverage
 
-Only some planner lanes use the per-root parse-failure circuit breaker in
-`PlannerRuntime`.
+Only some planner lanes use the per-root parse-failure circuit breaker in `PlannerRuntime`.
 
 | LaneId | Circuit breaker |
 |--------|:---------------:|
@@ -326,9 +374,7 @@ Only some planner lanes use the per-root parse-failure circuit breaker in
 | `GROUNDING_CLASSIFIER` | no |
 | `PLAN_REFINER` | no |
 
-When a circuit-backed lane trips, it returns
-`Noop(parseFailureShortCircuit = true)`, which sends the flow directly to the
-fallback-explanation path instead of normal noop handling.
+When a circuit-backed lane trips, it returns `Noop(parseFailureShortCircuit = true)`, which routes directly to fallback explanation instead of ordinary noop handling.
 
 ## File Index
 

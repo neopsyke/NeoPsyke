@@ -112,8 +112,8 @@ Bad:
 - If you learn something worth remembering about the project, propose adding it to `AGENTS.md` instead of storing it privately.
 
 ## Agent Logic Docs Maintenance (Required)
-- Keep both `AGENT_LOGIC_SUMMARY.md` and `AGENT_LOGIC_DIAGRAM.md` accurate as living runtime logic docs.
-- Whenever a change affects control flow or core behavior in any of these areas, update the relevant sections in both files in the same PR/patch:
+- Keep `AGENT_RUNTIME_LOGIC.md` and the relevant files under `docs/agent-logic/` accurate as living runtime logic docs.
+- Whenever a change affects control flow or core behavior in any of these areas, update the root runtime doc and the affected area docs in the same PR/patch:
   - Ego loop orchestration, scheduler ordering, or fallback behavior.
   - Planner decision schema/flow, action verifier behavior, or parsing fallback semantics.
   - Superego review behavior and default deny/allow semantics.

@@ -501,8 +501,8 @@ replaced the current planner without losing required behavior.
 - The redesign is not accepted until runtime behavior documentation reflects the new planner structure.
 - Required docs updates at signoff:
   - this spec reflects the final implemented architecture
-  - `AGENT_LOGIC_SUMMARY.md` reflects the final planner/orchestrator flow
-  - `AGENT_LOGIC_DIAGRAM.md` reflects the final planner/orchestrator flow
+  - `AGENT_RUNTIME_LOGIC.md` reflects the final planner/orchestrator flow
+  - the affected files under `docs/agent-logic/` reflect the final planner/orchestrator flow
 - If the implemented hierarchy differs from this spec, the spec must be updated before signoff.
 
 ### 12. Final Verification Rule

@@ -288,4 +288,4 @@ Open `http://localhost:8787` in your browser:
 - [Evaluation](evaluation.md) — how to run tests and evals, and where to contribute.
 - [Telegram setup](telegram-setup.md) — bot token, webhook/polling, owner-only filtering.
 - [Security model](security.md) — trust model, policy enforcement, action lifecycle.
-- [Architecture notes](../AGENT_LOGIC_SUMMARY.md) — the current runtime logic reference.
+- [Architecture notes](../AGENT_RUNTIME_LOGIC.md) — the current runtime logic reference.
