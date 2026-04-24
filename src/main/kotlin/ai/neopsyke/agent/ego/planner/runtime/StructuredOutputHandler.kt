@@ -77,7 +77,7 @@ object StructuredOutputHandler {
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["decision", "urgency", "long_term_memory_recall_query", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "plan_goal", "plan_steps", "reason"],
+              "required": ["decision", "urgency", "long_term_memory_recall_query", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "plan_assignment", "plan_steps", "reason"],
               "properties": {
                 "decision": { "type": "string", "enum": ["intend", "plan", "noop"] },
                 "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
@@ -87,7 +87,7 @@ object StructuredOutputHandler {
                 "action_type": { "type": ["string", "null"] },
                 "action_payload": { "type": ["string", "null"], "maxLength": 4000 },
                 "action_summary": { "type": ["string", "null"], "maxLength": 180 },
-                "plan_goal": { "type": ["string", "null"], "maxLength": 600 },
+                "plan_assignment": { "type": ["string", "null"], "maxLength": 600 },
                 "plan_steps": { "type": ["array", "null"], "items": { "type": "string", "maxLength": 120 }, "maxItems": 6 },
                 "reason": { "type": ["string", "null"], "maxLength": 160 }
               }
@@ -98,7 +98,7 @@ object StructuredOutputHandler {
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["decision", "urgency", "long_term_memory_recall_query", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "plan_goal", "plan_steps", "reason"],
+              "required": ["decision", "urgency", "long_term_memory_recall_query", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "plan_assignment", "plan_steps", "reason"],
               "properties": {
                 "decision": { "type": "string", "enum": ["intend", "plan", "noop"] },
                 "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
@@ -108,7 +108,7 @@ object StructuredOutputHandler {
                 "action_type": { "type": ["string", "null"] },
                 "action_payload": { "type": ["string", "null"] },
                 "action_summary": { "type": ["string", "null"] },
-                "plan_goal": { "type": ["string", "null"] },
+                "plan_assignment": { "type": ["string", "null"] },
                 "plan_steps": { "type": ["array", "null"], "items": { "type": "string" } },
                 "reason": { "type": ["string", "null"] }
               }

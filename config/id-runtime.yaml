@@ -18,7 +18,7 @@ id:
       cooldown_pulses: 5
       convergence: internalize
       allow_escalation: true
-      prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider advancing active goals, pending tasks, or find creative ways to help (use ambient context)."
+      prompt: "I feel a strong drive to be useful and provide value. What could I do proactively? Consider advancing active assignments, pending tasks, or find creative ways to help (use ambient context)."
       response_curve:
         type: power
         exponent: 3.0

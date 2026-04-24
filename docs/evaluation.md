@@ -33,7 +33,7 @@ NeoPsyke uses a multi-layered testing and evaluation approach, from fast unit te
 
 ### 1. Unit tests (`./gradlew test`)
 
-Standard JUnit tests covering individual components: planner parsing, Superego policy logic, memory compaction, goal state machines, action validation, security models, configuration loading, etc.
+Standard JUnit tests covering individual components: planner parsing, Superego policy logic, memory compaction, assignment state machines, action validation, security models, configuration loading, etc.
 
 These are fast, deterministic, and require no API keys or external services.
 
@@ -86,7 +86,7 @@ The cognitive-runtime completion work uses named deterministic Freud gates so ea
 ./freud/bin/freud run cognitive-runtime-p2-opportunities
 ./freud/bin/freud run cognitive-runtime-p3-intentions
 ./freud/bin/freud run cognitive-runtime-p4-feedback
-./freud/bin/freud run cognitive-runtime-p5-goals-scratchpad
+./freud/bin/freud run cognitive-runtime-p5-assignments-scratchpad
 ./freud/bin/freud run cognitive-runtime-p6-policy-control
 ./freud/bin/freud run cognitive-runtime-p7-convergence
 ```
@@ -106,7 +106,7 @@ A JSON-based pack of deterministic scenarios that test specific agent behaviors:
 
 - Does the planner produce the correct action type for a given input?
 - Does the Superego correctly deny a disallowed action?
-- Does the goal system handle lifecycle transitions correctly?
+- Does the assignment system handle lifecycle transitions correctly?
 - Does the feedback loop work when actions are denied?
 
 Scenarios are evaluated deterministically using recorded LLM responses, not live API calls.
@@ -166,7 +166,7 @@ Tests the real memory pipeline end-to-end: LLM memory advisor → Hippocampus im
 ./run-neopsyke --eval-memory-live
 
 # Run specific memory tasks
-./run-neopsyke --eval-memory-live --eval-memory-tasks user-preference-color,goal-constraint-timezone
+./run-neopsyke --eval-memory-live --eval-memory-tasks user-preference-color,assignment-constraint-timezone
 ```
 
 ### 8. Freud live eval (single-input)
@@ -319,7 +319,7 @@ NEOPSYKE_LLM_CACHE_FILE=my-cache.jsonl \
 
 ### Token savings in practice
 
-A typical single-input eval with the full cognitive loop (Planner → Superego → Action Verifier → Meta-Reasoner) uses 4–8 LLM calls per cycle. With multi-cycle inputs or goal execution, a single run can make 10–20+ calls. At replay, all of those calls are served from cache until divergence.
+A typical single-input eval with the full cognitive loop (Planner → Superego → Action Verifier → Meta-Reasoner) uses 4–8 LLM calls per cycle. With multi-cycle inputs or assignment execution, a single run can make 10–20+ calls. At replay, all of those calls are served from cache until divergence.
 
 During iterative development — where you might run the same eval 10–20 times while tuning a feature — replay eliminates the cost of all runs after the first recording, as long as your changes do not affect the messages sent to the LLM. Changes to scoring logic, telemetry, dashboard rendering, prompt budget allocation, or post-processing are completely free to test.
 
@@ -388,7 +388,7 @@ The eval infrastructure today is useful but incomplete. Major gaps include:
 - **No systematic behavioral regression suite.** The scenario pack covers specific cases, but there is no broad test of "does the agent still behave reasonably across a diverse set of tasks?"
 - **No adversarial security eval.** Prompt injection defense is tested with deterministic checks, but there is no red-team harness that systematically probes the agent with adversarial inputs.
 - **No multi-turn conversation eval.** Current evals are single-input. Multi-turn coherence, context management, and memory interaction across turns are not formally tested.
-- **No goal lifecycle eval.** Goal creation, execution, blocking, resumption, and recurring activation are tested in unit tests but not in end-to-end evals with real LLM reasoning.
+- **No assignment lifecycle eval.** Assignment creation, execution, blocking, resumption, and recurring activation are tested in unit tests but not in end-to-end evals with real LLM reasoning.
 - **No Id feedback loop eval.** The closed loop between motivation, governance, and drive satisfaction is not formally measured.
 - **No cost/efficiency benchmarking.** Token usage per task type, provider cost per cognitive role, and total cost per interaction are tracked in metrics but not evaluated against baselines.
 - **Memory advisor quality is unmeasured.** The advisor's consolidation decisions (what to save, what to skip) are not evaluated against ground truth.
@@ -420,9 +420,9 @@ Design conversation sequences that test:
 - Long-term memory recall relevance.
 - Episodic recall usefulness.
 
-### Goal lifecycle integration tests
+### Assignment lifecycle integration tests
 
-End-to-end tests that create goals via natural language, verify plan generation, execute steps, handle blocking conditions, and verify completion. Include recurring goals and timer-based goals.
+End-to-end tests that create assignments via natural language, verify plan generation, execute steps, handle blocking conditions, and verify completion. Include recurring assignments and timer-based assignments.
 
 ### Id–Ego–Superego interaction evals
 

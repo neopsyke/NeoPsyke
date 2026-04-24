@@ -38,9 +38,9 @@ class SecurityModelsTest {
     @Test
     fun `stimulus provenance defaults track trust level`() {
         val trusted = Provenances.fromStimulusTrustLevel(
-            source = "goal-runtime",
+            source = "assignment-runtime",
             trustLevel = StimulusTrustLevel.TRUSTED_INTERNAL,
-            sourceRef = "goal-1",
+            sourceRef = "assignment-1",
         )
         val external = Provenances.fromStimulusTrustLevel(
             source = "rss",

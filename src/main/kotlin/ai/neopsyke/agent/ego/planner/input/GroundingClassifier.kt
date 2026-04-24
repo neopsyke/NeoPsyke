@@ -89,7 +89,7 @@ class GroundingClassifier(
      */
     internal fun prefilter(route: InputRoute): GroundingMetadata? =
         when (route) {
-            is InputRoute.DurableWork -> GroundingMetadata.NOT_REQUIRED_PREFILTER
+            is InputRoute.Assignment -> GroundingMetadata.NOT_REQUIRED_PREFILTER
             is InputRoute.ClarificationNeeded -> GroundingMetadata.NOT_REQUIRED_PREFILTER
             is InputRoute.Noop -> GroundingMetadata.NOT_REQUIRED_PREFILTER
             is InputRoute.DirectResponse -> null
@@ -130,7 +130,7 @@ class GroundingClassifier(
                     current weather, live prices, today's news, recent events, real-time scores.
 
                     Answer false for: opinions, reasoning, explanations, transformations, memory
-                    recall, goal management, static facts, creative tasks, coding help.
+                    recall, assignment management, static facts, creative tasks, coding help.
 
                     Return STRICT JSON only: {"grounding_required": true} or {"grounding_required": false}
                 """.trimIndent()

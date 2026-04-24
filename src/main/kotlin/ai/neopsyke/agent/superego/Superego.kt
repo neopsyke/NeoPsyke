@@ -25,13 +25,7 @@ class Superego(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     actionRegistry: ActionRegistry = ActionRegistry.empty(),
-    private val modelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
-    private val modelContextWindow: Int? = null,
-    private val modelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
     private val escalationModelClient: ChatModelClient? = null,
-    private val escalationModelTokenWeight: Double = DEFAULT_MODEL_TOKEN_WEIGHT,
-    private val escalationModelContextWindow: Int? = null,
-    private val escalationModelReasoningOverhead: Double = DEFAULT_REASONING_OVERHEAD,
     private val policy: SuperegoPolicy = SuperegoPolicy,
     private val authorizationPolicy: ActionAuthorizationPolicy = ConfiguredActionAuthorizationPolicy(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
@@ -190,9 +184,6 @@ class Superego(
         SingleStageSuperegoReviewEngine(
             modelClient = modelClient,
             config = config,
-            modelTokenWeight = modelTokenWeight,
-            modelContextWindow = modelContextWindow,
-            reasoningOverheadMultiplier = modelReasoningOverhead,
             instrumentation = instrumentation,
             stageLabel = "primary",
             callSiteBase = "action_review"
@@ -214,9 +205,6 @@ class Superego(
         val escalation = SingleStageSuperegoReviewEngine(
             modelClient = escalationClient,
             config = config,
-            modelTokenWeight = escalationModelTokenWeight,
-            modelContextWindow = escalationModelContextWindow,
-            reasoningOverheadMultiplier = escalationModelReasoningOverhead,
             instrumentation = instrumentation,
             stageLabel = "escalation",
             callSiteBase = "action_review_escalated",
@@ -323,8 +311,6 @@ class Superego(
     }
 
     companion object {
-        private const val DEFAULT_MODEL_TOKEN_WEIGHT: Double = 1.0
-        private const val DEFAULT_REASONING_OVERHEAD: Double = 1.0
         private const val MAX_DENY_REASON_CHARS: Int = 180
     }
 

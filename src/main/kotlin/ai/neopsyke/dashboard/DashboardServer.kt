@@ -14,7 +14,7 @@ import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
-import ai.neopsyke.agent.durablework.DurableWorkRuntime
+import ai.neopsyke.agent.assignments.AssignmentRuntime
 import ai.neopsyke.integrations.google.GoogleWorkspaceOAuthBridge
 import ai.neopsyke.integrations.telegram.TelegramWebhookBridge
 import ai.neopsyke.metrics.LlmCallStatsReport
@@ -48,7 +48,7 @@ class DashboardServer(
     private val innerVoiceStore: InnerVoiceStore? = null,
     private val idInnerVoiceFilePath: Path? = null,
     @Volatile var metricsQueryProvider: MetricsQueryProvider? = null,
-    @Volatile var durableWorkRuntime: DurableWorkRuntime? = null,
+    @Volatile var assignmentRuntime: AssignmentRuntime? = null,
     @Volatile var actionControlService: ActionControlService? = null,
     @Volatile var actionControlMutationHandler: ((String, ActionControlDecisionResult) -> Unit)? = null,
     port: Int,
@@ -92,13 +92,13 @@ class DashboardServer(
                 respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
             }
         }
-        server.createContext("/goals") { exchange ->
-            withRequestGuard(exchange, "goals_page") {
-                if (exchange.requestURI.path != "/goals") {
+        server.createContext("/assignments") { exchange ->
+            withRequestGuard(exchange, "assignments_page") {
+                if (exchange.requestURI.path != "/assignments") {
                     respondText(exchange, 404, "Not found", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                respondText(exchange, 200, DashboardAssets.shellHtml, "text/html; charset=utf-8")
+                respondText(exchange, 200, DashboardAssets.assignmentsHtml, "text/html; charset=utf-8")
             }
         }
         server.createContext("/action-control") { exchange ->
@@ -120,18 +120,18 @@ class DashboardServer(
                 handleEmbeddedDashboardPage(exchange)
             }
         }
-        server.createContext("/api/goals") { exchange ->
-            withRequestGuard(exchange, "goals_api") {
-                handleGoalsApi(exchange)
+        server.createContext("/api/assignments") { exchange ->
+            withRequestGuard(exchange, "assignments_api") {
+                handleAssignmentsApi(exchange)
             }
         }
-        server.createContext("/api/goals/events") { exchange ->
-            withRequestGuard(exchange, "goals_events_sse") {
+        server.createContext("/api/assignments/events") { exchange ->
+            withRequestGuard(exchange, "assignments_events_sse") {
                 if (exchange.requestMethod != "GET") {
                     respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
                     return@withRequestGuard
                 }
-                handleGoalsSse(exchange)
+                handleAssignmentsSse(exchange)
             }
         }
         server.createContext("/api/obs/llm-stats") { exchange ->
@@ -334,7 +334,7 @@ class DashboardServer(
             "/conversations" -> DashboardAssets.conversationsHtml
             "/observability" -> DashboardAssets.observabilityHtml
             "/metrics" -> DashboardAssets.metricsHtml
-            "/goals" -> DashboardAssets.goalsHtml
+            "/assignments" -> DashboardAssets.assignmentsHtml
             "/action-control" -> DashboardAssets.actionControlHtml
             else -> null
         }
@@ -345,13 +345,13 @@ class DashboardServer(
         respondText(exchange, 200, asset, "text/html; charset=utf-8")
     }
 
-    private fun handleGoalsSse(exchange: HttpExchange) {
+    private fun handleAssignmentsSse(exchange: HttpExchange) {
         handleSubscriptionSse(
             exchange = exchange,
-            subscription = store.subscribe { event -> event.type.startsWith("goal_") },
-            expectedDisconnectMessage = "Goals SSE client disconnected.",
-            unexpectedDisconnectMessage = "Goals SSE stream terminated unexpectedly.",
-            streamName = "goals_events_sse"
+            subscription = store.subscribe { event -> event.type.startsWith("assignment_") },
+            expectedDisconnectMessage = "Assignments SSE client disconnected.",
+            unexpectedDisconnectMessage = "Assignments SSE stream terminated unexpectedly.",
+            streamName = "assignments_events_sse"
         )
     }
 
@@ -1113,14 +1113,14 @@ class DashboardServer(
         }
     }
 
-    private fun handleGoalsApi(exchange: HttpExchange) {
-        val pm = durableWorkRuntime
+    private fun handleAssignmentsApi(exchange: HttpExchange) {
+        val pm = assignmentRuntime
         if (pm == null) {
             respondText(exchange, 503, "[]", "application/json; charset=utf-8")
             return
         }
         val path = exchange.requestURI.path
-        val basePath = "/api/goals"
+        val basePath = "/api/assignments"
         if (exchange.requestMethod != "GET") {
             respondText(exchange, 405, "Method not allowed", "text/plain; charset=utf-8")
             return
@@ -1133,7 +1133,7 @@ class DashboardServer(
                 val allSteps = state?.workItem?.plan?.steps ?: emptyList()
                 val totalSteps = allSteps.size
                 val doneSteps = allSteps.count { step ->
-                    step.status == ai.neopsyke.agent.durablework.StepStatus.DONE
+                    step.status == ai.neopsyke.agent.assignments.StepStatus.DONE
                 }
                 val steps = allSteps.map { step ->
                     mapOf(
@@ -1143,7 +1143,7 @@ class DashboardServer(
                     )
                 }
                 mapOf(
-                    "goalId" to summary.workItemId,
+                    "assignmentId" to summary.workItemId,
                     "workItemId" to summary.workItemId,
                     "title" to summary.title,
                     "status" to summary.status.name,
@@ -1155,6 +1155,9 @@ class DashboardServer(
                     "nextWakeAt" to projection?.nextWakeAt?.toString(),
                     "lastSuccessfulActivation" to projection?.lastSuccessfulActivation?.toString(),
                     "lastMeaningfulChange" to projection?.lastMeaningfulChange?.toString(),
+                    "lastReviewAt" to projection?.lastReviewAt?.toString(),
+                    "nextReviewAt" to projection?.nextReviewAt?.toString(),
+                    "lastReviewWakeReasonType" to projection?.lastReviewWakeReasonType?.name,
                     "currentBlocker" to projection?.currentBlocker,
                     "failureCountInWindow" to (projection?.failureCountInWindow ?: 0),
                     "latestArtifactSummary" to projection?.latestArtifactSummary,
@@ -1164,6 +1167,7 @@ class DashboardServer(
                     "whyBlocked" to projection?.explanation?.whyBlocked,
                     "whyStalled" to projection?.explanation?.whyStalled,
                     "whyQuiet" to projection?.explanation?.whyQuiet,
+                    "whyReviewPending" to projection?.explanation?.whyReviewPending,
                     "whyNotified" to projection?.explanation?.whyNotified,
                     "whySkippedOrDeferred" to projection?.explanation?.whySkippedOrDeferred,
                     "steps" to steps,
@@ -1173,7 +1177,7 @@ class DashboardServer(
         } else {
             val state = pm.workItemStatus(suffix)
             if (state == null) {
-                respondText(exchange, 404, """{"error":"Goal not found"}""", "application/json; charset=utf-8")
+                respondText(exchange, 404, """{"error":"Assignment not found"}""", "application/json; charset=utf-8")
                 return
             }
             val projection = pm.workItemProjection(suffix)
@@ -1189,7 +1193,7 @@ class DashboardServer(
                 )
             }
             val detail = mapOf(
-                "goalId" to state.id,
+                "assignmentId" to state.id,
                 "workItemId" to state.id,
                 "title" to state.workItem.title,
                 "status" to state.workItem.status.name,
@@ -1201,6 +1205,9 @@ class DashboardServer(
                 "nextWakeAt" to projection?.nextWakeAt?.toString(),
                 "lastSuccessfulActivation" to projection?.lastSuccessfulActivation?.toString(),
                 "lastMeaningfulChange" to projection?.lastMeaningfulChange?.toString(),
+                "lastReviewAt" to projection?.lastReviewAt?.toString(),
+                "nextReviewAt" to projection?.nextReviewAt?.toString(),
+                "lastReviewWakeReasonType" to projection?.lastReviewWakeReasonType?.name,
                 "currentBlocker" to projection?.currentBlocker,
                 "failureCountInWindow" to (projection?.failureCountInWindow ?: 0),
                 "latestArtifactSummary" to projection?.latestArtifactSummary,
@@ -1208,6 +1215,7 @@ class DashboardServer(
                 "whyBlocked" to projection?.explanation?.whyBlocked,
                 "whyStalled" to projection?.explanation?.whyStalled,
                 "whyQuiet" to projection?.explanation?.whyQuiet,
+                "whyReviewPending" to projection?.explanation?.whyReviewPending,
                 "whyNotified" to projection?.explanation?.whyNotified,
                 "whySkippedOrDeferred" to projection?.explanation?.whySkippedOrDeferred,
                 "createdAt" to state.workItem.createdAt.toString(),

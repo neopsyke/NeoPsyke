@@ -134,7 +134,7 @@ class InnerVoiceSink(
 
     private fun handlePlanCreated(event: AgentEvent) {
         val rootInputId = extractRootInputId(event)
-        val goal = event.data["goal"]?.toString() ?: return
+        val assignment = event.data["assignment"]?.toString() ?: return
 
         synchronized(lock) {
             if (rootInputId != null) {
@@ -144,7 +144,7 @@ class InnerVoiceSink(
 
         emitEvent(
             type = InnerVoiceEventType.PLAN,
-            content = goal,
+            content = assignment,
             rootInputId = rootInputId,
             ts = event.ts,
             metadata = buildMap {

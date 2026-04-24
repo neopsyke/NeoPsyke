@@ -125,7 +125,7 @@ class EgoPlannerTest {
             content = "Plan step 2/4: Fetch summary of top result",
             planContext = ai.neopsyke.agent.model.PlanContext(
                 planId = "plan-42",
-                planGoal = "Identify an interesting topic",
+                planAssignment = "Identify an interesting topic",
                 stepIndex = 1,
                 totalSteps = 4,
                 stepDescription = "Fetch summary of top result"
@@ -632,7 +632,7 @@ class EgoPlannerTest {
 
         val prompt = llm.lastMessages.last().content
         assertTrue(prompt.contains("Background context:"))
-        assertTrue(prompt.contains("active_goals:"))
+        assertTrue(prompt.contains("active_assignments:"))
         assertTrue(prompt.contains("Improve the memory subsystem"))
         assertTrue(prompt.contains("unresolved_open_loops:"))
     }
@@ -771,7 +771,7 @@ class EgoPlannerTest {
             {
               "decision":"plan",
               "urgency":"medium",
-              "plan_goal":"Find verified current pricing",
+              "plan_assignment":"Find verified current pricing",
               "plan_steps":["Search for pricing page","Fetch pricing content","Synthesize answer"]
             }
             """.trimIndent()
@@ -806,7 +806,7 @@ class EgoPlannerTest {
     fun `planner returns noop for plan with empty steps`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse(
-            """{"decision":"plan","urgency":"medium","plan_goal":"do stuff","plan_steps":[]}"""
+            """{"decision":"plan","urgency":"medium","plan_assignment":"do stuff","plan_steps":[]}"""
         )
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 
@@ -823,10 +823,10 @@ class EgoPlannerTest {
     }
 
     @Test
-    fun `planner returns noop for plan with blank goal`() {
+    fun `planner returns noop for plan with blank assignment`() {
         val llm = StubChatModelClient()
         llm.enqueueRawResponse(
-            """{"decision":"plan","plan_goal":"","plan_steps":["step 1"]}"""
+            """{"decision":"plan","plan_assignment":"","plan_steps":["step 1"]}"""
         )
         val planner = LlmEgoPlanner(modelClient = llm, config = AgentConfig())
 

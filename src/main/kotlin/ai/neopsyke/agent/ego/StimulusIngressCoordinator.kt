@@ -3,9 +3,9 @@ package ai.neopsyke.agent.ego
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.cortex.sensory.ActionFeedbackCue
 import ai.neopsyke.agent.cortex.sensory.CognitiveCueMetadata
-import ai.neopsyke.agent.cortex.sensory.DurableWorkCue
-import ai.neopsyke.agent.durablework.DurableWorkActivation
-import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.cortex.sensory.AssignmentCue
+import ai.neopsyke.agent.assignments.AssignmentActivation
+import ai.neopsyke.agent.assignments.AssignmentGateway
 import ai.neopsyke.agent.model.CognitiveThread
 import ai.neopsyke.agent.model.CognitiveThreadKind
 import ai.neopsyke.agent.model.CognitiveThreadStatus
@@ -30,7 +30,7 @@ internal class StimulusIngressCoordinator(
     private val config: AgentConfig,
     private val scheduler: AttentionScheduler,
     private val cognitiveThreads: CognitiveThreadStore,
-    private val durableWorkGateway: DurableWorkGateway,
+    private val assignmentGateway: AssignmentGateway,
     private val instrumentation: AgentInstrumentation,
     private val telemetry: EgoTelemetry,
     private val shapeOpportunityContract: (Opportunity, String?, ai.neopsyke.agent.model.ConversationContext) -> Opportunity,
@@ -46,8 +46,8 @@ internal class StimulusIngressCoordinator(
     }
 
     fun ingest(stimulus: StimulusEnvelope, percept: Percept): Outcome {
-        DurableWorkCue.fromStimulus(stimulus)?.let { cue ->
-            return enqueueGoalWork(cue, stimulus, percept)
+        AssignmentCue.fromStimulus(stimulus)?.let { cue ->
+            return enqueueAssignment(cue, stimulus, percept)
         }
         if (stimulus.metadata[CognitiveCueMetadata.METADATA_CUE_TYPE] ==
             CognitiveCueMetadata.CUE_TYPE_ID_IMPULSE_READY
@@ -93,32 +93,32 @@ internal class StimulusIngressCoordinator(
         return enqueueFeedback(cue, stimulus, percept)
     }
 
-    private fun enqueueGoalWork(
-        cue: DurableWorkCue,
+    private fun enqueueAssignment(
+        cue: AssignmentCue,
         stimulus: StimulusEnvelope,
         percept: Percept,
     ): Outcome {
-        val work = durableWorkGateway.nextWorkFromCue(cue)
+        val work = assignmentGateway.nextWorkFromCue(cue)
         if (work == null) {
-            instrumentation.emit(AgentEvents.durableWorkUnavailable(cue.reason))
+            instrumentation.emit(AgentEvents.assignmentUnavailable(cue.reason))
             return Outcome.NoWork
         }
-        ingressLogger.info { "Durable work picked: ${work.workItemId}/${work.stepId}" }
+        ingressLogger.info { "Assignment picked: ${work.workItemId}/${work.stepId}" }
         val thread = cognitiveThreads.bindPercept(
             percept = percept.copy(conversationContext = work.conversationContext),
             rootInputId = work.rootInputId,
-            kind = CognitiveThreadKind.DURABLE_WORK_DIRECTED,
+            kind = CognitiveThreadKind.ASSIGNMENT_DIRECTED,
             title = work.stepDescription,
         )
-        emitThreadUpdate(thread, work.rootInputId, "goal_percept_bound")
-        cognitiveThreads.bindGoalWork(work)
+        emitThreadUpdate(thread, work.rootInputId, "assignment_percept_bound")
+        cognitiveThreads.bindAssignment(work)
         val opportunity = shapeOpportunityContract(
-            cognitiveThreads.goalOpportunity(work),
+            cognitiveThreads.assignmentOpportunity(work),
             work.rootInputId,
             work.conversationContext,
         )
-        scheduler.enqueueGoalWork(work, opportunity)
-        emitOpportunityEnqueued(opportunity, work.rootInputId, "goal_runtime", work.groundingMetadata)
+        scheduler.enqueueAssignment(work, opportunity)
+        emitOpportunityEnqueued(opportunity, work.rootInputId, "assignment_runtime", work.groundingMetadata)
         return Outcome.RunLoop(
             cleanupRootInputId = work.rootInputId,
             cleanupConversationContext = work.conversationContext,

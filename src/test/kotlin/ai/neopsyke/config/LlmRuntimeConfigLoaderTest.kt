@@ -417,9 +417,9 @@ class LlmRuntimeConfigLoaderTest {
         assertTrue(highLlmConfig.modelCatalog.profiles(LlmProvider.OLLAMA).isNotEmpty())
 
         // Verify planner lanes loaded from all three checked-in configs
-        assertEquals(11, appConfig.cognitiveRoles.plannerLanes.size)
-        assertEquals(11, lowLlmConfig.cognitiveRoles.plannerLanes.size)
-        assertEquals(11, highLlmConfig.cognitiveRoles.plannerLanes.size)
+        assertEquals(14, appConfig.cognitiveRoles.plannerLanes.size)
+        assertEquals(14, lowLlmConfig.cognitiveRoles.plannerLanes.size)
+        assertEquals(14, highLlmConfig.cognitiveRoles.plannerLanes.size)
 
         val appRouter = appConfig.cognitiveRoles.plannerLanes["input_intent_router"]!!
         assertEquals(LlmProvider.GROQ, appRouter.provider)
@@ -432,6 +432,18 @@ class LlmRuntimeConfigLoaderTest {
         val highRouter = highLlmConfig.cognitiveRoles.plannerLanes["input_intent_router"]!!
         assertEquals(LlmProvider.GROQ, highRouter.provider)
         assertEquals("openai/gpt-oss-120b", highRouter.model)
+
+        val appResponsibilityLane = appConfig.cognitiveRoles.plannerLanes["assignment_responsibility"]!!
+        assertEquals(LlmProvider.GROQ, appResponsibilityLane.provider)
+        assertEquals("openai/gpt-oss-120b", appResponsibilityLane.model)
+
+        val lowResponsibilityLane = lowLlmConfig.cognitiveRoles.plannerLanes["assignment_responsibility"]!!
+        assertEquals(LlmProvider.GROQ, lowResponsibilityLane.provider)
+        assertEquals("openai/gpt-oss-120b", lowResponsibilityLane.model)
+
+        val highResponsibilityLane = highLlmConfig.cognitiveRoles.plannerLanes["assignment_responsibility"]!!
+        assertEquals(LlmProvider.GROQ, highResponsibilityLane.provider)
+        assertEquals("openai/gpt-oss-120b", highResponsibilityLane.model)
     }
 
     @Test
@@ -606,7 +618,7 @@ class LlmRuntimeConfigLoaderTest {
         )
 
         // Lanes inherited from bundled config/llm-runtime.yaml via deep-merge
-        assertEquals(11, config.cognitiveRoles.plannerLanes.size)
+        assertEquals(14, config.cognitiveRoles.plannerLanes.size)
         // All inherited lanes resolve to the planner provider from the external YAML;
         // the grounding_classifier lane uses OpenAI (cheap model) per config
         for ((laneKey, endpoint) in config.cognitiveRoles.plannerLanes) {

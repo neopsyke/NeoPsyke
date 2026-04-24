@@ -516,7 +516,7 @@ class DashboardStateStore(
                         "version" to snapshot.version,
                         "updated_at_ms" to snapshot.updatedAtMs,
                         "update_type" to snapshot.updateType,
-                        "goal_preview" to snapshot.workItem.take(SCRATCHPAD_GOAL_PREVIEW_CHARS),
+                        "assignment_preview" to snapshot.workItem.take(SCRATCHPAD_GOAL_PREVIEW_CHARS),
                         "section_count" to snapshot.sectionCount,
                         "evidence_count" to snapshot.evidenceCount,
                         "scratchpad_confidence" to snapshot.scratchpadConfidence,
@@ -1145,11 +1145,10 @@ class DashboardStateStore(
             securityContext = current.thread.securityContext,
             rootStimulusId = rootInputId,
             workItemId = current.thread.workItemId,
-            goalRunId = current.thread.goalRunId,
+            assignmentRunId = current.thread.assignmentRunId,
             allowedIntentions = data["allowed_intentions"].asIntentionKindSet(),
             allowedCommitModes = data["allowed_commit_modes"].asCommitModeSet(),
             availableActions = data["available_actions"].asActionTypeSet(),
-            dispatchableActions = data["dispatchable_actions"].asActionTypeSet(),
             metadata = (data["opportunity_metadata"] as? Map<*, *>)
                 ?.entries
                 ?.mapNotNull { (key, value) ->
@@ -1179,7 +1178,7 @@ class DashboardStateStore(
             commitMode = current.latestIntention?.commitMode ?: ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
             rootStimulusId = data["root_input_id"].asString() ?: current.thread.rootStimulusId,
             workItemId = current.thread.workItemId,
-            goalRunId = current.thread.goalRunId,
+            assignmentRunId = current.thread.assignmentRunId,
             metadata = current.thread.metadata,
         )
         storeThreadSnapshotLocked(current.copy(latestIntention = intention))
@@ -1207,7 +1206,7 @@ class DashboardStateStore(
                 ?: ai.neopsyke.agent.model.CommitMode.NOT_APPLICABLE,
             rootStimulusId = current.thread.rootStimulusId,
             workItemId = current.thread.workItemId,
-            goalRunId = current.thread.goalRunId,
+            assignmentRunId = current.thread.assignmentRunId,
             metadata = current.thread.metadata,
         )
         storeThreadSnapshotLocked(current.copy(latestIntention = intention))
@@ -1303,7 +1302,7 @@ class DashboardStateStore(
                 version = version,
                 updatedAtMs = updatedAtMs,
                 updateType = data["update_type"]?.toString().orEmpty(),
-                workItem = data["goal_preview"]?.toString().orEmpty(),
+                workItem = data["assignment_preview"]?.toString().orEmpty(),
                 sectionCount = data["section_count"].asInt(),
                 evidenceCount = data["evidence_count"].asInt(),
                 scratchpadConfidence = data["scratchpad_confidence"].asDouble(),
@@ -1442,7 +1441,7 @@ class DashboardStateStore(
         const val DEFAULT_THREAD_SNAPSHOT_LIMIT: Int = 100
         const val MAX_LIVE_THREAD_SNAPSHOTS: Int = 256
         const val MAX_TERMINAL_THREAD_SNAPSHOTS: Int = 512
-        val PLANNER_CALL_SITES: Set<String> = setOf("input", "continuation", "feedback", "durable_work", "impulse")
+        val PLANNER_CALL_SITES: Set<String> = setOf("input", "continuation", "feedback", "assignment", "impulse")
         val ACTION_CONTROL_STREAM_EVENT_TYPES: Set<String> = setOf(
             "action_staged",
             "action_executed",

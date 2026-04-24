@@ -113,7 +113,7 @@ class SqliteActionControlStoreTest {
                     id = "stage-thread-1",
                     rootInputId = "root-1",
                     threadSequence = 1L,
-                    executionKey = "goal:1",
+                    executionKey = "assignment:1",
                     createdAtMs = 10L,
                 )
             )
@@ -122,7 +122,7 @@ class SqliteActionControlStoreTest {
                     id = "stage-thread-2",
                     rootInputId = "root-1",
                     threadSequence = 2L,
-                    executionKey = "goal:2",
+                    executionKey = "assignment:2",
                     createdAtMs = 20L,
                 )
             )

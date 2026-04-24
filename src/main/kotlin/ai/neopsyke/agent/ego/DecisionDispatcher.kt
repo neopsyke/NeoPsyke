@@ -174,7 +174,6 @@ internal class DecisionDispatcher(
                                 "opportunity_kind" to plannerContext?.opportunityKind?.name?.lowercase(),
                                 "allowed_intentions" to plannerContext?.allowedIntentions?.map { it.name.lowercase() }.orEmpty(),
                                 "available_actions" to plannerContext?.availableActions?.map { it.id }?.sorted().orEmpty(),
-                                "dispatchable_actions" to plannerContext?.dispatchableActions?.map { it.id }?.sorted().orEmpty(),
                                 "root_input_id" to rootInputId,
                             )
                         )
@@ -372,7 +371,7 @@ internal class DecisionDispatcher(
                 }
 
                 // ── Gate 2: exact plan hash dedup (uses refined plan) ──
-                val planHash = normalizePlanHash(refinedDecision.goal, refinedDecision.steps)
+                val planHash = normalizePlanHash(refinedDecision.assignment, refinedDecision.steps)
                 val inputHashes = emittedPlanHashes.getOrPut(scope) { mutableSetOf() }
                 if (!inputHashes.add(planHash)) {
                     instrumentation.emit(
@@ -405,7 +404,7 @@ internal class DecisionDispatcher(
                 planCountByInput[scope] = currentPlanCount + 1
                 val scratchpadActivated = scratchpadStore.recordPlan(
                     rootInputId = rootInputId,
-                    goal = refinedDecision.goal,
+                    assignment = refinedDecision.assignment,
                     steps = refinedDecision.steps
                 )
                 if (scratchpadActivated) {
@@ -415,7 +414,7 @@ internal class DecisionDispatcher(
                             data = mapOf(
                                 "root_input_id" to rootInputId,
                                 "root_input_received_at_ms" to rootInputReceivedAtMs,
-                                "goal_preview" to TextSecurity.preview(refinedDecision.goal, 140),
+                                "assignment_preview" to TextSecurity.preview(refinedDecision.assignment, 140),
                                 "active_tasks" to scratchpadStore.activeTaskCount(),
                                 "activation_trigger" to "plan_complexity",
                                 "plan_step_count" to refinedDecision.steps.size
@@ -435,7 +434,7 @@ internal class DecisionDispatcher(
                             "root_input_id" to rootInputId,
                             "root_input_received_at_ms" to rootInputReceivedAtMs,
                             "update_type" to "plan_recorded",
-                            "goal_preview" to TextSecurity.preview(refinedDecision.goal, 140),
+                            "assignment_preview" to TextSecurity.preview(refinedDecision.assignment, 140),
                             "step_count" to refinedDecision.steps.size,
                             "active_tasks" to scratchpadStore.activeTaskCount()
                         )
@@ -451,7 +450,7 @@ internal class DecisionDispatcher(
                 instrumentation.emit(
                     AgentEvents.planCreated(
                         planId = planId,
-                        goal = refinedDecision.goal,
+                        assignment = refinedDecision.assignment,
                         stepCount = refinedDecision.steps.size,
                         urgency = refinedDecision.urgency.name.lowercase(),
                         steps = refinedDecision.steps,
@@ -467,7 +466,7 @@ internal class DecisionDispatcher(
                         ),
                         planContext = PlanContext(
                             planId = planId,
-                            planGoal = refinedDecision.goal,
+                            planAssignment = refinedDecision.assignment,
                             stepIndex = index,
                             totalSteps = refinedDecision.steps.size,
                             stepDescription = stepDescription,
@@ -636,8 +635,8 @@ internal class DecisionDispatcher(
         )
     }
 
-    private fun normalizePlanHash(goal: String, steps: List<String>): String {
-        val normalized = (listOf(goal) + steps)
+    private fun normalizePlanHash(assignment: String, steps: List<String>): String {
+        val normalized = (listOf(assignment) + steps)
             .joinToString("|") { it.lowercase().replace(Regex("\\s+"), " ").trim() }
         return normalized.hashCode().toString(16)
     }
@@ -661,12 +660,6 @@ internal class DecisionDispatcher(
                     reason = "Action '${decision.actionType.id}' is not available in the current opportunity.",
                 )
 
-            decision.actionType !in plannerContext.dispatchableActions ->
-                PlannerContextViolation(
-                    reasonCode = "ACTION_TYPE_NOT_DISPATCHABLE",
-                    reason = "Action '${decision.actionType.id}' is visible but not dispatchable in the current opportunity.",
-                )
-
             decision.commitModePreference !in plannerContext.allowedCommitModes ->
                 PlannerContextViolation(
                     reasonCode = "COMMIT_MODE_NOT_ALLOWED",
@@ -687,7 +680,7 @@ internal class DecisionDispatcher(
             ?.sorted()
             ?.joinToString(", ")
             .orEmpty()
-        val dispatchableActions = plannerContext?.dispatchableActions
+        val availableActions = plannerContext?.availableActions
             ?.map { it.id }
             ?.sorted()
             ?.joinToString(", ")
@@ -701,9 +694,9 @@ internal class DecisionDispatcher(
                 append(allowedIntentions)
                 append('.')
             }
-            if (dispatchableActions.isNotBlank()) {
-                append(" Dispatchable actions: ")
-                append(dispatchableActions)
+            if (availableActions.isNotBlank()) {
+                append(" Available actions: ")
+                append(availableActions)
                 append('.')
             }
             append(" Do not repeat action '")
@@ -732,8 +725,8 @@ internal class DecisionDispatcher(
         val request = PlanRefinementRequest(
             planKind = PlanKind.INLINE_EGO,
             terminalPolicy = TerminalPolicy.MAY_END_WITH_USER_DELIVERY,
-            goal = decision.goal,
-            instruction = decision.goal,
+            assignment = decision.assignment,
+            instruction = decision.assignment,
             steps = candidates,
             availableActions = buildInlineRefinementActions(plannerContext),
             runtimeFacts = buildInlineRuntimeFacts(plannerContext),
@@ -776,7 +769,7 @@ internal class DecisionDispatcher(
                 }
                 .sortedBy { it.actionType }
         }
-        return plannerContext?.dispatchableActions
+        return plannerContext?.availableActions
             .orEmpty()
             .map { actionType ->
                 ActionSummary(

@@ -69,7 +69,6 @@ class DecisionVerifierTest {
             context = DecisionVerifierContext(
                 externalEvidence = DeliberationEngine.ExternalEvidenceProgress(),
                 availableActions = setOf(ActionType.CONTACT_USER),
-                dispatchableActions = setOf(ActionType.CONTACT_USER),
                 evidenceActionTypes = evidenceActionTypes,
             )
         )
@@ -193,7 +192,6 @@ class DecisionVerifierTest {
             hadExternalFailures = hadExternalFailures,
         ),
         availableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
-        dispatchableActions = setOf(ActionType.WEB_SEARCH, ActionType.CONTACT_USER),
         evidenceActionTypes = evidenceActionTypes,
         groundingTechnicalFailureBudgetExceeded = groundingTechnicalFailureBudgetExceeded,
     )

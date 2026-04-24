@@ -153,7 +153,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.planCreated(
                 planId = "plan-1",
-                goal = "Find and summarize recent AI developments",
+                assignment = "Find and summarize recent AI developments",
                 stepCount = 3,
                 urgency = "high",
                 steps = listOf("Search", "Fetch", "Summarize"),
@@ -481,7 +481,7 @@ class InnerVoiceSinkTest {
         sink.onEvent(
             AgentEvents.planCreated(
                 planId = "plan-1",
-                goal = "Research AI developments",
+                assignment = "Research AI developments",
                 stepCount = 3,
                 urgency = "high",
                 steps = listOf("Search", "Fetch", "Summarize"),

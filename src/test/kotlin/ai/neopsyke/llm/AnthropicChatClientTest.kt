@@ -138,6 +138,64 @@ class AnthropicChatClientTest {
         }
     }
 
+    @Test
+    fun `reasoning effort maps to thinking budget_tokens`() {
+        var capturedBody = ""
+        val httpClient = fakeHttpClient(status = 200) { request ->
+            capturedBody = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            SUCCESSFUL_RESPONSE
+        }
+
+        AnthropicChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/v1",
+            httpClient = httpClient,
+        ).use { client ->
+            client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hi")),
+                options = ChatRequestOptions(reasoningEffort = "low")
+            )
+        }
+
+        assertTrue(capturedBody.contains("\"thinking\""), "thinking field should be in the request")
+        assertTrue(capturedBody.contains("\"budget_tokens\":1024"), "low effort should map to 1024 budget tokens")
+        assertTrue(capturedBody.contains("\"type\":\"enabled\""), "thinking type should be enabled")
+    }
+
+    @Test
+    fun `reasoning effort omitted when not set`() {
+        var capturedBody = ""
+        val httpClient = fakeHttpClient(status = 200) { request ->
+            capturedBody = Buffer().also { request.body?.writeTo(it) }.readUtf8()
+            SUCCESSFUL_RESPONSE
+        }
+
+        AnthropicChatClient(
+            apiKey = "test-key",
+            baseUrl = "https://mock.test/v1",
+            httpClient = httpClient,
+        ).use { client ->
+            client.chat(
+                messages = listOf(ChatMessage(ChatRole.USER, "hi")),
+                options = ChatRequestOptions()
+            )
+        }
+
+        assertTrue(!capturedBody.contains("thinking"), "thinking field should not be in the request when effort is null")
+    }
+
+    companion object {
+        private val SUCCESSFUL_RESPONSE = """
+            {
+              "id": "msg_1",
+              "model": "claude-sonnet-4-20250514",
+              "content": [{"type": "text", "text": "ok"}],
+              "stop_reason": "end_turn",
+              "usage": {"input_tokens": 10, "output_tokens": 2}
+            }
+        """.trimIndent()
+    }
+
     private fun fakeHttpClient(
         status: Int,
         bodyProvider: (Request) -> String,

@@ -105,8 +105,8 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 11,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.DURABLE_WORK_OPERATION,
-                        payload = """{"operation":"revise","work_item_id":"goal-1","step":"first"}""",
+                        type = ActionType.ASSIGNMENT_OPERATION,
+                        payload = """{"command":"revise","work_item_id":"assignment-1","step":"first"}""",
                         summary = "first action",
                         rootInputId = rootInputId,
                         conversationContext = context,
@@ -125,8 +125,8 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 12,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.DURABLE_WORK_OPERATION,
-                        payload = """{"operation":"revise","work_item_id":"goal-2","step":"second"}""",
+                        type = ActionType.ASSIGNMENT_OPERATION,
+                        payload = """{"command":"revise","work_item_id":"assignment-2","step":"second"}""",
                         summary = "second action",
                         rootInputId = rootInputId,
                         conversationContext = context,
@@ -148,7 +148,7 @@ class DefaultActionControlServiceTest {
             }
             assertEquals(1, firstBatch.size)
             assertEquals("first action", firstBatch.single().stagedAction.summary)
-            assertContentEquals(listOf("""{"operation":"revise","work_item_id":"goal-1","step":"first"}"""), executedPayloads)
+            assertContentEquals(listOf("""{"command":"revise","work_item_id":"assignment-1","step":"first"}"""), executedPayloads)
 
             val secondBatch = runBlocking {
                 service.processAutonomousStagedActions(limit = 10)
@@ -157,8 +157,8 @@ class DefaultActionControlServiceTest {
             assertEquals("second action", secondBatch.single().stagedAction.summary)
             assertContentEquals(
                 listOf(
-                    """{"operation":"revise","work_item_id":"goal-1","step":"first"}""",
-                    """{"operation":"revise","work_item_id":"goal-2","step":"second"}""",
+                    """{"command":"revise","work_item_id":"assignment-1","step":"first"}""",
+                    """{"command":"revise","work_item_id":"assignment-2","step":"second"}""",
                 ),
                 executedPayloads,
             )
@@ -370,14 +370,14 @@ class DefaultActionControlServiceTest {
     }
 
     @Test
-    fun `goal operation rate limit is scoped by normalized operation kind`() {
-        val tempDir = Files.createTempDirectory("action-control-goal-rate-limit-test")
+    fun `assignment operation rate limit is scoped by normalized operation kind`() {
+        val tempDir = Files.createTempDirectory("action-control-assignment-rate-limit-test")
         val dbPath = tempDir.resolve("action-control.db").toString()
         SqliteActionControlStore(dbPath).use { store ->
             val service = DefaultActionControlService(
                 config = ActionControlConfig(
                     dbPath = dbPath,
-                    durableWorkOperationPerRootInput = 1,
+                    assignmentOperationPerRootInput = 1,
                 ),
                 store = store,
             ) { action, _ ->
@@ -387,16 +387,16 @@ class DefaultActionControlServiceTest {
                 )
             }
             val context = ConversationContext.default()
-            val rootInputId = "root-goal-rate-limit"
+            val rootInputId = "root-assignment-rate-limit"
 
             val listResult = runBlocking {
                 service.handleAuthorizationDecision(
                     action = PendingAction(
                         id = 201,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.DURABLE_WORK_OPERATION,
-                        payload = """{"operation":"list"}""",
-                        summary = "list goals",
+                        type = ActionType.ASSIGNMENT_OPERATION,
+                        payload = """{"command":"list"}""",
+                        summary = "list assignments",
                         rootInputId = rootInputId,
                         conversationContext = context,
                         groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
@@ -405,8 +405,8 @@ class DefaultActionControlServiceTest {
                         progress = AuthorizationProgress.ALLOW_STAGE,
                         commitMode = CommitMode.POLICY_AUTONOMOUS,
                         policyVersion = "test-v1",
-                        reason = "stage goal operation",
-                        reasonCode = "TEST_GOAL_STAGE",
+                        reason = "stage assignment operation",
+                        reasonCode = "TEST_ASSIGNMENT_STAGE",
                     ),
                     conversationContext = context,
                 )
@@ -418,9 +418,9 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 202,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.DURABLE_WORK_OPERATION,
-                        payload = """{"operation":"create","title":"Goal","instruction":"Do it"}""",
-                        summary = "create goal",
+                        type = ActionType.ASSIGNMENT_OPERATION,
+                        payload = """{"command":"create","title":"Assignment","instruction":"Do it"}""",
+                        summary = "create assignment",
                         rootInputId = rootInputId,
                         conversationContext = context,
                         groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
@@ -429,8 +429,8 @@ class DefaultActionControlServiceTest {
                         progress = AuthorizationProgress.ALLOW_STAGE,
                         commitMode = CommitMode.POLICY_AUTONOMOUS,
                         policyVersion = "test-v1",
-                        reason = "stage goal operation",
-                        reasonCode = "TEST_GOAL_STAGE",
+                        reason = "stage assignment operation",
+                        reasonCode = "TEST_ASSIGNMENT_STAGE",
                     ),
                     conversationContext = context,
                 )
@@ -442,9 +442,9 @@ class DefaultActionControlServiceTest {
                     action = PendingAction(
                         id = 203,
                         urgency = Urgency.MEDIUM,
-                        type = ActionType.DURABLE_WORK_OPERATION,
-                        payload = """{"operation":"create","title":"Goal 2","instruction":"Do it again"}""",
-                        summary = "create goal 2",
+                        type = ActionType.ASSIGNMENT_OPERATION,
+                        payload = """{"command":"create","title":"Assignment 2","instruction":"Do it again"}""",
+                        summary = "create assignment 2",
                         rootInputId = rootInputId,
                         conversationContext = context,
                         groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
@@ -453,8 +453,8 @@ class DefaultActionControlServiceTest {
                         progress = AuthorizationProgress.ALLOW_STAGE,
                         commitMode = CommitMode.POLICY_AUTONOMOUS,
                         policyVersion = "test-v1",
-                        reason = "stage goal operation",
-                        reasonCode = "TEST_GOAL_STAGE",
+                        reason = "stage assignment operation",
+                        reasonCode = "TEST_ASSIGNMENT_STAGE",
                     ),
                     conversationContext = context,
                 )

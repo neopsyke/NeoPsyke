@@ -444,14 +444,14 @@ class DashboardStateStoreTest {
     @Test
     fun `filtered subscription only receives matching events`() = runBlocking {
         val store = DashboardStateStore(maxEvents = 10)
-        val subscription = store.subscribe { event -> event.type.startsWith("durable_work_") }
+        val subscription = store.subscribe { event -> event.type.startsWith("assignment_") }
         store.onEvent(AgentEvent(id = 1, type = "warning", data = mapOf("message" to "ignore")))
-        store.onEvent(AgentEvent(id = 2, type = "durable_work_started", data = mapOf("work_item_id" to "goal-1")))
+        store.onEvent(AgentEvent(id = 2, type = "assignment_started", data = mapOf("work_item_id" to "assignment-1")))
 
         val payload = withTimeoutOrNull(200) { subscription.receive() }
         assertNotNull(payload)
-        assertTrue(payload.contains("\"type\":\"durable_work_started\""))
-        assertTrue(payload.contains("\"work_item_id\":\"goal-1\""))
+        assertTrue(payload.contains("\"type\":\"assignment_started\""))
+        assertTrue(payload.contains("\"work_item_id\":\"assignment-1\""))
         subscription.close()
         store.close()
     }

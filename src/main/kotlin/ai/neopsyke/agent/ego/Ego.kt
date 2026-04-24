@@ -21,9 +21,9 @@ import ai.neopsyke.agent.memory.longterm.MemoryEventType
 import ai.neopsyke.agent.memory.scratchpad.ScratchpadStore
 import ai.neopsyke.agent.id.EmptyWorkItemRegistry
 import ai.neopsyke.agent.id.WorkItemRegistry
-import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
-import ai.neopsyke.agent.durablework.DurableWorkActivation
-import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.assignments.NoopAssignmentGateway
+import ai.neopsyke.agent.assignments.AssignmentActivation
+import ai.neopsyke.agent.assignments.AssignmentGateway
 import ai.neopsyke.agent.ego.planner.NoopPlanRefiner
 import ai.neopsyke.agent.ego.planner.PlanRefiner
 import ai.neopsyke.agent.support.PromptInjectionDefense
@@ -51,10 +51,11 @@ class Ego(
     private val actionControlService: ActionControlService = LegacyCompatibleActionControlService { action, authorization ->
         motorCortex.execute(action, config.searchResultCount, authorization)
     },
-    private val goalRegistry: WorkItemRegistry = EmptyWorkItemRegistry,
-    private val durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
+    private val assignmentRegistry: WorkItemRegistry = EmptyWorkItemRegistry,
+    private val assignmentGateway: AssignmentGateway = NoopAssignmentGateway,
     private val evidenceArtifactStore: EvidenceArtifactStore = InMemoryEvidenceArtifactStore(),
     private val planRefiner: PlanRefiner = NoopPlanRefiner(),
+    private val contactChannelSupplier: () -> Set<String> = { emptySet() },
 ) {
     @Volatile private var id: ai.neopsyke.agent.id.Id? = null
     @Volatile private var approvalStagingHook: ApprovalStagingHook? = null
@@ -166,14 +167,14 @@ class Ego(
             )
         },
         actionControlService = actionControlService,
-        actionLifecycleObserver = durableWorkGateway,
+        actionLifecycleObserver = assignmentGateway,
         emitActionFeedback = sensoryCortex::offerActionFeedback,
     )
     private val stimulusIngress = StimulusIngressCoordinator(
         config = config,
         scheduler = scheduler,
         cognitiveThreads = cognitiveThreads,
-        durableWorkGateway = durableWorkGateway,
+        assignmentGateway = assignmentGateway,
         instrumentation = instrumentation,
         telemetry = telemetry,
         shapeOpportunityContract = ::shapeOpportunityContract,
@@ -459,7 +460,7 @@ class Ego(
         feedbackAction: PendingAction,
         resumedFromWait: Boolean,
     ): Boolean {
-        if (!durableWorkGateway.allowFollowUp(feedbackAction)) return false
+        if (!assignmentGateway.allowFollowUp(feedbackAction)) return false
         if (cue.executionStatus == ActionExecutionStatus.WAITING) return false
         return resumedFromWait || cue.requiresFollowUpThought || cue.executionStatus != ActionExecutionStatus.SUCCESS
     }
@@ -635,7 +636,7 @@ class Ego(
             is OpportunityTrigger.Input -> processInput(trigger.input, opportunity.opportunity)
             is OpportunityTrigger.Impulse -> processImpulse(trigger.impulse, opportunity.opportunity)
             is OpportunityTrigger.Feedback -> processActionFeedback(trigger.feedback, opportunity.opportunity)
-            is OpportunityTrigger.DurableWork -> processGoalWork(trigger.work, opportunity.opportunity)
+            is OpportunityTrigger.Assignment -> processAssignment(trigger.work, opportunity.opportunity)
         }
     }
 
@@ -821,10 +822,10 @@ class Ego(
             needId = impulse.needId,
             triggeringTension = impulse.tension,
         )
-        val projectSummary = durableWorkGateway.pendingWorkSummary()
+        val projectSummary = assignmentGateway.pendingWorkSummary()
         val context = idConstrainedContext.copy(
             shortTermContextSummary = "",
-            goalWorkSummary = projectSummary,
+            assignmentSummary = projectSummary,
         )
 
         timing.startPhase("planner_decide")
@@ -865,23 +866,23 @@ class Ego(
         actionPipeline.reviewAndExecute(action)
     }
 
-    private suspend fun processGoalWork(
-        work: DurableWorkActivation,
+    private suspend fun processAssignment(
+        work: AssignmentActivation,
         opportunity: Opportunity? = null,
     ) {
-        val timing = PhaseTimingCollector("durable_work", "work:${work.workItemId}")
+        val timing = PhaseTimingCollector("assignment", "work:${work.workItemId}")
         val convCtx = work.conversationContext
         val sessionId = resolveSessionId(convCtx)
         activateSession(convCtx)
-        cognitiveThreads.bindGoalWork(work)
-        maybeCreateGoalScratchpad(work)
+        cognitiveThreads.bindAssignment(work)
+        maybeCreateAssignmentScratchpad(work)
 
-        timing.startPhase("goal_work_processing")
+        timing.startPhase("assignment_processing")
         instrumentation.emit(
             AgentEvent(
-                type = "goal_work_processing",
+                type = "assignment_processing",
                 data = mapOf(
-                    "goal_id" to work.workItemId,
+                    "assignment_id" to work.workItemId,
                     "step_id" to work.stepId,
                     "step_description" to work.stepDescription,
                 ),
@@ -889,13 +890,26 @@ class Ego(
         )
 
         timing.startPhase("planner_context")
-        val trigger = EgoTrigger.DurableWork(work)
-        val context = plannerContext(
+        val trigger = EgoTrigger.Assignment(work)
+        val rawContext = plannerContext(
             trigger = trigger,
             rootInputId = work.rootInputId,
             sessionId = sessionId,
             conversationContext = convCtx,
             opportunity = opportunity,
+        )
+        // Assignment step execution is conversation-independent: a cron-backed assignment
+        // may fire minutes or months after the user set it up, so session-level
+        // context (recent dialogue, short-term summary, scratchpad digest,
+        // ambient context) is noise at best and a contamination source at worst.
+        // The step has its own focused scratchpad + assignment context. Long-term
+        // recall, lessons, and episodic recall are kept — they carry durable
+        // user preferences and prior execution history.
+        val context = rawContext.copy(
+            shortTermContextSummary = "",
+            recentDialogue = emptyList(),
+            sessionScratchpadDigest = "",
+            ambientContext = AmbientContext(),
         )
 
         timing.startPhase("meta_assessment")
@@ -919,9 +933,9 @@ class Ego(
         journalPlannerDecision(finalDecision)
 
         timing.startPhase("apply_decision")
-        val origin = ActionOrigin(OriginSource.DURABLE_WORK)
+        val origin = ActionOrigin(OriginSource.ASSIGNMENT)
         if (finalDecision is EgoDecision.Noop) {
-            durableWorkGateway.notifyStepPlannerNoop(work.rootInputId, finalDecision.reason)
+            assignmentGateway.notifyStepPlannerNoop(work.rootInputId, finalDecision.reason)
         }
         dispatcher.dispatch(
             decision = finalDecision,
@@ -954,7 +968,7 @@ class Ego(
                     "root_input_id" to input.rootInputId,
                     "root_input_received_at_ms" to input.receivedAtMs,
                     "input_id" to input.id,
-                    "goal_preview" to TextSecurity.preview(input.content, 140),
+                    "assignment_preview" to TextSecurity.preview(input.content, 140),
                     "active_tasks" to scratchpadStore.activeTaskCount()
                 )
             )
@@ -966,8 +980,8 @@ class Ego(
         )
     }
 
-    private fun maybeCreateGoalScratchpad(work: DurableWorkActivation) {
-        val created = scratchpadStore.ensureForGoalWork(work)
+    private fun maybeCreateAssignmentScratchpad(work: AssignmentActivation) {
+        val created = scratchpadStore.ensureForAssignment(work)
         if (!created) return
         instrumentation.emit(
             AgentEvent(
@@ -975,16 +989,16 @@ class Ego(
                 data = mapOf(
                     "root_input_id" to work.rootInputId,
                     "root_input_received_at_ms" to System.currentTimeMillis(),
-                    "goal_preview" to TextSecurity.preview(work.stepDescription, 140),
+                    "assignment_preview" to TextSecurity.preview(work.stepDescription, 140),
                     "active_tasks" to scratchpadStore.activeTaskCount(),
-                    "source" to "goal_runtime",
+                    "source" to "assignment_runtime",
                 )
             )
         )
         telemetry.emitScratchpadTelemetry(
             rootInputId = work.rootInputId,
             rootInputReceivedAtMs = System.currentTimeMillis(),
-            updateType = "goal_scratchpad_created"
+            updateType = "assignment_scratchpad_created"
         )
     }
 
@@ -1011,7 +1025,6 @@ class Ego(
             shortTermSummary = shortTermSummary,
             recentDialogue = recentDialogue,
             episodicCues = episodicCues,
-            ambientContext = ambientContext,
         )
         val lessons = memory.recallLessons(trigger, recentDialogue)
         val episodicRecall = memory.recallEpisodic(trigger, recentDialogue)
@@ -1033,7 +1046,6 @@ class Ego(
                     descriptor.allowedArgumentDataTrust.contains(threadSecurityContext.aggregatedDataTrust)
             }
         val implementedAvailableActions = motorCortex.availableActionTypes()
-        val implementedDispatchableActions = motorCortex.dispatchableActionTypes()
         val shapedActionSurface = CognitivePolicyShaper.shapePlannerActions(
             conversationContext = conversationContext,
             threadSecurityContext = threadSecurityContext,
@@ -1047,13 +1059,6 @@ class Ego(
         } else {
             shapedActionSurface.availableActions intersect implementedAvailableActions
         }
-        val dispatchableActions = if (opportunity?.dispatchableActions?.isNotEmpty() == true) {
-            shapedActionSurface.dispatchableActions
-                .intersect(implementedDispatchableActions)
-                .intersect(opportunity.dispatchableActions)
-        } else {
-            shapedActionSurface.dispatchableActions intersect implementedDispatchableActions
-        }
         val actionDefinitions = if (opportunity?.actionDefinitions?.isNotEmpty() == true) {
             shapedActionSurface.actionDefinitions
                 .filter { definition ->
@@ -1065,7 +1070,8 @@ class Ego(
                 .filter { definition -> definition.actionType in availableActions }
         }
         val evidenceHints = buildEvidenceHints(rootInputId, sessionId)
-        val goalSummaryResult = buildNumberedGoalSummary()
+        val assignmentSummaryResult = buildNumberedAssignmentSummary()
+        val reviewableResponsibilities = buildReviewableResponsibilitySummary()
         return PlannerContext(
             recentDialogue = recentDialogue,
             queue = scheduler.queueSnapshot(),
@@ -1094,12 +1100,14 @@ class Ego(
             ),
             allowedCommitModes = opportunity?.allowedCommitModes ?: CommitMode.entries.toSet(),
             availableActions = availableActions,
-            dispatchableActions = dispatchableActions,
+            availableContactChannels = contactChannelSupplier(),
             actionDefinitions = actionDefinitions,
             conversationContext = conversationContext,
-            goalWorkSummary = goalSummaryResult.text,
-            goalIndex = goalSummaryResult.index,
-            goalSnapshots = goalSummaryResult.snapshots,
+            assignmentSummary = assignmentSummaryResult.text,
+            assignmentIndex = assignmentSummaryResult.index,
+            assignmentSnapshots = assignmentSummaryResult.snapshots,
+            reviewableResponsibilitySummary = reviewableResponsibilities.text,
+            reviewableResponsibilityIndex = reviewableResponsibilities.index,
             groundingMetadata = groundingMetadataForTrigger(trigger),
         )
     }
@@ -1134,9 +1142,9 @@ class Ego(
                     sourceRef = trigger.impulse.rootImpulseId,
                 ).renderSummary()
 
-            is EgoTrigger.DurableWork ->
+            is EgoTrigger.Assignment ->
                 Provenances.trustedSystemSignal(
-                    provider = "goal-runtime",
+                    provider = "assignment-runtime",
                     sourceRef = trigger.workUnit.rootInputId,
                 ).renderSummary()
         }
@@ -1147,30 +1155,31 @@ class Ego(
             is EgoTrigger.Continuation -> trigger.continuation.groundingMetadata
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.groundingMetadata
             is EgoTrigger.IncomingImpulse -> GroundingMetadata.NOT_REQUIRED_PREFILTER
-            is EgoTrigger.DurableWork -> trigger.workUnit.groundingMetadata
+            is EgoTrigger.Assignment -> trigger.workUnit.groundingMetadata
         }
 
-    private data class GoalSummaryResult(
+    private data class AssignmentSummaryResult(
         val text: String,
         val index: Map<Int, String>,
-        val snapshots: Map<String, DurableWorkItemSnapshot>,
+        val snapshots: Map<String, AssignmentItemSnapshot>,
     )
 
-    private fun buildNumberedGoalSummary(): GoalSummaryResult {
-        val goals = durableWorkGateway.allWorkItems()
-        if (goals.isEmpty()) return GoalSummaryResult("", emptyMap(), emptyMap())
+    private fun buildNumberedAssignmentSummary(): AssignmentSummaryResult {
+        val assignments = assignmentGateway.allWorkItems()
+        if (assignments.isEmpty()) return AssignmentSummaryResult("", emptyMap(), emptyMap())
         val index = mutableMapOf<Int, String>()
-        val snapshots = mutableMapOf<String, DurableWorkItemSnapshot>()
+        val snapshots = mutableMapOf<String, AssignmentItemSnapshot>()
         val text = buildString {
-            append("Active goals:")
-            goals.forEachIndexed { i, g ->
+            append("Active assignments:")
+            assignments.forEachIndexed { i, g ->
                 val position = i + 1
                 index[position] = g.workItemId
-                val state = durableWorkGateway.workItemStatus(g.workItemId)
-                val projection = durableWorkGateway.workItemProjection(g.workItemId)
+                val state = assignmentGateway.workItemStatus(g.workItemId)
+                val projection = assignmentGateway.workItemProjection(g.workItemId)
                 state?.let { workState ->
-                    snapshots[g.workItemId] = DurableWorkItemSnapshot(
+                    snapshots[g.workItemId] = AssignmentItemSnapshot(
                         workItemId = workState.id,
+                        kind = workState.workItem.kind,
                         title = workState.workItem.title,
                         instruction = workState.workItem.instruction,
                         completionCriteria = workState.workItem.completionCriteria,
@@ -1179,7 +1188,7 @@ class Ego(
                         failureCountInWindow = workState.workItem.failureWindow.failureCount,
                         latestArtifactSummary = projection?.latestArtifactSummary ?: workState.durableState.artifacts.lastSummary,
                         planSteps = workState.workItem.plan.steps.map { step ->
-                            DurableWorkPlanStepSnapshot(
+                            AssignmentPlanStepSnapshot(
                                 id = step.id,
                                 description = step.description,
                                 status = step.status,
@@ -1196,15 +1205,15 @@ class Ego(
                 append("\n$position. \"${g.title}\" (${snapshot?.status ?: g.status}")
                 if (!g.cronExpression.isNullOrBlank()) append(", cron=${g.cronExpression}")
                 snapshot?.let {
-                    val doneCount = it.planSteps.count { step -> step.status == ai.neopsyke.agent.durablework.StepStatus.DONE }
+                    val doneCount = it.planSteps.count { step -> step.status == ai.neopsyke.agent.assignments.StepStatus.DONE }
                     append(", rev=${it.planRevision}, steps=$doneCount/${it.planSteps.size}")
                 }
                 append(")")
                 val currentStep = snapshot?.planSteps?.firstOrNull { step ->
                     step.status in setOf(
-                        ai.neopsyke.agent.durablework.StepStatus.IN_PROGRESS,
-                        ai.neopsyke.agent.durablework.StepStatus.READY,
-                        ai.neopsyke.agent.durablework.StepStatus.BLOCKED,
+                        ai.neopsyke.agent.assignments.StepStatus.IN_PROGRESS,
+                        ai.neopsyke.agent.assignments.StepStatus.READY,
+                        ai.neopsyke.agent.assignments.StepStatus.BLOCKED,
                     )
                 }
                 if (currentStep != null) {
@@ -1220,14 +1229,33 @@ class Ego(
                 }
             }
         }
-        return GoalSummaryResult(text, index, snapshots)
+        return AssignmentSummaryResult(text, index, snapshots)
+    }
+
+    private fun buildReviewableResponsibilitySummary(): AssignmentSummaryResult {
+        val reviewable = assignmentGateway.reviewableResponsibilities(MAX_REVIEWABLE_RESPONSIBILITIES)
+        if (reviewable.isEmpty()) return AssignmentSummaryResult("", emptyMap(), emptyMap())
+        val index = linkedMapOf<Int, String>()
+        val text = buildString {
+            append("Reviewable responsibilities:")
+            reviewable.forEachIndexed { i, item ->
+                val position = i + 1
+                index[position] = item.workItemId
+                append("\n$position. \"${item.title}\" (${item.priority.name.lowercase()}")
+                item.nextReviewAt?.let { append(", next_review_at=$it") }
+                item.lastReviewAt?.let { append(", last_review_at=$it") }
+                append(")")
+                append("\n   summary: ${TextSecurity.preview(item.operatorSummary, GOAL_ARTIFACT_SUMMARY_PREVIEW_CHARS)}")
+            }
+        }
+        return AssignmentSummaryResult(text, index, emptyMap())
     }
 
     private fun buildAmbientContext(trigger: EgoTrigger): AmbientContext {
         if (!shouldAttachAmbientContext(trigger)) {
             return AmbientContext()
         }
-        val activeWorkItems = goalRegistry.activeWorkItems()
+        val activeWorkItems = assignmentRegistry.activeWorkItems()
             .map { item -> TextSecurity.preview(item.instruction, AMBIENT_PROJECT_PREVIEW_CHARS) }
             .filter { it.isNotBlank() }
             .take(MAX_AMBIENT_PROJECTS)
@@ -1245,7 +1273,7 @@ class Ego(
             is EgoTrigger.IncomingInput -> false
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.origin.source == OriginSource.ID
             is EgoTrigger.IncomingImpulse -> true
-            is EgoTrigger.DurableWork -> true
+            is EgoTrigger.Assignment -> true
             is EgoTrigger.Continuation -> trigger.continuation.origin.source == OriginSource.ID
         }
 
@@ -1274,7 +1302,7 @@ class Ego(
             is EgoTrigger.Continuation -> trigger.continuation.rootInputId
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
-            is EgoTrigger.DurableWork -> trigger.workUnit.rootInputId
+            is EgoTrigger.Assignment -> trigger.workUnit.rootInputId
         }
 
     private fun triggerLabel(trigger: EgoTrigger): String =
@@ -1283,13 +1311,13 @@ class Ego(
             is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
-            is EgoTrigger.DurableWork -> "durable-work"
+            is EgoTrigger.Assignment -> "assignment"
         }
 
     private fun resolveFeedbackThreadKind(feedback: PendingFeedback): CognitiveThreadKind =
         cognitiveThreads.thread(feedback.cue.rootInputId, feedback.cue.conversationContext)?.kind
             ?: when (feedback.cue.origin.source) {
-                OriginSource.DURABLE_WORK -> CognitiveThreadKind.DURABLE_WORK_DIRECTED
+                OriginSource.ASSIGNMENT -> CognitiveThreadKind.ASSIGNMENT_DIRECTED
                 OriginSource.ID -> CognitiveThreadKind.DRIVE
                 OriginSource.SYSTEM,
                 OriginSource.USER,
@@ -1336,12 +1364,10 @@ class Ego(
             emptySet()
         }
         val filteredAvailable = baseContext.availableActions - blockedPlannerActions
-        val filteredDispatchable = baseContext.dispatchableActions - blockedPlannerActions
         val filteredDefinitions = baseContext.actionDefinitions.filterNot { it.actionType in blockedPlannerActions }
         return baseContext.copy(
             idState = idState,
             availableActions = filteredAvailable,
-            dispatchableActions = filteredDispatchable,
             actionDefinitions = filteredDefinitions,
         )
     }
@@ -1443,7 +1469,7 @@ class Ego(
                     data = mapOf(
                         "root_input_id" to rootInputId,
                         "session_id" to sessionId,
-                        "goal_preview" to TextSecurity.preview(digestEntry.goal, 140),
+                        "assignment_preview" to TextSecurity.preview(digestEntry.assignment, 140),
                         "section_count" to digestEntry.sectionIndex.size,
                         "evidence_count" to digestEntry.keyEvidence.size,
                     )
@@ -1490,40 +1516,40 @@ class Ego(
         val sessionId = resolveSessionId(conversationContext)
         val thread = cognitiveThreads.thread(rootInputId, conversationContext)
         val workItemId = thread?.workItemId
-        val stepId = thread?.metadata?.get("goal_step_id")
+        val stepId = thread?.metadata?.get("assignment_step_id")
         planner.resetForInput(rootInputId)
-        durableWorkGateway.finalizeDurableWorkCycle(rootInputId)
-        val goalState = workItemId?.let { durableWorkGateway.workItemStatus(it) }
-        val stepStatus = stepId?.let { id -> goalState?.workItem?.plan?.steps?.firstOrNull { it.id == id }?.status }
+        assignmentGateway.finalizeAssignmentCycle(rootInputId)
+        val assignmentState = workItemId?.let { assignmentGateway.workItemStatus(it) }
+        val stepStatus = stepId?.let { id -> assignmentState?.workItem?.plan?.steps?.firstOrNull { it.id == id }?.status }
         val retainContinuity = when {
-            goalState == null -> false
-            goalState.workItem.status == ai.neopsyke.agent.durablework.WorkItemStatus.COMPLETED -> false
-            goalState.workItem.status == ai.neopsyke.agent.durablework.WorkItemStatus.FAILED -> false
-            stepStatus == ai.neopsyke.agent.durablework.StepStatus.DONE -> false
-            stepStatus == ai.neopsyke.agent.durablework.StepStatus.FAILED -> false
+            assignmentState == null -> false
+            assignmentState.workItem.status == ai.neopsyke.agent.assignments.WorkItemStatus.COMPLETED -> false
+            assignmentState.workItem.status == ai.neopsyke.agent.assignments.WorkItemStatus.FAILED -> false
+            stepStatus == ai.neopsyke.agent.assignments.StepStatus.DONE -> false
+            stepStatus == ai.neopsyke.agent.assignments.StepStatus.FAILED -> false
             else -> true
         }
         if (retainContinuity) {
             when {
-                stepStatus == ai.neopsyke.agent.durablework.StepStatus.BLOCKED ||
-                    goalState?.workItem?.status == ai.neopsyke.agent.durablework.WorkItemStatus.BLOCKED ->
-                    cognitiveThreads.markBlocked(rootInputId, conversationContext, reason = "goal_blocked")
-                goalState?.workItem?.status == ai.neopsyke.agent.durablework.WorkItemStatus.SUSPENDED ->
-                    cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_suspended")
+                stepStatus == ai.neopsyke.agent.assignments.StepStatus.BLOCKED ||
+                    assignmentState?.workItem?.status == ai.neopsyke.agent.assignments.WorkItemStatus.BLOCKED ->
+                    cognitiveThreads.markBlocked(rootInputId, conversationContext, reason = "assignment_blocked")
+                assignmentState?.workItem?.status == ai.neopsyke.agent.assignments.WorkItemStatus.SUSPENDED ->
+                    cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "assignment_suspended")
                 else ->
-                    cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "goal_waiting_resume")
+                    cognitiveThreads.markWaiting(rootInputId, conversationContext, reason = "assignment_waiting_resume")
             }
             cognitiveThreads.thread(rootInputId, conversationContext)
-                ?.let { updated -> emitThreadUpdate(updated, rootInputId, "goal_cycle_retained") }
+                ?.let { updated -> emitThreadUpdate(updated, rootInputId, "assignment_cycle_retained") }
             deliberation.clearForInput(rootInputId, sessionId, retainThreadContinuity = true)
         } else {
-            if (goalState?.workItem?.status == ai.neopsyke.agent.durablework.WorkItemStatus.FAILED || stepStatus == ai.neopsyke.agent.durablework.StepStatus.FAILED) {
-                cognitiveThreads.markFailed(rootInputId, conversationContext, reason = "goal_failed")
+            if (assignmentState?.workItem?.status == ai.neopsyke.agent.assignments.WorkItemStatus.FAILED || stepStatus == ai.neopsyke.agent.assignments.StepStatus.FAILED) {
+                cognitiveThreads.markFailed(rootInputId, conversationContext, reason = "assignment_failed")
             } else {
                 cognitiveThreads.markResolved(rootInputId, conversationContext)
             }
             cognitiveThreads.thread(rootInputId, conversationContext)
-                ?.let { updated -> emitThreadUpdate(updated, rootInputId, "goal_cycle_terminal") }
+                ?.let { updated -> emitThreadUpdate(updated, rootInputId, "assignment_cycle_terminal") }
             deliberation.clearForInput(rootInputId, sessionId)
             val digestEntry = scratchpadStore.captureDigest(rootInputId, sessionId)
             if (digestEntry != null) {
@@ -1533,7 +1559,7 @@ class Ego(
                         data = mapOf(
                             "root_input_id" to rootInputId,
                             "session_id" to sessionId,
-                            "goal_preview" to TextSecurity.preview(digestEntry.goal, 140),
+                            "assignment_preview" to TextSecurity.preview(digestEntry.assignment, 140),
                             "section_count" to digestEntry.sectionIndex.size,
                             "evidence_count" to digestEntry.keyEvidence.size,
                         )
@@ -1543,7 +1569,7 @@ class Ego(
             telemetry.emitScratchpadTelemetry(
                 rootInputId = rootInputId,
                 rootInputReceivedAtMs = System.currentTimeMillis(),
-                updateType = "before_destroy_goal_cycle"
+                updateType = "before_destroy_assignment_cycle"
             )
             val destroyedScratchpad = scratchpadStore.destroy(rootInputId)
             if (destroyedScratchpad != null) {
@@ -1555,7 +1581,7 @@ class Ego(
                             "root_input_received_at_ms" to destroyedScratchpad.rootInputReceivedAtMs,
                             "section_count" to destroyedScratchpad.sectionCount,
                             "evidence_count" to destroyedScratchpad.evidenceCount,
-                            "reason" to "goal_cycle_terminal"
+                            "reason" to "assignment_cycle_terminal"
                         )
                     )
                 )
@@ -1564,11 +1590,11 @@ class Ego(
         dispatcher.clearExternalActionSignatures(InputScope(rootInputId, sessionId))
         instrumentation.emit(
             AgentEvent(
-                type = "goal_advance_cleanup",
+                type = "assignment_advance_cleanup",
                 data = mapOf(
-                    "goal_root_id" to rootInputId,
+                    "assignment_root_id" to rootInputId,
                     "retain_thread_continuity" to retainContinuity,
-                    "goal_status" to goalState?.workItem?.status?.name?.lowercase(),
+                    "assignment_status" to assignmentState?.workItem?.status?.name?.lowercase(),
                     "step_status" to stepStatus?.name?.lowercase(),
                 )
             )
@@ -1581,7 +1607,7 @@ class Ego(
                 is OpportunityTrigger.Input -> "input"
                 is OpportunityTrigger.Impulse -> "impulse"
                 is OpportunityTrigger.Feedback -> "feedback"
-                is OpportunityTrigger.DurableWork -> "durable_work"
+                is OpportunityTrigger.Assignment -> "assignment"
             }
             is LoopTask.ProcessContinuation -> "continuation"
             is LoopTask.ProcessIntention -> "intention"
@@ -1635,7 +1661,7 @@ class Ego(
             is EgoDecision.EnqueueContinuation ->
                 "Decision: $label — ${TextSecurity.preview(decision.continuation.content, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
             is EgoDecision.EnqueuePlan ->
-                "Decision: plan — ${TextSecurity.preview(decision.goal, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
+                "Decision: plan — ${TextSecurity.preview(decision.assignment, JOURNAL_SUMMARY_PREVIEW_CHARS)}"
             is EgoDecision.Noop ->
                 "Decision: noop — ${decision.reason}"
         }
@@ -1645,6 +1671,7 @@ class Ego(
     private companion object {
         const val GOAL_ARTIFACT_SUMMARY_PREVIEW_CHARS: Int = 160
         const val MAX_AMBIENT_PROJECTS: Int = 4
+        const val MAX_REVIEWABLE_RESPONSIBILITIES: Int = 8
         const val AMBIENT_PROJECT_PREVIEW_CHARS: Int = 180
         const val MAX_AMBIENT_SCRATCHPAD_SIGNALS: Int = 6
         const val MAX_AMBIENT_OPEN_LOOPS: Int = 4
@@ -1669,7 +1696,7 @@ class Ego(
                     "thread_kind" to thread.kind.name.lowercase(),
                     "thread_status" to thread.status.name.lowercase(),
                     "root_input_id" to rootInputId,
-                    "goal_id" to thread.workItemId,
+                    "assignment_id" to thread.workItemId,
                     "policy_scope_id" to thread.securityContext.policyScope.id,
                     "reason" to reason,
                     "thread_snapshot" to snapshot,
@@ -1697,7 +1724,6 @@ class Ego(
                     "allowed_intentions" to opportunity.allowedIntentions.map { it.name.lowercase() },
                     "allowed_commit_modes" to opportunity.allowedCommitModes.map { it.name.lowercase() },
                     "available_actions" to opportunity.availableActions.map { it.id }.sorted(),
-                    "dispatchable_actions" to opportunity.dispatchableActions.map { it.id }.sorted(),
                     "opportunity_metadata" to opportunity.metadata,
                     "thread_snapshot" to cognitiveThreads.snapshot(rootInputId, opportunity.conversationContext),
                     "grounding_required" to groundingMetadata?.requirement?.name?.lowercase(),
@@ -1729,8 +1755,7 @@ class Ego(
         val shaped = CognitivePolicyShaper.shapeOpportunityContract(
             opportunity = opportunity,
             plannerActionSurface = shapedActionSurface,
-            implementedAvailableActions = motorCortex.actionRegistry().dispatchableActionTypes(),
-            implementedDispatchableActions = motorCortex.actionRegistry().dispatchableActionTypes(),
+            implementedAvailableActions = motorCortex.cachedAvailableActionTypes(),
         )
         cognitiveThreads.recordOpportunity(rootInputId, conversationContext, shaped)
         return shaped
@@ -1765,7 +1790,7 @@ class Ego(
             commitMode = commitMode,
             rootStimulusId = rootInputId,
             workItemId = thread.workItemId,
-            goalRunId = thread.goalRunId,
+            assignmentRunId = thread.assignmentRunId,
             metadata = metadata,
         )
         cognitiveThreads.recordIntention(rootInputId, conversationContext, intention)

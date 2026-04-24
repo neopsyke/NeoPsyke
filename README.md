@@ -1,6 +1,6 @@
 # NeoPsyke
 
-NeoPsyke is an autonomous AI agent built around a cognitive architecture inspired by Freud's structural model. It is designed to generate internal motivation, maintain durable goals and memory, do useful work through a full agent runtime, and route actions through typed trust, durable approval, and explicit governance.
+NeoPsyke is an autonomous AI agent built around a cognitive architecture inspired by Freud's structural model. It is designed to generate internal motivation, maintain durable assignments and memory, do useful work through a full agent runtime, and route actions through typed trust, durable approval, and explicit governance.
 
 The system is organized around three core modules:
 
@@ -8,7 +8,7 @@ The system is organized around three core modules:
 - **Ego** -- plans, reasons, and mediates between motivation, reality, and constraints.
 - **Superego** -- judges intentions and enforces governance, safety, and self-control.
 
-LLMs power the internal cognitive roles. Around that core, NeoPsyke provides short-term, long-term, and episodic memory, durable and recurring goals, and a layered security model built into the runtime from stimulus ingress to action execution.
+LLMs power the internal cognitive roles. Around that core, NeoPsyke provides short-term, long-term, and episodic memory, durable and recurring assignments, and a layered security model built into the runtime from stimulus ingress to action execution.
 
 > **Status:** Experimental. The architecture is real and implemented, but the project is under active development. Expect rough edges.
 
@@ -34,7 +34,7 @@ It is trying to build a useful, capable cognitive architecture with clear intern
 - interpretation is distinct from transport
 - internal drives are distinct from user requests
 - decision-making is separate from execution
-- durable goals are separate from ephemeral turns
+- durable assignments are separate from ephemeral turns
 - judgment and safety are first-class architectural functions
 
 Just as importantly, the goal is not a minimal theoretical demonstration. If the core mechanism were the only objective, it could be explored in a much smaller and simpler project. NeoPsyke is an attempt to embed that mechanism in a genuinely useful agent runtime where authority, trust, and action control are first-class runtime concepts rather than prompt conventions.
@@ -116,7 +116,7 @@ User input -----> SensoryCortex -----> Ego (Planner + Attention)
                           +------------------------+
                           |
                     MemorySystem (short-term + long-term + episodic)
-                    GoalManager (durable, recurring, scheduled goals)
+                    AssignmentRuntime (persistent, recurring, scheduled assignments)
 ```
 > For a full reference of all agent concepts and terminology, see the [Glossary](docs/glossary.md).
 
@@ -124,7 +124,7 @@ User input -----> SensoryCortex -----> Ego (Planner + Attention)
 
 Every interaction follows this chain:
 
-1. A **stimulus** reaches the `SensoryCortex` -- a user message, an Id impulse, a goal signal, tool feedback, or a timer cue. Each stimulus carries security metadata: who sent it, through what channel, and its trust level.
+1. A **stimulus** reaches the `SensoryCortex` -- a user message, an Id impulse, an assignment signal, tool feedback, or a timer cue. Each stimulus carries security metadata: who sent it, through what channel, and its trust level.
 2. The system appraises the stimulus into a typed **percept** (request, observation, feedback, state-change, or drive activation).
 3. The percept is attached to an existing **cognitive thread** or starts a new one. Cognitive threads persist across time and can suspend, resume, and accumulate context.
 4. The cognitive thread emits one or more **opportunity** items for the Ego's attention.
@@ -145,7 +145,7 @@ The Ego runs in a bounded loop (configurable, default 180 steps per input) to pr
 
 **Autonomous motivation.** The Id maintains internal drives that accumulate pressure over time. When a drive crosses a threshold and the Ego is idle, the system can initiate proactive behavior. The agent is driven by generic internal prompts rather than narrowly predefined tasks, so it has to decide what deserves attention and what kind of work to pursue. Governance and action outcomes feed back into motivation: successful actions can discharge pressure, while denied or failed paths do not.
 
-**Durable goals.** Goals are first-class persistent objects with lifecycle management (`CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`). They can be triggered by schedules, events, polling, manual activation, or async resume. This is where NeoPsyke places explicit scheduled work: tasks that genuinely need reliability, timing, or frequency. Each goal can carry an execution plan with steps and acceptance criteria, or act as a standing monitor or recurring synthesis task. Goals also track novelty to avoid re-alerting on already-seen information. Goals, however, remain unstable and require further debugging and testing. This is a current priority.
+**Durable assignments.** Assignments are first-class persistent objects with lifecycle management (`CREATED`, `PLANNING`, `ACTIVE`, `BLOCKED`, `SUSPENDED`, `COMPLETED`, `FAILED`). They can be triggered by schedules, events, polling, manual activation, or async resume. This is where NeoPsyke places explicit scheduled work: tasks that genuinely need reliability, timing, or frequency. Each assignment can carry an execution plan with steps and acceptance criteria, or act as a standing monitor or recurring synthesis task. Assignments also track novelty to avoid re-alerting on already-seen information. Assignments, however, remain unstable and require further debugging and testing. This is a current priority.
 
 **Three-tier memory.** Short-term memory maintains rolling context per conversation with automatic compaction. Episodic memory records narrative events in a SQLite FTS5 store with configurable retention. Long-term memory uses pgvector for semantic recall and imprint, guided by an LLM-based advisor that periodically assesses what is worth consolidating.
 
@@ -155,7 +155,7 @@ The Ego runs in a bounded loop (configurable, default 180 steps per input) to pr
 
 **External integrations.** Telegram bot support, Google Workspace read/observe integrations for Gmail and Calendar via OAuth with PKCE, and staged email sending through Microsoft Graph.
 
-**Action plugin system.** Actions are discovered at startup via Java `ServiceLoader`. Built-in actions cover user communication (`contact_user`, `resolution_draft`), web research (`web_search`, `website_fetch`), internal reflection and memory capture (`reflect_internal`, `reflect_evidence`), goal management (`goal_operation`), outbound email (`email_send`), and Google Workspace observation (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`). New actions can be added by implementing the plugin interface and registering via `ServiceLoader`. Runtime policy still owns whether an action can direct-commit, must stage for approval, or is denied outright.
+**Action plugin system.** Actions are discovered at startup via Java `ServiceLoader`. Built-in actions cover user communication (`contact_user`, `resolution_draft`), web research (`web_search`, `website_fetch`), internal reflection and memory capture (`reflect_internal`, `reflect_evidence`), assignment lifecycle control (`assignment_operation`), outbound email (`email_send`), and Google Workspace observation (`gmail_observe_search`, `gmail_observe_message`, `calendar_observe_events`). New actions can be added by implementing the plugin interface and registering via `ServiceLoader`. Runtime policy still owns whether an action can direct-commit, must stage for approval, or is denied outright.
 
 **Web dashboard.** Chat interface, observability dashboard with runtime metrics, and an action control panel for reviewing staged actions and approvals -- all served from a local web server.
 
@@ -260,15 +260,15 @@ Some omissions are deliberate architectural decisions rather than missing checkl
 **Current risks and limitations:**
 
 - LLM quality directly affects planning and reasoning quality. The architecture mitigates but cannot eliminate model errors.
-- Long-running goal execution depends on external service availability and correct action contracts. 
-- The goal subsystem works in basic scenarios but remains unstable and needs much broader testing. This is a work in progress and a priority at the moment.
+- Long-running assignment execution depends on external service availability and correct action contracts. 
+- The assignment subsystem works in basic scenarios but remains unstable and needs much broader testing. This is a work in progress and a priority at the moment.
 - The memory advisor's consolidation decisions are LLM-dependent and not yet formally evaluated.
 - The Id's drive model is simple by design (configurable state machine, not learned behavior). This mirrors the structural role of drives in the original model -- complexity is expected to emerge from the interaction between modules, not from the drive source itself. However, different strategies can be still explored for need growth, urgency resolution by the Ego, interaction with the Ego, etc.
 - The dashboard is basic and suitable only for local monitoring and debugging. It's not yet a production-ready multi-user tool.
 - Prompt injection defense is heuristic, not a full sandbox. First-party plugins still run in-process as trusted code, and connector hosts are only partially isolated today.
 - Much testing and tuning is still required in the agent all-around.
 - The evals are still minimal and could use much improvement and expansion.
-- The implemented actions and tools are still not enough for the agent to be broadly useful. More will be added once the main reasoning loop and the goals are more stable.
+- The implemented actions and tools are still not enough for the agent to be broadly useful. More will be added once the main reasoning loop and the assignments are more stable.
 
 ## Testing and evaluation
 
@@ -337,8 +337,8 @@ Each cognitive role (planner, superego primary/escalation, action verifier, meta
 | [docs/why-kotlin.md](docs/why-kotlin.md) | Why Kotlin instead of Python |
 | [docs/telegram-setup.md](docs/telegram-setup.md) | Telegram bot setup (webhook/polling, owner filtering) |
 | `AGENTS.md` | Instructions for coding agents working in this repository |
-| `AGENT_LOGIC_SUMMARY.md` | Current runtime logic reference |
-| `AGENT_LOGIC_DIAGRAM.md` | Visual flow of the current agent loop |
+| `AGENT_RUNTIME_LOGIC.md` | Unified runtime logic reference and entrypoint to the split area docs |
+| [docs/agent-logic/](docs/agent-logic/) | Focused runtime logic docs by area: input, planner, memory, durable work, observability, and more |
 | [examples/runtime-config/](examples/runtime-config/) | Ready-to-use external overlay examples for fast start |
 
 ## Project structure
@@ -354,7 +354,7 @@ src/main/kotlin/ai/neopsyke/
     superego/        # Governance, policy review (Superego)
     cortex/motor/    # Action execution (MotorCortex)
     memory/          # Short-term, long-term (Hippocampus), episodic (Logbook)
-    goal/            # Durable goal lifecycle and execution
+    assignment/ # Durable assignment lifecycle and execution
     model/           # Domain models (security, cognitive, actions)
     support/         # Prompt injection defense, text security, payload validation
   config/            # Runtime configuration loaders

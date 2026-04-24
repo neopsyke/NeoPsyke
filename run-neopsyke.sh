@@ -9,7 +9,7 @@ LOG_LEVEL_FROM_ENV=0
 EVAL_MODE=0
 FREUD_LIVE_MODE=0
 DISABLE_ID=0
-GOALS_OVERRIDE=""
+ASSIGNMENTS_OVERRIDE=""
 CLEAR_ACTION_CONTROL=0
 LOOP_DELAY_MS="${EGO_LOOP_DELAY_MS:-0}"
 LOG_DIR="${NEOPSYKE_LOG_DIR:-$ROOT_DIR/.neopsyke/logs}"
@@ -393,15 +393,15 @@ while [[ $# -gt 0 ]]; do
       DISABLE_ID=1
       shift
       ;;
-    --goals)
-      GOALS_OVERRIDE="true"
+    --assignments)
+      ASSIGNMENTS_OVERRIDE="true"
       shift
       ;;
-    --no-goals)
-      GOALS_OVERRIDE="false"
+    --no-assignments)
+      ASSIGNMENTS_OVERRIDE="false"
       shift
       ;;
-    --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-lessons|--clear-goals)
+    --clear-memory-all|--clear-memory-vector|--clear-memory-episodic|--clear-memory-lessons|--clear-assignments)
       APP_ARGS+=("$1")
       shift
       ;;
@@ -410,7 +410,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --clear-state)
-      APP_ARGS+=("--clear-memory-all" "--clear-goals")
+      APP_ARGS+=("--clear-memory-all" "--clear-assignments")
       CLEAR_ACTION_CONTROL=1
       shift
       ;;
@@ -424,15 +424,15 @@ while [[ $# -gt 0 ]]; do
       cat <<'EOF'
 Usage:
   ./run-neopsyke doctor
-  ./run-neopsyke [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--goals|--no-goals] [--clear-memory-*] [--clear-action-control] [--record-session] [--] [app-args...]
+  ./run-neopsyke [--log-level LEVEL] [--loop-delay-ms MS|--no-delay] [--no-id] [--assignments|--no-assignments] [--clear-memory-*] [--clear-action-control] [--record-session] [--] [app-args...]
 
 Options:
   -l, --log-level LEVEL   SLF4J simple logger level (default: warning)
       --loop-delay-ms MS  Delay between ego loop cycles in ms (default: 0, no delay)
       --no-delay          Alias for --loop-delay-ms 0 (already the default)
       --no-id             Disable the Id module (autonomous drives) for this run
-      --goals             Enable the goals subsystem for this run
-      --no-goals          Disable the goals subsystem for this run
+      --assignments             Enable the assignments subsystem for this run
+      --no-assignments          Disable the assignments subsystem for this run
   -h, --help              Show this help message
       doctor             Run environment diagnostics and exit
 
@@ -441,9 +441,9 @@ Memory clearing (applied before agent startup):
       --clear-memory-vector      Clear vector/hippocampus memory before starting
       --clear-memory-episodic    Clear episodic logbook memory before starting
       --clear-memory-lessons     Clear lessons from vector memory before starting
-      --clear-goals              Clear all persisted goals and workspace data before starting
+      --clear-assignments       Clear all persisted assignments and workspace data before starting
       --clear-action-control     Delete the active action-control SQLite store before starting
-      --clear-state              Clear ALL behavior-affecting state (memory + goals + action-control)
+      --clear-state              Clear ALL behavior-affecting state (memory + assignments + action-control)
 
 Session recording:
       --record-session           Record all signals to a session directory for later replay via Freud
@@ -471,11 +471,11 @@ Environment:
   MEMORY_DEFAULT_NAMESPACE  Namespace for long-term memory provider reads/writes (launcher default: neopsyke)
   NEOPSYKE_EVENT_LOG_FILE    Optional path override for instrumentation sidecar JSONL
   NEOPSYKE_METRICS_DB        SQLite path for persisted local metrics
-  NEOPSYKE_GOALS_WORKSPACE_ROOT  Optional goal workspace root override
+  NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT  Optional assignment workspace root override
   EGO_LOOP_DELAY_MS       Delay between loop cycles in ms (default: 0, no delay)
   NEOPSYKE_ID_CONFIG_FILE       Optional path to Id runtime YAML (otherwise use bundled config/id-runtime.yaml)
   NEOPSYKE_ID_ENABLED            Override Id module enabled state (true/false, overrides YAML)
-  NEOPSYKE_GOALS_ENABLED         Override goals subsystem enabled state (true/false, launcher default: true)
+  NEOPSYKE_ASSIGNMENTS_ENABLED         Override assignments subsystem enabled state (true/false, launcher default: true)
   NEOPSYKE_LLM_CACHE_MODE       LLM response cache mode: record, replay, or off (default: off)
   NEOPSYKE_LLM_CACHE_FILE       Path to LLM cache JSONL file (required when cache mode is record or replay)
   NEOPSYKE_SESSION_RECORDING_MODE  Session recording mode: record, replay, or off (default: off)
@@ -596,21 +596,21 @@ if [[ "$DISABLE_ID" -eq 1 ]]; then
   export NEOPSYKE_ID_ENABLED="false"
 fi
 
-if [[ -n "$GOALS_OVERRIDE" ]]; then
-  EFFECTIVE_GOALS_ENABLED="$GOALS_OVERRIDE"
-elif [[ -n "${NEOPSYKE_GOALS_ENABLED:-}" ]]; then
-  EFFECTIVE_GOALS_ENABLED="$NEOPSYKE_GOALS_ENABLED"
+if [[ -n "$ASSIGNMENTS_OVERRIDE" ]]; then
+  EFFECTIVE_ASSIGNMENTS_ENABLED="$ASSIGNMENTS_OVERRIDE"
+elif [[ -n "${NEOPSYKE_ASSIGNMENTS_ENABLED:-}" ]]; then
+  EFFECTIVE_ASSIGNMENTS_ENABLED="$NEOPSYKE_ASSIGNMENTS_ENABLED"
 else
-  EFFECTIVE_GOALS_ENABLED="true"
+  EFFECTIVE_ASSIGNMENTS_ENABLED="true"
 fi
-export NEOPSYKE_GOALS_ENABLED="$EFFECTIVE_GOALS_ENABLED"
+export NEOPSYKE_ASSIGNMENTS_ENABLED="$EFFECTIVE_ASSIGNMENTS_ENABLED"
 
-effective_goals_enabled_normalized="$(printf '%s' "$EFFECTIVE_GOALS_ENABLED" | tr '[:upper:]' '[:lower:]')"
-if [[ "$effective_goals_enabled_normalized" != "true" ]]; then
-  log_info "Warning: goals subsystem is disabled for this run. Use --goals or set NEOPSYKE_GOALS_ENABLED=true to enable persistent goal creation."
-elif [[ "$EVAL_MODE" -eq 1 ]] && [[ -z "${NEOPSYKE_GOALS_WORKSPACE_ROOT:-}" ]]; then
-  export NEOPSYKE_GOALS_WORKSPACE_ROOT="$ROOT_DIR/.neopsyke/eval-goals/$RUN_ID"
-  log_info "Eval mode detected; isolating goals workspace at $NEOPSYKE_GOALS_WORKSPACE_ROOT"
+effective_assignments_enabled_normalized="$(printf '%s' "$EFFECTIVE_ASSIGNMENTS_ENABLED" | tr '[:upper:]' '[:lower:]')"
+if [[ "$effective_assignments_enabled_normalized" != "true" ]]; then
+  log_info "Warning: assignments subsystem is disabled for this run. Use --assignments or set NEOPSYKE_ASSIGNMENTS_ENABLED=true to enable persistent assignment creation."
+elif [[ "$EVAL_MODE" -eq 1 ]] && [[ -z "${NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT:-}" ]]; then
+  export NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT="$ROOT_DIR/.neopsyke/eval-assignments/$RUN_ID"
+  log_info "Eval mode detected; isolating assignments workspace at $NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT"
 fi
 
 JAVA_OPTS_APPEND=" -Dorg.slf4j.simpleLogger.defaultLogLevel=${LOG_LEVEL} -Dorg.slf4j.simpleLogger.logFile=${RUN_LOG_FILE} -Dorg.slf4j.simpleLogger.showDateTime=true -Dorg.slf4j.simpleLogger.dateTimeFormat=yyyy-MM-dd_HH:mm:ss.SSSZ"

@@ -1,6 +1,7 @@
 package ai.neopsyke.agent.cortex.motor.actions
 
 import ai.neopsyke.agent.config.TelegramChannelConfig
+import ai.neopsyke.agent.model.ChannelSurface
 import ai.neopsyke.agent.model.ConversationContext
 
 /**
@@ -36,7 +37,10 @@ interface UserContactChannelStatusProvider {
 }
 
 interface UserContactChannelResolver {
-    fun resolve(conversationContext: ConversationContext): ChannelResolutionResult
+    fun resolve(
+        conversationContext: ConversationContext,
+        preferredChannel: String? = null,
+    ): ChannelResolutionResult
 }
 
 /**
@@ -86,20 +90,40 @@ class DefaultUserContactChannelResolver(
     private val defaultChannel: String,
 ) : UserContactChannelResolver {
 
-    override fun resolve(conversationContext: ConversationContext): ChannelResolutionResult {
-        val provider = conversationContext.security.channel.provider.trim().lowercase()
-        if (provider in KNOWN_DELIVERABLE_PROVIDERS) {
+    override fun resolve(
+        conversationContext: ConversationContext,
+        preferredChannel: String?,
+    ): ChannelResolutionResult {
+        val channel = conversationContext.security.channel
+        val surface = channel.surface
+        val provider = channel.provider.trim().lowercase()
+        val channelId = channel.channelId.trim()
+
+        // Only trust the inbound channelId when the conversation surface is an
+        // authenticated direct chat (e.g. a real Telegram webhook/polling update
+        // whose chat_id came from the transport itself). Any other surface —
+        // AUTOMATION, ADMIN, GROUP, SHARED_WORKSPACE — must resolve through the
+        // live status provider so untrusted callers cannot smuggle a channelId.
+        if (surface == ChannelSurface.DIRECT && channelId.isNotBlank() && provider in KNOWN_DELIVERABLE_PROVIDERS) {
             return ChannelResolutionResult(
                 target = DeliveryTarget(
                     provider = provider,
                     sessionId = conversationContext.sessionId,
-                    channelId = conversationContext.security.channel.channelId,
+                    channelId = channelId,
                 ),
                 scope = "conversation",
             )
         }
 
         val available = channelStatusProvider.availableChannels()
+
+        val hintedChannel = preferredChannel?.trim()?.lowercase()?.ifBlank { null }
+        if (hintedChannel != null) {
+            val hinted = available[hintedChannel]
+            if (hinted != null) {
+                return ChannelResolutionResult(target = hinted, scope = "resolved_hint")
+            }
+        }
 
         channelPriority.forEach { candidateName ->
             val target = available[candidateName.trim().lowercase()]

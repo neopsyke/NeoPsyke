@@ -54,7 +54,7 @@ func resetCLIState() {
 	runSkipSteps = nil
 	runContinueOnFail = false
 	runTimeout = 0
-	runGoals = nil
+	runAssignments = nil
 
 	testFreudReplayInput = ""
 	testFreudReplayTimeout = 0

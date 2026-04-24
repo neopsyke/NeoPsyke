@@ -10,14 +10,14 @@ import ai.neopsyke.agent.ego.Ego
 import ai.neopsyke.agent.ego.EgoAssembler
 import ai.neopsyke.agent.ego.planner.HierarchicalEgoPlanner
 import ai.neopsyke.agent.ego.planner.LaneId
-import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
+import ai.neopsyke.agent.ego.planner.input.DirectResponder
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
-import ai.neopsyke.agent.ego.planner.input.WorkPlanBuilder
+import ai.neopsyke.agent.ego.planner.input.AssignmentCommandBuilder
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
 import ai.neopsyke.agent.ego.planner.input.TaskDecompositionPlanner
 import ai.neopsyke.agent.ego.planner.lane.ProgressionPlanner
-import ai.neopsyke.agent.ego.planner.lane.DurableWorkLanePlanner
+import ai.neopsyke.agent.ego.planner.lane.AssignmentLanePlanner
 import ai.neopsyke.agent.ego.planner.lane.ImpulsePlanner
 import ai.neopsyke.agent.ego.planner.lane.InputPlanner
 import ai.neopsyke.agent.ego.planner.runtime.PlannerRuntime
@@ -132,6 +132,7 @@ import ai.neopsyke.llm.OllamaChatClient
 import ai.neopsyke.llm.OllamaProviderStatusChecker
 import ai.neopsyke.llm.ProviderHealthState
 import ai.neopsyke.llm.ProviderStatus
+import ai.neopsyke.llm.ReasoningEffortChatClient
 import ai.neopsyke.llm.TokenBudgetGuardedChatClient
 import ai.neopsyke.llm.LlmCacheMode
 import ai.neopsyke.llm.LlmCacheManager
@@ -172,6 +173,22 @@ private const val PROVIDER_HEALTH_CHECK_MAX_ATTEMPTS: Int = 2
 private const val PROVIDER_HEALTH_CHECK_RETRY_DELAY_MS: Long = 250L
 private const val FREUD_LIVE_SESSION_ID: String = "freud-live"
 private const val FREUD_LIVE_INTERLOCUTOR_ID: String = "freud-live-user"
+
+private fun normalizedReasoningEffort(endpoint: LlmEndpointConfig): String? =
+    endpoint.reasoningEffort?.trim()?.lowercase()?.ifBlank { null }
+
+private fun maybeReasoningEffortWrap(client: ChatModelClient, endpoint: LlmEndpointConfig): ChatModelClient =
+    normalizedReasoningEffort(endpoint)?.let { effort -> ReasoningEffortChatClient(client, effort) } ?: client
+
+private fun endpointClientKey(endpoint: LlmEndpointConfig): String =
+    listOf(
+        endpoint.providerLabel.lowercase(),
+        endpoint.model.trim(),
+        normalizedReasoningEffort(endpoint).orEmpty(),
+    ).joinToString("::")
+
+private fun sameProviderAndModel(endpoint: LlmEndpointConfig, provider: String, model: String): Boolean =
+    endpoint.providerLabel.equals(provider, ignoreCase = true) && endpoint.model.trim() == model
 
 internal object AppModeRunners {
     private data class InteractiveLlmStartupConfig(
@@ -263,9 +280,12 @@ internal object AppModeRunners {
                         if (!checkProviderHealth(endpoint = llm.planner, modeLabel = "eval_reasoning_model", roleLabel = "planner")) {
                             return
                         }
-                        createChatClient(
-                            endpoint = llm.planner,
-                            callObserver = callObserver
+                        maybeReasoningEffortWrap(
+                            createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserver
+                            ),
+                            llm.planner,
                         )
                     }
                 }
@@ -398,9 +418,12 @@ internal object AppModeRunners {
                 // Memory advisor client — uses the memory_advisor cognitive role.
                 UsageTrackingChatClient(
                     delegate = InstrumentedChatModelClient(
-                        delegate = createChatClient(
-                            endpoint = llm.memoryAdvisor,
-                            callObserver = callObserverFor(llm.memoryAdvisor)
+                        delegate = maybeReasoningEffortWrap(
+                            createChatClient(
+                                endpoint = llm.memoryAdvisor,
+                                callObserver = callObserverFor(llm.memoryAdvisor)
+                            ),
+                            llm.memoryAdvisor,
                         ),
                         hooks = listOf(rawResponseHook)
                     )
@@ -408,9 +431,12 @@ internal object AppModeRunners {
                 // Judge client — uses the planner cognitive role for recall evaluation.
                 UsageTrackingChatClient(
                     delegate = InstrumentedChatModelClient(
-                        delegate = createChatClient(
-                            endpoint = llm.planner,
-                            callObserver = callObserverFor(llm.planner)
+                        delegate = maybeReasoningEffortWrap(
+                            createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserverFor(llm.planner)
+                            ),
+                            llm.planner,
                         ),
                         hooks = listOf(rawResponseHook)
                     )
@@ -429,9 +455,6 @@ internal object AppModeRunners {
                             longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                 modelClient = advisorClient,
                                 config = config,
-                                modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                 instrumentation = instrumentation
                             ),
                             hippocampus = activeHippocampus,
@@ -716,6 +739,9 @@ internal object AppModeRunners {
             channelPriority = config.approvals.channelPriority,
             defaultChannel = config.approvals.defaultChannel,
         )
+        val contactChannelPolicy = ai.neopsyke.agent.cortex.motor.actions.ContactChannelPolicy(
+            statusProvider = contactChannelStatusProvider,
+        )
         val conversationOutput = RoutedConversationOutputGateway(
             fallbackOutput = {},
             telegramSink = telegramSink,
@@ -945,13 +971,6 @@ internal object AppModeRunners {
                                 "pressure_assess_threshold" to config.metaReasoner.deliberationPressureAssessmentThreshold,
                                 "meta_reasoner_cooldown_steps" to config.metaReasoner.cooldownSteps,
                                 "meta_reasoner_max_tokens" to config.metaReasoner.maxTokens,
-                                "meta_reasoner_dynamic_completion_enabled" to config.metaReasoner.dynamicCompletionEnabled,
-                                "meta_reasoner_dynamic_completion_hard_max_tokens" to
-                                    config.metaReasoner.dynamicCompletionHardMaxTokens,
-                                "meta_reasoner_dynamic_prompt_to_completion_ratio" to
-                                    config.metaReasoner.dynamicPromptToCompletionRatio,
-                                "meta_reasoner_dynamic_completion_min_prompt_tokens" to
-                                    config.metaReasoner.dynamicCompletionMinPromptTokens,
                                 "long_term_memory_assess_every_steps" to config.memory.longTermMemoryAssessEverySteps,
                                 "long_term_memory_assess_cooldown_steps" to config.memory.longTermMemoryAssessCooldownSteps,
                                 "long_term_memory_min_confidence" to config.memory.longTermMemoryMinConfidence,
@@ -965,25 +984,12 @@ internal object AppModeRunners {
                                 "long_term_memory_recall_echo_min_token_count" to config.memory.longTermMemoryRecallEchoMinTokenCount,
                                 "long_term_memory_recall_echo_token_overlap_threshold" to
                                     config.memory.longTermMemoryRecallEchoTokenOverlapThreshold,
-                                "superego_dynamic_completion_enabled" to config.superego.dynamicCompletionEnabled,
-                                "superego_dynamic_completion_hard_max_tokens" to config.superego.dynamicCompletionHardMaxTokens,
-                                "superego_dynamic_prompt_to_completion_ratio" to config.superego.dynamicPromptToCompletionRatio,
-                                "superego_dynamic_completion_min_prompt_tokens" to config.superego.dynamicCompletionMinPromptTokens,
                                 "superego_two_stage_review_enabled" to config.superego.twoStageReviewEnabled,
                                 "superego_two_stage_low_confidence_threshold" to
                                     config.superego.twoStageLowConfidenceThreshold,
                                 "superego_two_stage_escalate_on_medium_policy_risk" to
                                     config.superego.twoStageEscalateOnMediumPolicyRisk,
-                                "long_term_memory_dynamic_completion_enabled" to config.memory.longTermMemoryDynamicCompletionEnabled,
-                                "long_term_memory_dynamic_completion_hard_max_tokens" to
-                                    config.memory.longTermMemoryDynamicCompletionHardMaxTokens,
-                                "long_term_memory_dynamic_prompt_to_completion_ratio" to
-                                    config.memory.longTermMemoryDynamicPromptToCompletionRatio,
-                                "long_term_memory_dynamic_completion_min_prompt_tokens" to
-                                    config.memory.longTermMemoryDynamicCompletionMinPromptTokens,
-                                "superego_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.superego),
-                                "meta_reasoner_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
-                                "memory_advisor_model_token_weight" to llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor)
+                                "superego_max_completion_tokens" to config.superego.maxCompletionTokens
                             )
                         )
                     )
@@ -1055,10 +1061,13 @@ internal object AppModeRunners {
 
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = maybeCacheWrap(createChatClient(
-                                endpoint = llm.planner,
-                                callObserver = callObserverForProvider(llm.planner.providerLabel)
-                            )),
+                            delegate = maybeReasoningEffortWrap(
+                                maybeCacheWrap(createChatClient(
+                                    endpoint = llm.planner,
+                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
+                                )),
+                                llm.planner,
+                            ),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
@@ -1072,10 +1081,13 @@ internal object AppModeRunners {
                             )
                             InstrumentedChatModelClient(
                                 delegate = TokenBudgetGuardedChatClient(
-                                    delegate = maybeCacheWrap(createChatClient(
-                                        endpoint = superegoReviewRouting.primaryEndpoint,
-                                        callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
-                                    )),
+                                    delegate = maybeReasoningEffortWrap(
+                                        maybeCacheWrap(createChatClient(
+                                            endpoint = superegoReviewRouting.primaryEndpoint,
+                                            callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
+                                        )),
+                                        superegoReviewRouting.primaryEndpoint,
+                                    ),
                                     budgetGate = tokenBudgetGate,
                                     provider = superegoReviewRouting.primaryEndpoint.providerLabel,
                                     role = LlmRoleLabels.SUPEREGO
@@ -1085,10 +1097,13 @@ internal object AppModeRunners {
                                 val superegoEscalationClient = superegoReviewRouting.escalationEndpoint?.let { escalationEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = escalationEndpoint,
-                                                callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = escalationEndpoint,
+                                                    callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
+                                                )),
+                                                escalationEndpoint,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = escalationEndpoint.providerLabel,
                                             role = LlmRoleLabels.SUPEREGO
@@ -1099,10 +1114,13 @@ internal object AppModeRunners {
                                 val metaReasonerFallbackClient = metaReasonerFallbackEndpoint?.let { fallbackEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = fallbackEndpoint,
-                                                callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = fallbackEndpoint,
+                                                    callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
+                                                )),
+                                                fallbackEndpoint,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = fallbackEndpoint.providerLabel,
                                             role = LlmRoleLabels.META_REASONER
@@ -1112,10 +1130,13 @@ internal object AppModeRunners {
                                 }
                                 InstrumentedChatModelClient(
                                     delegate = TokenBudgetGuardedChatClient(
-                                        delegate = maybeCacheWrap(createChatClient(
-                                            endpoint = llm.metaReasoner,
-                                            callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
-                                        )),
+                                        delegate = maybeReasoningEffortWrap(
+                                            maybeCacheWrap(createChatClient(
+                                                endpoint = llm.metaReasoner,
+                                                callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
+                                            )),
+                                            llm.metaReasoner,
+                                        ),
                                         budgetGate = tokenBudgetGate,
                                         provider = llm.metaReasoner.providerLabel,
                                         role = LlmRoleLabels.META_REASONER
@@ -1124,10 +1145,13 @@ internal object AppModeRunners {
                                 ).use { metaReasonerClient ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = llm.memoryAdvisor,
-                                                callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = llm.memoryAdvisor,
+                                                    callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
+                                                )),
+                                                llm.memoryAdvisor,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = llm.memoryAdvisor.providerLabel,
                                             role = LlmRoleLabels.MEMORY_ADVISOR
@@ -1136,10 +1160,13 @@ internal object AppModeRunners {
                                     ).use { longTermMemoryClient ->
                                         val approvalInterpreterClient = InstrumentedChatModelClient(
                                             delegate = TokenBudgetGuardedChatClient(
-                                                delegate = maybeCacheWrap(createChatClient(
-                                                    endpoint = llm.approvalInterpreter,
-                                                    callObserver = callObserverForProvider(llm.approvalInterpreter.providerLabel)
-                                                )),
+                                                delegate = maybeReasoningEffortWrap(
+                                                    maybeCacheWrap(createChatClient(
+                                                        endpoint = llm.approvalInterpreter,
+                                                        callObserver = callObserverForProvider(llm.approvalInterpreter.providerLabel)
+                                                    )),
+                                                    llm.approvalInterpreter,
+                                                ),
                                                 budgetGate = tokenBudgetGate,
                                                 provider = llm.approvalInterpreter.providerLabel,
                                                 role = LlmRoleLabels.APPROVAL_INTERPRETER
@@ -1186,9 +1213,6 @@ internal object AppModeRunners {
                                                     val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                         modelClient = longTermMemoryClient,
                                                         config = config,
-                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                                        modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                                         instrumentation = instrumentation
                                                     )
                                                     val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
@@ -1198,22 +1222,22 @@ internal object AppModeRunners {
                                                         runtime.engine
                                                     }
                                                     val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine)
-                                                    if (cliOptions?.clearDurableWork == true) {
-                                                        executeDurableWorkClear(config, instrumentation)
+                                                    if (cliOptions?.clearAssignment == true) {
+                                                        executeAssignmentClear(config, instrumentation)
                                                     }
-                                                    val durableWorkRuntime = if (config.durableWork.enabled) {
-                                                        ai.neopsyke.agent.durablework.DurableWorkRuntime(
-                                                            config = config.durableWork,
-                                                            store = ai.neopsyke.agent.durablework.WorkItemStore(config.durableWork.workspaceRoot),
-                                                            planner = ai.neopsyke.agent.durablework.DeterministicWorkPlanBuilder(),
-                                                            verifier = ai.neopsyke.agent.durablework.LlmWorkStepVerifier(plannerClient, config),
+                                                    val assignmentRuntime = if (config.assignment.enabled) {
+                                                        ai.neopsyke.agent.assignments.AssignmentRuntime(
+                                                            config = config.assignment,
+                                                            store = ai.neopsyke.agent.assignments.WorkItemStore(config.assignment.workspaceRoot),
+                                                            planner = ai.neopsyke.agent.assignments.DeterministicAssignmentPlanBuilder(),
+                                                            verifier = ai.neopsyke.agent.assignments.LlmWorkStepVerifier(plannerClient, config),
                                                             instrumentation = instrumentation,
-                                                            cueEmitter = sensoryCortex::offerDurableWorkCue,
+                                                            cueEmitter = sensoryCortex::offerAssignmentCue,
                                                         ).also { it.start(agentScope) }
                                                     } else {
                                                         null
                                                     }
-                                                    dashboardServer?.durableWorkRuntime = durableWorkRuntime
+                                                    dashboardServer?.assignmentRuntime = assignmentRuntime
                                                     var plannerNoopCount = 0
                                                     var plannerOutputRepairedCount = 0
                                                     val plannerLaneClientResolver = buildPlannerLaneModelClientResolver(
@@ -1222,11 +1246,14 @@ internal object AppModeRunners {
                                                         createPlannerClient = { endpoint ->
                                                             InstrumentedChatModelClient(
                                                                 delegate = TokenBudgetGuardedChatClient(
-                                                                    delegate = maybeCacheWrap(
-                                                                        createChatClient(
-                                                                            endpoint = endpoint,
-                                                                            callObserver = callObserverForProvider(endpoint.providerLabel)
-                                                                        )
+                                                                    delegate = maybeReasoningEffortWrap(
+                                                                        maybeCacheWrap(
+                                                                            createChatClient(
+                                                                                endpoint = endpoint,
+                                                                                callObserver = callObserverForProvider(endpoint.providerLabel)
+                                                                            )
+                                                                        ),
+                                                                        endpoint,
                                                                     ),
                                                                     budgetGate = tokenBudgetGate,
                                                                     provider = endpoint.providerLabel,
@@ -1266,6 +1293,7 @@ internal object AppModeRunners {
                                                                         )
                                                                     }
                                                                 },
+                                                                onTruncationRetry = { metrics.recordTruncationRetry() },
                                                                 laneModelClientResolver = plannerLaneClientResolver,
                                                             ).let { EgoAssembler.PlannerBuildResult(planner = it.planner, planRefiner = it.planRefiner) }
                                                         },
@@ -1274,14 +1302,7 @@ internal object AppModeRunners {
                                                                 modelClient = superegoClient,
                                                                 config = config,
                                                                 actionRegistry = registry,
-                                                                modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
-                                                                modelContextWindow = superegoReviewRouting.primaryContextWindow,
-                                                                modelReasoningOverhead = superegoReviewRouting.primaryReasoningOverhead,
                                                                 escalationModelClient = superegoEscalationClient,
-                                                                escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
-                                                                    ?: superegoReviewRouting.primaryTokenWeight,
-                                                                escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
-                                                                escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
                                                                 authorizationPolicy = actionAuthorizationPolicy,
                                                                 instrumentation = instrumentation
                                                             )
@@ -1292,8 +1313,6 @@ internal object AppModeRunners {
                                                         metaReasoner = LlmMetaReasoner(
                                                             modelClient = metaReasonerClient,
                                                             config = config,
-                                                            modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
-                                                            modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
                                                             fallbackModelClient = metaReasonerFallbackClient,
                                                             instrumentation = instrumentation
                                                         ),
@@ -1314,8 +1333,8 @@ internal object AppModeRunners {
                                                         logbookSummarizer = logbookSummarizer,
                                                         webSearchActionHandler = webSearchActionHandler,
                                                         fetchTool = activeFetchTool,
-                                                        durableWorkGateway = durableWorkRuntime
-                                                            ?: ai.neopsyke.agent.durablework.NoopDurableWorkGateway,
+                                                        assignmentGateway = assignmentRuntime
+                                                            ?: ai.neopsyke.agent.assignments.NoopAssignmentGateway,
                                                         actionControlServiceFactory = { motorCortex ->
                                                             val rawService = actionControlStore?.let { store ->
                                                                 DefaultActionControlService(
@@ -1345,6 +1364,7 @@ internal object AppModeRunners {
                                                         },
                                                         output = {},
                                                         conversationOutput = conversationOutput,
+                                                        contactChannelPolicy = contactChannelPolicy,
                                                     )
                                                     assembly.actionRegistry.loadWarnings.forEach { warning ->
                                                         instrumentation.emit(AgentEvents.warning(warning))
@@ -1465,7 +1485,7 @@ internal object AppModeRunners {
                                                             shutdownGuard.close()
                                                         }
                                                         } } finally {
-                                                            durableWorkRuntime?.stop()
+                                                            assignmentRuntime?.stop()
                                                             approvalRuntime?.close()
                                                             egoDispatcher.close()
                                                         }
@@ -1643,10 +1663,13 @@ internal object AppModeRunners {
 
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = maybeCacheWrap(createChatClient(
-                                endpoint = llm.planner,
-                                callObserver = callObserverForProvider(llm.planner.providerLabel)
-                            )),
+                            delegate = maybeReasoningEffortWrap(
+                                maybeCacheWrap(createChatClient(
+                                    endpoint = llm.planner,
+                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
+                                )),
+                                llm.planner,
+                            ),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
@@ -1660,10 +1683,13 @@ internal object AppModeRunners {
                             )
                             InstrumentedChatModelClient(
                                 delegate = TokenBudgetGuardedChatClient(
-                                    delegate = maybeCacheWrap(createChatClient(
-                                        endpoint = superegoReviewRouting.primaryEndpoint,
-                                        callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
-                                    )),
+                                    delegate = maybeReasoningEffortWrap(
+                                        maybeCacheWrap(createChatClient(
+                                            endpoint = superegoReviewRouting.primaryEndpoint,
+                                            callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
+                                        )),
+                                        superegoReviewRouting.primaryEndpoint,
+                                    ),
                                     budgetGate = tokenBudgetGate,
                                     provider = superegoReviewRouting.primaryEndpoint.providerLabel,
                                     role = LlmRoleLabels.SUPEREGO
@@ -1673,10 +1699,13 @@ internal object AppModeRunners {
                                 val superegoEscalationClient = superegoReviewRouting.escalationEndpoint?.let { escalationEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = escalationEndpoint,
-                                                callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = escalationEndpoint,
+                                                    callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
+                                                )),
+                                                escalationEndpoint,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = escalationEndpoint.providerLabel,
                                             role = LlmRoleLabels.SUPEREGO
@@ -1687,10 +1716,13 @@ internal object AppModeRunners {
                                 val metaReasonerFallbackClient = metaReasonerFallbackEndpoint?.let { fallbackEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = fallbackEndpoint,
-                                                callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = fallbackEndpoint,
+                                                    callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
+                                                )),
+                                                fallbackEndpoint,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = fallbackEndpoint.providerLabel,
                                             role = LlmRoleLabels.META_REASONER
@@ -1700,10 +1732,13 @@ internal object AppModeRunners {
                                 }
                                 InstrumentedChatModelClient(
                                     delegate = TokenBudgetGuardedChatClient(
-                                        delegate = maybeCacheWrap(createChatClient(
-                                            endpoint = llm.metaReasoner,
-                                            callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
-                                        )),
+                                        delegate = maybeReasoningEffortWrap(
+                                            maybeCacheWrap(createChatClient(
+                                                endpoint = llm.metaReasoner,
+                                                callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
+                                            )),
+                                            llm.metaReasoner,
+                                        ),
                                         budgetGate = tokenBudgetGate,
                                         provider = llm.metaReasoner.providerLabel,
                                         role = LlmRoleLabels.META_REASONER
@@ -1712,10 +1747,13 @@ internal object AppModeRunners {
                                 ).use { metaReasonerClient ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = llm.memoryAdvisor,
-                                                callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = llm.memoryAdvisor,
+                                                    callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
+                                                )),
+                                                llm.memoryAdvisor,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = llm.memoryAdvisor.providerLabel,
                                             role = LlmRoleLabels.MEMORY_ADVISOR
@@ -1761,9 +1799,6 @@ internal object AppModeRunners {
                                                 val longTermMemoryAdvisor = LlmLongTermMemoryAdvisor(
                                                     modelClient = longTermMemoryClient,
                                                     config = config,
-                                                    modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.memoryAdvisor),
-                                                    modelContextWindow = llm.modelCatalog.contextWindowFor(llm.memoryAdvisor),
-                                                    modelReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(llm.memoryAdvisor),
                                                     instrumentation = instrumentation
                                                 )
                                                 val logbookSummarizer = createLogbookSummarizer(config, longTermMemoryClient)
@@ -1773,17 +1808,17 @@ internal object AppModeRunners {
                                                     runtime.engine
                                                 }
                                                 val webSearchActionHandler = WebSearchActionHandler(activeWebSearchEngine2)
-                                                if (cliOptions.clearDurableWork) {
-                                                    executeDurableWorkClear(config, instrumentation)
+                                                if (cliOptions.clearAssignment) {
+                                                    executeAssignmentClear(config, instrumentation)
                                                 }
-                                                val durableWorkRuntime = if (config.durableWork.enabled) {
-                                                    ai.neopsyke.agent.durablework.DurableWorkRuntime(
-                                                        config = config.durableWork,
-                                                        store = ai.neopsyke.agent.durablework.WorkItemStore(config.durableWork.workspaceRoot),
-                                                        planner = ai.neopsyke.agent.durablework.DeterministicWorkPlanBuilder(),
-                                                        verifier = ai.neopsyke.agent.durablework.LlmWorkStepVerifier(plannerClient, config),
+                                                val assignmentRuntime = if (config.assignment.enabled) {
+                                                    ai.neopsyke.agent.assignments.AssignmentRuntime(
+                                                        config = config.assignment,
+                                                        store = ai.neopsyke.agent.assignments.WorkItemStore(config.assignment.workspaceRoot),
+                                                        planner = ai.neopsyke.agent.assignments.DeterministicAssignmentPlanBuilder(),
+                                                        verifier = ai.neopsyke.agent.assignments.LlmWorkStepVerifier(plannerClient, config),
                                                         instrumentation = instrumentation,
-                                                        cueEmitter = sensoryCortex::offerDurableWorkCue,
+                                                        cueEmitter = sensoryCortex::offerAssignmentCue,
                                                     ).also { it.start(agentScope) }
                                                 } else {
                                                     null
@@ -1794,11 +1829,14 @@ internal object AppModeRunners {
                                                     createPlannerClient = { endpoint ->
                                                         InstrumentedChatModelClient(
                                                             delegate = TokenBudgetGuardedChatClient(
-                                                                delegate = maybeCacheWrap(
-                                                                    createChatClient(
-                                                                        endpoint = endpoint,
-                                                                        callObserver = callObserverForProvider(endpoint.providerLabel)
-                                                                    )
+                                                                delegate = maybeReasoningEffortWrap(
+                                                                    maybeCacheWrap(
+                                                                        createChatClient(
+                                                                            endpoint = endpoint,
+                                                                            callObserver = callObserverForProvider(endpoint.providerLabel)
+                                                                        )
+                                                                    ),
+                                                                    endpoint,
                                                                 ),
                                                                 budgetGate = tokenBudgetGate,
                                                                 provider = endpoint.providerLabel,
@@ -1818,6 +1856,7 @@ internal object AppModeRunners {
                                                             actionPayloadRepair = motorCortex::repairPlannerPayload,
                                                             onPlannerNoop = { metrics.recordPlannerNoop() },
                                                             onPlannerOutputRepaired = { metrics.recordPlannerOutputRepaired() },
+                                                            onTruncationRetry = { metrics.recordTruncationRetry() },
                                                             laneModelClientResolver = plannerLaneClientResolver,
                                                         ).let { EgoAssembler.PlannerBuildResult(planner = it.planner, planRefiner = it.planRefiner) }
                                                     },
@@ -1826,14 +1865,7 @@ internal object AppModeRunners {
                                                             modelClient = superegoClient,
                                                             config = config,
                                                             actionRegistry = registry,
-                                                            modelTokenWeight = superegoReviewRouting.primaryTokenWeight,
-                                                            modelContextWindow = superegoReviewRouting.primaryContextWindow,
-                                                            modelReasoningOverhead = superegoReviewRouting.primaryReasoningOverhead,
                                                             escalationModelClient = superegoEscalationClient,
-                                                            escalationModelTokenWeight = superegoReviewRouting.escalationTokenWeight
-                                                                ?: superegoReviewRouting.primaryTokenWeight,
-                                                            escalationModelContextWindow = superegoReviewRouting.escalationContextWindow,
-                                                            escalationModelReasoningOverhead = superegoReviewRouting.escalationReasoningOverhead,
                                                             authorizationPolicy = actionAuthorizationPolicy,
                                                             instrumentation = instrumentation
                                                         )
@@ -1844,8 +1876,6 @@ internal object AppModeRunners {
                                                     metaReasoner = LlmMetaReasoner(
                                                         modelClient = metaReasonerClient,
                                                         config = config,
-                                                        modelTokenWeight = llm.modelCatalog.tokenWeightFor(llm.metaReasoner),
-                                                        modelContextWindow = llm.modelCatalog.contextWindowFor(llm.metaReasoner),
                                                         fallbackModelClient = metaReasonerFallbackClient,
                                                         instrumentation = instrumentation
                                                     ),
@@ -1866,8 +1896,8 @@ internal object AppModeRunners {
                                                     logbookSummarizer = logbookSummarizer,
                                                     webSearchActionHandler = webSearchActionHandler,
                                                     fetchTool = activeFetchTool,
-                                                    durableWorkGateway = durableWorkRuntime
-                                                        ?: ai.neopsyke.agent.durablework.NoopDurableWorkGateway,
+                                                    assignmentGateway = assignmentRuntime
+                                                        ?: ai.neopsyke.agent.assignments.NoopAssignmentGateway,
                                                     actionControlServiceFactory = { motorCortex ->
                                                         val rawService = actionControlStore?.let { store ->
                                                             DefaultActionControlService(
@@ -1998,7 +2028,7 @@ internal object AppModeRunners {
                                                     exitProcess(exitCode)
 
                                                     } } finally {
-                                                        durableWorkRuntime?.stop()
+                                                        assignmentRuntime?.stop()
                                                         egoDispatcher.close()
                                                     }
                                                 }
@@ -2173,13 +2203,7 @@ internal object AppModeRunners {
 
     private data class SuperegoReviewRouting(
         val primaryEndpoint: LlmEndpointConfig,
-        val primaryTokenWeight: Double,
-        val primaryContextWindow: Int? = null,
-        val primaryReasoningOverhead: Double = 1.0,
         val escalationEndpoint: LlmEndpointConfig? = null,
-        val escalationTokenWeight: Double? = null,
-        val escalationContextWindow: Int? = null,
-        val escalationReasoningOverhead: Double = 1.0,
     )
 
     private fun resolveSuperegoReviewRouting(
@@ -2200,9 +2224,6 @@ internal object AppModeRunners {
                 )
                 return SuperegoReviewRouting(
                     primaryEndpoint = explicitPrimary,
-                    primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                    primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
-                    primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary)
                 )
             }
             instrumentation.emit(
@@ -2222,13 +2243,7 @@ internal object AppModeRunners {
             )
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitPrimary,
-                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
-                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary),
                 escalationEndpoint = explicitEscalation,
-                escalationTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
-                escalationContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation),
-                escalationReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitEscalation)
             )
         }
 
@@ -2236,9 +2251,6 @@ internal object AppModeRunners {
         if (explicitPrimary != null) {
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitPrimary,
-                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitPrimary),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitPrimary),
-                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitPrimary)
             )
         }
 
@@ -2251,9 +2263,6 @@ internal object AppModeRunners {
             )
             return SuperegoReviewRouting(
                 primaryEndpoint = explicitEscalation,
-                primaryTokenWeight = llm.modelCatalog.tokenWeightFor(explicitEscalation),
-                primaryContextWindow = llm.modelCatalog.contextWindowFor(explicitEscalation),
-                primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(explicitEscalation)
             )
         }
 
@@ -2280,9 +2289,6 @@ internal object AppModeRunners {
         )
         return SuperegoReviewRouting(
             primaryEndpoint = legacyEndpoint,
-            primaryTokenWeight = llm.modelCatalog.tokenWeightFor(legacyEndpoint),
-            primaryContextWindow = llm.modelCatalog.contextWindowFor(legacyEndpoint),
-            primaryReasoningOverhead = llm.modelCatalog.reasoningOverheadFor(legacyEndpoint)
         )
     }
     
@@ -2686,35 +2692,35 @@ internal object AppModeRunners {
         }
     }
 
-    private fun executeDurableWorkClear(
+    private fun executeAssignmentClear(
         config: AgentConfig,
         instrumentation: ai.neopsyke.instrumentation.AgentInstrumentation,
     ) {
-        val goalsRoot = config.durableWork.workspaceRoot
-        if (!java.nio.file.Files.isDirectory(goalsRoot)) {
-            output.info("Goals workspace does not exist; nothing to clear.")
+        val assignmentsRoot = config.assignment.workspaceRoot
+        if (!java.nio.file.Files.isDirectory(assignmentsRoot)) {
+            output.info("Assignments workspace does not exist; nothing to clear.")
             return
         }
         try {
             var deleted = 0
-            java.nio.file.Files.list(goalsRoot).use { stream ->
-                stream.filter { java.nio.file.Files.isDirectory(it) }.forEach { goalDir ->
-                    java.nio.file.Files.walk(goalDir)
+            java.nio.file.Files.list(assignmentsRoot).use { stream ->
+                stream.filter { java.nio.file.Files.isDirectory(it) }.forEach { assignmentDir ->
+                    java.nio.file.Files.walk(assignmentDir)
                         .sorted(Comparator.reverseOrder())
                         .forEach { java.nio.file.Files.deleteIfExists(it) }
                     deleted++
                 }
             }
-            output.info("Goals cleared ($deleted goal(s) removed).")
-            logger.info { "CLI --clear-goals: $deleted goal workspace(s) removed from $goalsRoot." }
+            output.info("Assignments cleared ($deleted assignment(s) removed).")
+            logger.info { "CLI --clear-assignments: $deleted assignment workspace(s) removed from $assignmentsRoot." }
             instrumentation.emit(
                 ai.neopsyke.instrumentation.AgentEvents.warning(
-                    "Goals cleared via CLI: $deleted goal(s) removed."
+                    "Assignments cleared via CLI: $deleted assignment(s) removed."
                 )
             )
         } catch (ex: Exception) {
-            output.error("Failed to clear goals: ${ex.message}")
-            logger.warn(ex) { "CLI --clear-goals: failed to clear goals workspace at $goalsRoot." }
+            output.error("Failed to clear assignments: ${ex.message}")
+            logger.warn(ex) { "CLI --clear-assignments: failed to clear assignments workspace at $assignmentsRoot." }
         }
     }
 
@@ -2890,7 +2896,7 @@ private fun plannerLaneEndpointTemplates(llm: LlmRuntimeConfig): Map<String, Llm
     return templates
 }
 
-private fun buildPlannerLaneModelClientResolver(
+internal fun buildPlannerLaneModelClientResolver(
     llm: LlmRuntimeConfig,
     plannerClient: ChatModelClient,
     createPlannerClient: (LlmEndpointConfig) -> ChatModelClient,
@@ -2900,21 +2906,27 @@ private fun buildPlannerLaneModelClientResolver(
     val plannerModel = llm.planner.model.trim()
     val clientsByKey = mutableMapOf<String, ChatModelClient>()
     val warnedUnknownProviders = mutableSetOf<String>()
+    val plannerReasoningEffort = normalizedReasoningEffort(llm.planner)
+
+    fun clientForEndpoint(endpoint: LlmEndpointConfig): ChatModelClient =
+        clientsByKey.getOrPut(endpointClientKey(endpoint)) {
+            if (sameProviderAndModel(endpoint, plannerProvider, plannerModel)) {
+                val effort = normalizedReasoningEffort(endpoint)
+                if (effort == plannerReasoningEffort) {
+                    plannerClient
+                } else {
+                    effort?.let { ReasoningEffortChatClient(plannerClient, it) } ?: plannerClient
+                }
+            } else {
+                createPlannerClient(endpoint)
+            }
+        }
 
     return { laneId, resolved ->
         // Priority 1: per-lane endpoint from llm-runtime.yaml cognitive_roles.planner.lanes
         val laneEndpoint = llm.cognitiveRoles.plannerLanes[laneId.configKey]
         if (laneEndpoint != null) {
-            val provider = laneEndpoint.providerLabel.lowercase()
-            val model = laneEndpoint.model.trim()
-            if (provider == plannerProvider && model == plannerModel) {
-                plannerClient
-            } else {
-                val cacheKey = "$provider::$model"
-                clientsByKey.getOrPut(cacheKey) {
-                    createPlannerClient(laneEndpoint)
-                }
-            }
+            clientForEndpoint(laneEndpoint)
         } else {
             // Priority 2: per-lane provider/model from agent-runtime.yaml planner.lanes
             val requestedProvider = resolved.provider?.trim()?.lowercase()?.ifBlank { null }
@@ -2933,14 +2945,7 @@ private fun buildPlannerLaneModelClientResolver(
                     null
                 } else {
                     val model = requestedModel ?: template.model
-                    if (provider == plannerProvider && model == plannerModel) {
-                        plannerClient
-                    } else {
-                        val cacheKey = "$provider::$model"
-                        clientsByKey.getOrPut(cacheKey) {
-                            createPlannerClient(template.copy(model = model))
-                        }
-                    }
+                    clientForEndpoint(template.copy(model = model))
                 }
             }
         }
@@ -2962,6 +2967,7 @@ private fun buildHierarchicalPlanner(
     actionPayloadRepair: (ai.neopsyke.agent.model.ActionType, String) -> String,
     onPlannerNoop: () -> Unit = {},
     onPlannerOutputRepaired: () -> Unit = {},
+    onTruncationRetry: () -> Unit = {},
     laneModelClientResolver: ((LaneId, ai.neopsyke.agent.ego.planner.ResolvedLaneConfig) -> ai.neopsyke.llm.ChatModelClient?)? = null,
 ): PlannerAssembly {
     val runtime = PlannerRuntime(
@@ -2970,6 +2976,7 @@ private fun buildHierarchicalPlanner(
         instrumentation = instrumentation,
         onPlannerNoop = onPlannerNoop,
         onPlannerOutputRepaired = onPlannerOutputRepaired,
+        onTruncationRetry = onTruncationRetry,
         actionPayloadRepair = actionPayloadRepair,
         laneModelClientResolver = laneModelClientResolver ?: { _, _ -> null },
     )
@@ -2982,10 +2989,10 @@ private fun buildHierarchicalPlanner(
 
     val router = InputIntentRouter(runtime, config, instrumentation)
     val groundingClassifier = GroundingClassifier(runtime, config, instrumentation)
-    val directResponse = DirectResponsePlanner(runtime, config, instrumentation)
+    val directResponse = DirectResponder(runtime, config, instrumentation)
     val generalAction = GeneralActionPlanner(runtime, config, instrumentation)
     val taskDecomp = TaskDecompositionPlanner(runtime, config, instrumentation)
-    val goalPlanner = WorkPlanBuilder(runtime, config, instrumentation, planRefiner)
+    val assignmentCommandBuilder = AssignmentCommandBuilder(runtime, config, instrumentation, planRefiner)
 
     val inputPlanner = InputPlanner(
         runtime = runtime,
@@ -2996,11 +3003,11 @@ private fun buildHierarchicalPlanner(
         directResponsePlanner = directResponse,
         generalActionPlanner = generalAction,
         taskDecompositionPlanner = taskDecomp,
-        goalPlanner = goalPlanner,
+        assignmentCommandBuilder = assignmentCommandBuilder,
     )
 
     val progressionPlanner = ProgressionPlanner(runtime, config, instrumentation)
-    val durableWorkLanePlannerLane = DurableWorkLanePlanner(runtime, config, instrumentation)
+    val assignmentLanePlannerLane = AssignmentLanePlanner(runtime, config, instrumentation)
     val impulsePlannerLane = ImpulsePlanner(runtime, config, instrumentation)
 
     val planner = HierarchicalEgoPlanner(
@@ -3008,7 +3015,7 @@ private fun buildHierarchicalPlanner(
         instrumentation = instrumentation,
         inputPlanner = inputPlanner,
         progressionPlanner = progressionPlanner,
-        durableWorkLanePlanner = durableWorkLanePlannerLane,
+        assignmentLanePlanner = assignmentLanePlannerLane,
         impulsePlanner = impulsePlannerLane,
     )
 

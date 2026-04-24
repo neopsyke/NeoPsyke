@@ -2,7 +2,7 @@ package ai.neopsyke.session
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import ai.neopsyke.agent.cortex.sensory.CognitiveSignal
-import ai.neopsyke.agent.cortex.sensory.DurableWorkCue
+import ai.neopsyke.agent.cortex.sensory.AssignmentCue
 import ai.neopsyke.agent.cortex.sensory.RuntimeControlSignal
 import ai.neopsyke.agent.cortex.sensory.Signal
 import ai.neopsyke.agent.cortex.sensory.SignalSource
@@ -244,7 +244,7 @@ class RecordingSignalSourceTest {
                 id = "external-security-id",
                 family = StimulusFamily.LINGUISTIC,
                 source = "slack",
-                content = "please create a goal",
+                content = "please create an assignment",
                 receivedAt = Instant.parse("2026-03-26T15:00:00Z"),
                 conversationContext = ConversationContext(
                     sessionId = "shared-session",
@@ -297,7 +297,7 @@ class RecordingSignalSourceTest {
     fun `REPLAY preserves trusted internal automation security context`() = runBlocking {
         val file = Files.createTempFile("session-signal-internal-security-", ".jsonl")
         try {
-            val stimulus = DurableWorkCue(workItemId = "goal-1", stepId = "step-1", reason = "ready").toStimulus()
+            val stimulus = AssignmentCue(workItemId = "assignment-1", stepId = "step-1", reason = "ready").toStimulus()
             val recordChannel = RecordReplayChannel(
                 channelName = "signals",
                 mode = SessionRecordingMode.RECORD,

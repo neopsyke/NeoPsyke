@@ -29,6 +29,7 @@ import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.dashboard.DashboardStateStore
+import ai.neopsyke.support.StubChatModelClient
 import ai.neopsyke.session.SessionRecordingManager
 import ai.neopsyke.session.SessionRecordingMode
 import java.nio.file.Files
@@ -203,7 +204,7 @@ class ApprovalRuntimeTest {
 
     @Test
     fun `approval prompt is delivered and approve reply authorizes staged action`() = runBlocking {
-        withRuntime(testStagedAction()) { runtime, store, dashboardStore, actionControl, _, _, _, _ ->
+        withRuntime(testStagedAction(), interpreterClient = stubInterpreterClient("approve")) { runtime, store, dashboardStore, actionControl, _, _, _, _ ->
             runtime.onApprovalStaged(
                 actionSummary = actionControl.currentStagedAction.summary,
                 stagedAction = actionControl.currentStagedAction,
@@ -237,6 +238,7 @@ class ApprovalRuntimeTest {
         val forwarded = mutableListOf<Pair<String, ConversationContext>>()
         withRuntime(
             stagedAction = testStagedAction(),
+            interpreterClient = stubInterpreterClient("deny_and_reissue"),
             forwardNormalInput = { content, source, _, context ->
                 forwarded += "$source::$content" to context
                 true
@@ -277,7 +279,7 @@ class ApprovalRuntimeTest {
 
     @Test
     fun `approve on hash drift supersedes request and refreshes prompt`() = runBlocking {
-        withRuntime(testStagedAction()) { runtime, store, dashboardStore, actionControl, _, _, _, _ ->
+        withRuntime(testStagedAction(), interpreterClient = stubInterpreterClient("approve")) { runtime, store, dashboardStore, actionControl, _, _, _, _ ->
             runtime.onApprovalStaged(
                 actionSummary = actionControl.currentStagedAction.summary,
                 stagedAction = actionControl.currentStagedAction,
@@ -321,6 +323,7 @@ class ApprovalRuntimeTest {
         var forwarded = 0
         withRuntime(
             stagedAction = testStagedAction(),
+            interpreterClient = stubInterpreterClient("deny_and_reissue"),
             forwardNormalInput = { _, _, _, _ ->
                 forwarded += 1
                 true
@@ -360,7 +363,7 @@ class ApprovalRuntimeTest {
 
     @Test
     fun `stale reply is ignored after clarification refresh`() = runBlocking {
-        withRuntime(testStagedAction()) { runtime, store, _, actionControl, _, _, _, _ ->
+        withRuntime(testStagedAction(), interpreterClient = stubInterpreterClient("unclear", "approve")) { runtime, store, _, actionControl, _, _, _, _ ->
             runtime.onApprovalStaged(
                 actionSummary = actionControl.currentStagedAction.summary,
                 stagedAction = actionControl.currentStagedAction,
@@ -404,6 +407,7 @@ class ApprovalRuntimeTest {
         var forwarded = 0
         withRuntime(
             stagedAction = testStagedAction(),
+            interpreterClient = stubInterpreterClient("approve", "approve"),
             forwardNormalInput = { _, _, _, _ ->
                 forwarded += 1
                 true
@@ -447,7 +451,7 @@ class ApprovalRuntimeTest {
 
     @Test
     fun `channel principal mismatch reply is rejected fail closed`() = runBlocking {
-        withRuntime(testStagedAction()) { runtime, store, _, actionControl, _, _, _, _ ->
+        withRuntime(testStagedAction(), interpreterClient = stubInterpreterClient("approve")) { runtime, store, _, actionControl, _, _, _, _ ->
             runtime.onApprovalStaged(
                 actionSummary = actionControl.currentStagedAction.summary,
                 stagedAction = actionControl.currentStagedAction,
@@ -543,9 +547,9 @@ class ApprovalRuntimeTest {
             id = "staged-no-telegram-evidence",
             rootInputId = "root-no-telegram-evidence",
             conversationContext = ConversationContext(
-                sessionId = "goal-session-no-evidence",
+                sessionId = "assignment-session-no-evidence",
                 interlocutor = Interlocutor.named("Goal"),
-                security = ConversationSecurityContexts.internalAutomation(provider = "goal", channelId = "goal"),
+                security = ConversationSecurityContexts.internalAutomation(provider = "assignment", channelId = "assignment"),
             ),
             origin = ActionOrigin.SYSTEM,
         )
@@ -586,7 +590,7 @@ class ApprovalRuntimeTest {
         val stagedAction = testStagedAction(
             summary = "Send localhost summary 550e8400-e29b-41d4-a716-446655440000 deadbeefdeadbeefdeadbeef"
         )
-        withRuntime(stagedAction) { runtime, store, dashboardStore, actionControl, _, _, _, _ ->
+        withRuntime(stagedAction, interpreterClient = stubInterpreterClient("explain")) { runtime, store, dashboardStore, actionControl, _, _, _, _ ->
             runtime.onApprovalStaged(
                 actionSummary = actionControl.currentStagedAction.summary,
                 stagedAction = actionControl.currentStagedAction,
@@ -618,7 +622,7 @@ class ApprovalRuntimeTest {
 
     @Test
     fun `approval works after clarification without requiring references`() = runBlocking {
-        withRuntime(testStagedAction()) { runtime, store, _, actionControl, _, _, _, _ ->
+        withRuntime(testStagedAction(), interpreterClient = stubInterpreterClient("unclear", "approve")) { runtime, store, _, actionControl, _, _, _, _ ->
             runtime.onApprovalStaged(
                 actionSummary = actionControl.currentStagedAction.summary,
                 stagedAction = actionControl.currentStagedAction,
@@ -683,7 +687,7 @@ class ApprovalRuntimeTest {
                 dashboardStore = dashboardStore,
                 telegramConfig = TelegramChannelConfig(enabled = false),
                 telegramSink = null,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }),
                 forwardNormalInput = { _, _, _, _ -> true },
                 onApprovalExecuted = {},
                 onApprovalDenied = {},
@@ -718,9 +722,9 @@ class ApprovalRuntimeTest {
             id = "staged-telegram",
             rootInputId = "root-telegram",
             conversationContext = ConversationContext(
-                sessionId = "goal-session",
+                sessionId = "assignment-session",
                 interlocutor = Interlocutor.named("Goal"),
-                security = ConversationSecurityContexts.internalAutomation(provider = "goal", channelId = "goal"),
+                security = ConversationSecurityContexts.internalAutomation(provider = "assignment", channelId = "assignment"),
             ),
             origin = ActionOrigin.SYSTEM,
         )
@@ -779,7 +783,7 @@ class ApprovalRuntimeTest {
                     dashboardStore = dashboardStore,
                     telegramConfig = TelegramChannelConfig(enabled = false),
                     telegramSink = null,
-                    interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                    interpreter = DefaultApprovalInterpreter(AgentConfig(), StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }),
                     forwardNormalInput = { _, _, _, _ -> true },
                     onApprovalExecuted = {},
                     onApprovalDenied = {},
@@ -864,6 +868,7 @@ class ApprovalRuntimeTest {
         var forwarded = 0
         withRuntime(
             stagedAction = testStagedAction(),
+            interpreterClient = stubInterpreterClient("approve"),
             forwardNormalInput = { _, _, _, _ ->
                 forwarded += 1
                 true
@@ -894,7 +899,7 @@ class ApprovalRuntimeTest {
             // A new message with a different eventId should be forwarded, not consumed.
             val result = runtime.routeOwnerMessage(
                 OwnerMessageEnvelope(
-                    content = "Create a new goal for weather reports",
+                    content = "Create a new assignment for weather reports",
                     source = "chat:test",
                     priority = InputPriority.HIGH,
                     conversationContext = actionControl.currentStagedAction.conversationContext,
@@ -912,6 +917,7 @@ class ApprovalRuntimeTest {
         var forwarded = 0
         withRuntime(
             stagedAction = testStagedAction(),
+            interpreterClient = stubInterpreterClient("approve", "approve"),
             forwardNormalInput = { _, _, _, _ ->
                 forwarded += 1
                 true
@@ -956,6 +962,7 @@ class ApprovalRuntimeTest {
         var forwarded = 0
         withRuntime(
             stagedAction = testStagedAction(),
+            interpreterClient = stubInterpreterClient("approve"),
             forwardNormalInput = { _, _, _, _ ->
                 forwarded += 1
                 true
@@ -986,7 +993,7 @@ class ApprovalRuntimeTest {
             // Should be forwarded because the request is stale.
             val result = runtime.routeOwnerMessage(
                 OwnerMessageEnvelope(
-                    content = "Create a new goal",
+                    content = "Create a new assignment",
                     source = "chat:test",
                     priority = InputPriority.HIGH,
                     conversationContext = actionControl.currentStagedAction.conversationContext,
@@ -999,11 +1006,15 @@ class ApprovalRuntimeTest {
         }
     }
 
+    private fun stubInterpreterClient(vararg decisions: String): StubChatModelClient =
+        StubChatModelClient().apply { decisions.forEach { enqueueRawResponse("""{"decision":"$it"}""") } }
+
     private suspend fun withRuntime(
         stagedAction: StagedAction,
         config: AgentConfig = AgentConfig(),
         telegramConfig: TelegramChannelConfig = TelegramChannelConfig(enabled = false),
         telegramSink: TelegramMessageSink? = null,
+        interpreterClient: ai.neopsyke.llm.ChatModelClient? = null,
         forwardNormalInput: (String, String, InputPriority, ConversationContext) -> Boolean = { _, _, _, _ -> true },
         block: suspend (
             ApprovalRuntime,
@@ -1031,7 +1042,7 @@ class ApprovalRuntimeTest {
                 dashboardStore = dashboardStore,
                 telegramConfig = telegramConfig,
                 telegramSink = telegramSink,
-                interpreter = DefaultApprovalInterpreter(config),
+                interpreter = DefaultApprovalInterpreter(config, interpreterClient),
                 forwardNormalInput = forwardNormalInput,
                 onApprovalExecuted = { executed += it },
                 onApprovalDenied = { denied += it },

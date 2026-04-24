@@ -3,9 +3,9 @@ package ai.neopsyke.agent.ego.planner.lane
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.ego.planner.LaneId
 import ai.neopsyke.agent.ego.planner.PlannerLane
-import ai.neopsyke.agent.ego.planner.input.DirectResponsePlanner
+import ai.neopsyke.agent.ego.planner.input.DirectResponder
 import ai.neopsyke.agent.ego.planner.input.GeneralActionPlanner
-import ai.neopsyke.agent.ego.planner.input.WorkPlanBuilder
+import ai.neopsyke.agent.ego.planner.input.AssignmentCommandBuilder
 import ai.neopsyke.agent.ego.planner.input.GroundingClassifier
 import ai.neopsyke.agent.model.GroundingMetadata
 import ai.neopsyke.agent.ego.planner.input.InputIntentRouter
@@ -41,10 +41,10 @@ class InputPlanner(
     private val instrumentation: AgentInstrumentation,
     private val router: InputIntentRouter,
     private val groundingClassifier: GroundingClassifier,
-    private val directResponsePlanner: DirectResponsePlanner,
+    private val directResponsePlanner: DirectResponder,
     private val generalActionPlanner: GeneralActionPlanner,
     private val taskDecompositionPlanner: TaskDecompositionPlanner,
-    private val goalPlanner: WorkPlanBuilder,
+    private val assignmentCommandBuilder: AssignmentCommandBuilder,
 ) : PlannerLane {
 
     override val laneId: LaneId = LaneId.INPUT_INTENT_ROUTER
@@ -97,12 +97,12 @@ class InputPlanner(
             is InputRoute.DirectResponse -> directResponsePlanner.plan(groundedTrigger, groundedContext)
             is InputRoute.GeneralAction -> generalActionPlanner.plan(groundedTrigger, groundedContext)
             is InputRoute.MultiStepTask -> taskDecompositionPlanner.plan(groundedTrigger, groundedContext)
-            is InputRoute.DurableWork -> {
-                val decision = goalPlanner.plan(groundedTrigger, groundedContext)
+            is InputRoute.Assignment -> {
+                val decision = assignmentCommandBuilder.plan(groundedTrigger, groundedContext, route.target)
                 if (decision is EgoDecision.Noop) {
                     instrumentation.emit(
                         AgentEvent(
-                            type = "goal_planner_fallback",
+                            type = "assignment_command_builder_fallback",
                             data = mapOf(
                                 "reason" to decision.reason,
                                 "root_input_id" to groundedInput.rootInputId,

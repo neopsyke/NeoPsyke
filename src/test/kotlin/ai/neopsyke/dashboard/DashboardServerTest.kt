@@ -258,13 +258,13 @@ class DashboardServerTest {
                 started.store.onEvent(
                     AgentEvent(
                         id = 1,
-                        type = "goal_started",
-                        data = mapOf("work_item_id" to "goal-1")
+                        type = "assignment_started",
+                        data = mapOf("work_item_id" to "assignment-1")
                     )
                 )
                 val agentEvent = readNextEventNamed(stream, "agent", timeoutMs = 2_000)
                 assertNotNull(agentEvent)
-                assertTrue(agentEvent.second.contains("\"type\":\"goal_started\""))
+                assertTrue(agentEvent.second.contains("\"type\":\"assignment_started\""))
 
                 started.store.onEvent(
                     AgentEvent(
@@ -296,33 +296,33 @@ class DashboardServerTest {
     }
 
     @Test
-    fun `goals sse only emits goal events`() {
+    fun `assignments sse only emits assignment events`() {
         startServer().use { started ->
-            val goals = openSse("http://127.0.0.1:${started.port}/api/goals/events")
-            goals.use {
-                readNextEvent(goals)
+            val assignments = openSse("http://127.0.0.1:${started.port}/api/assignments/events")
+            assignments.use {
+                readNextEvent(assignments)
 
                 started.store.onEvent(
                     AgentEvent(
                         id = 1,
                         type = "warning",
-                        data = mapOf("message" to "not-a-goal-event")
+                        data = mapOf("message" to "not-an-assignment-event")
                     )
                 )
-                val nonWorkItemEvent = readNextEvent(goals, timeoutMs = 600)
+                val nonWorkItemEvent = readNextEvent(assignments, timeoutMs = 600)
                 assertNull(nonWorkItemEvent)
 
                 started.store.onEvent(
                     AgentEvent(
                         id = 2,
-                        type = "goal_started",
-                        data = mapOf("work_item_id" to "goal-1")
+                        type = "assignment_started",
+                        data = mapOf("work_item_id" to "assignment-1")
                     )
                 )
-                val goalEvent = readNextEvent(goals, timeoutMs = 2_000)
-                assertNotNull(goalEvent)
-                assertEquals("agent", goalEvent.first)
-                assertTrue(goalEvent.second.contains("\"type\":\"goal_started\""))
+                val assignmentEvent = readNextEvent(assignments, timeoutMs = 2_000)
+                assertNotNull(assignmentEvent)
+                assertEquals("agent", assignmentEvent.first)
+                assertTrue(assignmentEvent.second.contains("\"type\":\"assignment_started\""))
             }
         }
     }

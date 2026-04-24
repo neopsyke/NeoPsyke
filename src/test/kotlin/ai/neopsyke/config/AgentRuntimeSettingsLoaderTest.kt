@@ -1,5 +1,6 @@
 package ai.neopsyke.config
 
+import ai.neopsyke.agent.config.SuperegoConfig
 import ai.neopsyke.agent.config.TelegramIngressMode
 import ai.neopsyke.agent.ego.planner.StructuredOutputMode
 import java.nio.file.Files
@@ -21,7 +22,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertEquals(180, settings.agentConfig.planner.maxLoopStepsPerInput)
-        assertEquals(192, settings.agentConfig.superego.maxCompletionTokens)
+        assertEquals(SuperegoConfig.DEFAULT_MAX_COMPLETION_TOKENS, settings.agentConfig.superego.maxCompletionTokens)
         assertEquals(true, settings.agentConfig.memory.scratchpad.enabled)
         assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
         assertEquals(true, settings.agentConfig.logbook.enabled)
@@ -34,9 +35,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(TelegramIngressMode.POLLING, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals("/api/channels/telegram/webhook", settings.agentConfig.nativeIntegrations.telegram.webhookPath)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
-        assertEquals(true, settings.agentConfig.durableWork.enabled)
-        assertEquals(Paths.get(".neopsyke/work-items"), settings.agentConfig.durableWork.workspaceRoot)
-        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
+        assertEquals(true, settings.agentConfig.assignment.enabled)
+        assertEquals(Paths.get(".neopsyke/work-items"), settings.agentConfig.assignment.workspaceRoot)
+        assertEquals(false, settings.agentConfig.assignment.allowRuntimePlanFallback)
         assertTrue(settings.dashboardEnabled)
         assertEquals(8787, settings.dashboardPort)
         assertEquals(Int.MAX_VALUE, settings.evalMaxRawResponseChars)
@@ -70,10 +71,6 @@ class AgentRuntimeSettingsLoaderTest {
                 action_retry_budget_non_retryable_failures: 7
                 action_retry_cooldown_steps: 15
               superego:
-                dynamic_completion_enabled: false
-                dynamic_completion_hard_max_tokens: 700
-                dynamic_prompt_to_completion_ratio: 0.21
-                dynamic_completion_min_prompt_tokens: 110
                 two_stage_review_enabled: true
                 two_stage_low_confidence_threshold: 0.74
                 two_stage_escalate_on_medium_policy_risk: false
@@ -83,10 +80,6 @@ class AgentRuntimeSettingsLoaderTest {
                 long_term_memory_prompt_compression_enabled: true
                 long_term_memory_prompt_dialogue_max_chars: 780
                 long_term_memory_prompt_recall_max_chars: 640
-                long_term_memory_dynamic_completion_enabled: false
-                long_term_memory_dynamic_completion_hard_max_tokens: 480
-                long_term_memory_dynamic_prompt_to_completion_ratio: 0.12
-                long_term_memory_dynamic_completion_min_prompt_tokens: 90
                 scratchpad:
                   enabled: true
                   max_prompt_tokens: 300
@@ -96,10 +89,7 @@ class AgentRuntimeSettingsLoaderTest {
                   final_pass_min_model_confidence: 0.61
                   debug_capture_enabled: false
               meta_reasoner:
-                dynamic_completion_enabled: false
-                dynamic_completion_hard_max_tokens: 700
-                dynamic_prompt_to_completion_ratio: 0.22
-                dynamic_completion_min_prompt_tokens: 130
+                forced_terminal_pressure_threshold: 0.98
               logbook:
                 enabled: false
                 max_summary_chars: 222
@@ -110,9 +100,9 @@ class AgentRuntimeSettingsLoaderTest {
                 episodic_recall_max_chars: 333
                 episodic_recall_max_results: 11
                 use_llm_summarizer: true
-              durable_work:
+              assignment:
                 enabled: true
-                workspace_root: /tmp/neopsyke-goals
+                workspace_root: /tmp/neopsyke-assignments
                 allow_runtime_plan_fallback: true
               action_control:
                 enabled: true
@@ -127,7 +117,7 @@ class AgentRuntimeSettingsLoaderTest {
                 contact_user_per_root_input: 6
                 reflection_family_per_root_input: 4
                 reflect_evidence_per_root_input: 2
-                durable_work_operation_per_root_input: 5
+                assignment_operation_per_root_input: 5
                 commit_private_per_type_per_root_input: 7
                 commit_stateful_per_type_per_root_input: 3
                 commit_public_per_type_per_root_input: 2
@@ -225,10 +215,6 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(3, settings.agentConfig.planner.maxPlansPerInput)
         assertEquals(7, settings.agentConfig.planner.actionRetryBudgetNonRetryableFailures)
         assertEquals(15, settings.agentConfig.planner.actionRetryCooldownSteps)
-        assertEquals(false, settings.agentConfig.superego.dynamicCompletionEnabled)
-        assertEquals(700, settings.agentConfig.superego.dynamicCompletionHardMaxTokens)
-        assertEquals(0.21, settings.agentConfig.superego.dynamicPromptToCompletionRatio)
-        assertEquals(110, settings.agentConfig.superego.dynamicCompletionMinPromptTokens)
         assertEquals(true, settings.agentConfig.superego.twoStageReviewEnabled)
         assertEquals(0.74, settings.agentConfig.superego.twoStageLowConfidenceThreshold)
         assertEquals(false, settings.agentConfig.superego.twoStageEscalateOnMediumPolicyRisk)
@@ -245,16 +231,6 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(true, settings.agentConfig.memory.longTermMemoryPromptCompressionEnabled)
         assertEquals(780, settings.agentConfig.memory.longTermMemoryPromptDialogueMaxChars)
         assertEquals(640, settings.agentConfig.memory.longTermMemoryPromptRecallMaxChars)
-        assertEquals(false, settings.agentConfig.memory.longTermMemoryDynamicCompletionEnabled)
-        assertEquals(480, settings.agentConfig.memory.longTermMemoryDynamicCompletionHardMaxTokens)
-        assertEquals(0.12, settings.agentConfig.memory.longTermMemoryDynamicPromptToCompletionRatio)
-        assertEquals(90, settings.agentConfig.memory.longTermMemoryDynamicCompletionMinPromptTokens)
-
-        assertEquals(false, settings.agentConfig.metaReasoner.dynamicCompletionEnabled)
-        assertEquals(700, settings.agentConfig.metaReasoner.dynamicCompletionHardMaxTokens)
-        assertEquals(0.22, settings.agentConfig.metaReasoner.dynamicPromptToCompletionRatio)
-        assertEquals(130, settings.agentConfig.metaReasoner.dynamicCompletionMinPromptTokens)
-
         assertEquals(false, settings.agentConfig.logbook.enabled)
         assertEquals(222, settings.agentConfig.logbook.maxSummaryChars)
         assertEquals(7, settings.agentConfig.logbook.maxKeywordsPerEntry)
@@ -264,9 +240,9 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(333, settings.agentConfig.logbook.episodicRecallMaxChars)
         assertEquals(11, settings.agentConfig.logbook.episodicRecallMaxResults)
         assertEquals(true, settings.agentConfig.logbook.useLlmSummarizer)
-        assertEquals(true, settings.agentConfig.durableWork.enabled)
-        assertEquals(Paths.get("/tmp/neopsyke-goals"), settings.agentConfig.durableWork.workspaceRoot)
-        assertEquals(true, settings.agentConfig.durableWork.allowRuntimePlanFallback)
+        assertEquals(true, settings.agentConfig.assignment.enabled)
+        assertEquals(Paths.get("/tmp/neopsyke-assignments"), settings.agentConfig.assignment.workspaceRoot)
+        assertEquals(true, settings.agentConfig.assignment.allowRuntimePlanFallback)
         assertEquals(true, settings.agentConfig.actionControl.enabled)
         assertEquals("/tmp/neopsyke-action-control.db", settings.agentConfig.actionControl.dbPath)
         assertEquals("/tmp/neopsyke-action-security.yaml", settings.agentConfig.actionControl.policyPath)
@@ -279,7 +255,7 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(6, settings.agentConfig.actionControl.contactUserPerRootInput)
         assertEquals(4, settings.agentConfig.actionControl.reflectionFamilyPerRootInput)
         assertEquals(2, settings.agentConfig.actionControl.reflectEvidencePerRootInput)
-        assertEquals(5, settings.agentConfig.actionControl.durableWorkOperationPerRootInput)
+        assertEquals(5, settings.agentConfig.actionControl.assignmentOperationPerRootInput)
         assertEquals(7, settings.agentConfig.actionControl.commitPrivatePerTypePerRootInput)
         assertEquals(3, settings.agentConfig.actionControl.commitStatefulPerTypePerRootInput)
         assertEquals(2, settings.agentConfig.actionControl.commitPublicPerTypePerRootInput)
@@ -380,8 +356,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(false, settings.agentConfig.connectors.enabled)
         assertEquals(TelegramIngressMode.WEBHOOK, settings.agentConfig.nativeIntegrations.telegram.mode)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)
-        assertEquals(true, settings.agentConfig.durableWork.enabled)
-        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
+        assertEquals(true, settings.agentConfig.assignment.enabled)
+        assertEquals(false, settings.agentConfig.assignment.allowRuntimePlanFallback)
     }
 
     @Test
@@ -408,7 +384,7 @@ class AgentRuntimeSettingsLoaderTest {
                   input_intent_router:
                     temperature: 0.0
                     max_completion_tokens: 120
-                  goal_creation:
+                  assignment_creation:
                     provider: mistral
                     model: mistral-small-latest
                     structured_output: off
@@ -434,10 +410,10 @@ class AgentRuntimeSettingsLoaderTest {
         assertNull(routerLane.provider)
         assertNull(routerLane.model)
 
-        val goalCreationLane = assertNotNull(settings.agentConfig.planner.lanes["goal_creation"])
-        assertEquals("mistral", goalCreationLane.provider)
-        assertEquals("mistral-small-latest", goalCreationLane.model)
-        assertEquals(StructuredOutputMode.OFF, goalCreationLane.structuredOutput)
+        val assignmentCreationLane = assertNotNull(settings.agentConfig.planner.lanes["assignment_creation"])
+        assertEquals("mistral", assignmentCreationLane.provider)
+        assertEquals("mistral-small-latest", assignmentCreationLane.model)
+        assertEquals(StructuredOutputMode.OFF, assignmentCreationLane.structuredOutput)
     }
 
     @Test
@@ -521,8 +497,8 @@ class AgentRuntimeSettingsLoaderTest {
                 "NEOPSYKE_GOOGLE_OAUTH_TOKEN_ENCRYPTION_SECRET_HANDLE" to "ENV_GOOGLE_TOKEN_ENCRYPTION",
                 "NEOPSYKE_GOOGLE_OAUTH_STATE_TTL_SECONDS" to "180",
                 "NEOPSYKE_GOOGLE_SCOPES" to "https://www.googleapis.com/auth/gmail.readonly, https://www.googleapis.com/auth/calendar.readonly",
-                "NEOPSYKE_GOALS_ENABLED" to "true",
-                "NEOPSYKE_GOALS_WORKSPACE_ROOT" to "/env/goals",
+                "NEOPSYKE_ASSIGNMENTS_ENABLED" to "true",
+                "NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT" to "/env/assignments",
                 "NEOPSYKE_DASHBOARD_ENABLED" to "true",
                 "NEOPSYKE_DASHBOARD_PORT" to "9900",
                 "NEOPSYKE_EVAL_MAX_RAW_RESPONSE_CHARS" to "5555",
@@ -577,9 +553,9 @@ class AgentRuntimeSettingsLoaderTest {
             ),
             settings.agentConfig.nativeIntegrations.googleWorkspace.scopes,
         )
-        assertEquals(true, settings.agentConfig.durableWork.enabled)
-        assertEquals(Paths.get("/env/goals"), settings.agentConfig.durableWork.workspaceRoot)
-        assertEquals(false, settings.agentConfig.durableWork.allowRuntimePlanFallback)
+        assertEquals(true, settings.agentConfig.assignment.enabled)
+        assertEquals(Paths.get("/env/assignments"), settings.agentConfig.assignment.workspaceRoot)
+        assertEquals(false, settings.agentConfig.assignment.allowRuntimePlanFallback)
         assertEquals(true, settings.dashboardEnabled)
         assertEquals(9900, settings.dashboardPort)
         assertEquals(5555, settings.evalMaxRawResponseChars)
@@ -609,7 +585,8 @@ class AgentRuntimeSettingsLoaderTest {
         assertEquals(180, settings.agentConfig.planner.maxLoopStepsPerInput)
         assertEquals(true, settings.agentConfig.memory.scratchpad.enabled)
         assertEquals(false, settings.agentConfig.memory.scratchpad.debugCaptureEnabled)
-        assertEquals(true, settings.agentConfig.superego.dynamicCompletionEnabled)
+        // dynamicCompletionEnabled was removed from SuperegoConfig; verify a remaining default instead.
+        assertEquals(SuperegoConfig.DEFAULT_MAX_COMPLETION_TOKENS, settings.agentConfig.superego.maxCompletionTokens)
     }
 
     @Test
@@ -649,7 +626,7 @@ class AgentRuntimeSettingsLoaderTest {
         )
 
         assertTrue(settings.dashboardEnabled)
-        assertEquals(false, settings.agentConfig.durableWork.enabled)
+        assertEquals(false, settings.agentConfig.assignment.enabled)
         assertEquals(false, settings.agentConfig.actionControl.autonomousWorkerEnabled)
         assertEquals(false, settings.agentConfig.nativeIntegrations.telegram.enabled)
         assertEquals(false, settings.agentConfig.nativeIntegrations.googleWorkspace.enabled)

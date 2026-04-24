@@ -15,10 +15,10 @@ This design has three architectural flaws:
 
 1. **Scope mismatch.** The verifier classifies volatility from the *user's input
    text* but gates individual *actions*. The user's input and the action's
-   semantic purpose can diverge. Example: "Create a daily weather goal" is a
+   semantic purpose can diverge. Example: "Create a daily weather assignment" is a
    system-mutation request, but the verifier sees "weather" + "daily" and
    demands external evidence before allowing the operational confirmation
-   "Goal created: Daily Hamburg Weather."
+   "Assignment created: Daily Hamburg Weather."
 
 2. **Late classification.** The grounding decision happens *after* planning and
    execution, at delivery time. When evidence is required but missing, the
@@ -34,9 +34,9 @@ This design has three architectural flaws:
 ### Triggering Incident
 
 In run `20260407T035932Z-56036`, the user requested creation of a recurring
-weather goal. The goal was created successfully (action_id=2, `goal_operation`,
+weather assignment. The assignment was created successfully (action_id=2, `assignment_operation`,
 allowed). The system then generated a `contact_user` action (action_id=3) to
-confirm the goal was created. The verifier blocked it:
+confirm the assignment was created. The verifier blocked it:
 
 ```
 task_verifier.review action_id=3 allow=false
@@ -46,7 +46,7 @@ task_verifier.review action_id=3 allow=false
   had_successful_evidence=false
 ```
 
-The confirmation message ("Goal created: Daily Hamburg Weather. Recurs on cron
+The confirmation message ("Assignment created: Daily Hamburg Weather. Recurs on cron
 '5 6 * * *'.") contained zero volatile facts -- it was reporting the outcome of
 a system operation. The verifier blocked it because the user's input mentioned
 "weather" and "daily."
@@ -193,8 +193,8 @@ question entirely:
 
 | InputRoute Variant     | Grounding result                    | Rationale                                 |
 |------------------------|-------------------------------------|-------------------------------------------|
-| `GoalCreation`         | `GroundingRequirement.NOT_REQUIRED` | System mutation, not a factual answer     |
-| `GoalManagement`       | `GroundingRequirement.NOT_REQUIRED` | System mutation, not a factual answer     |
+| `AssignmentCreation`   | `GroundingRequirement.NOT_REQUIRED` | System mutation, not a factual answer     |
+| `AssignmentManagement` | `GroundingRequirement.NOT_REQUIRED` | System mutation, not a factual answer     |
 | `ClarificationNeeded`  | `GroundingRequirement.NOT_REQUIRED` | Agent is asking the user, not answering   |
 | `Noop`                 | `GroundingRequirement.NOT_REQUIRED` | No action taken                           |
 | `DirectResponse`       | **needs LLM**                       | Could be volatile fact or static reasoning |
@@ -205,7 +205,7 @@ For non-input triggers (EgoTrigger variants that bypass InputIntentRouter):
 
 | Trigger Type                   | Grounding result                    | Rationale                                      |
 |--------------------------------|-------------------------------------|------------------------------------------------|
-| `EgoTrigger.GoalWork`          | *per-step policy*                   | Goal step execution may need grounding; see Goal Work section below |
+| `EgoTrigger.Assignment`        | *per-step policy*                   | Assignment step execution may need grounding; see Assignment Work section below |
 | `EgoTrigger.DeferredIntention` | *inherited metadata*                | Carries the same metadata from the original root |
 | `EgoTrigger.ActionFeedback`    | *inherited metadata*                | Carries the same metadata from the originating action/root |
 | `EgoTrigger.IncomingImpulse`   | `GroundingRequirement.NOT_REQUIRED` | Self-motivated; no user-facing factual claim    |
@@ -246,20 +246,20 @@ The grounding classifier call can run **in parallel** with other pre-planning
 work (memory recall, episodic recall) since it has no dependencies on those
 results.
 
-#### Goal Work: Per-Step Grounding
+#### Assignment Work: Per-Step Grounding
 
-When a goal fires (cron trigger), the resulting `GoalRunActivation` must carry
-typed grounding metadata determined earlier by goal-step policy. `GoalWorkPlanner`
+When an assignment fires (cron trigger), the resulting `AssignmentActivation` must carry
+typed grounding metadata determined earlier by assignment-step policy. `AssignmentPlanner`
 must consume this typed metadata; it must not infer grounding from free-text
 step descriptions.
 
-This requires goal-step/activation models to grow a typed grounding field
-(for example on `PlanStep`, `GoalRunActivation`, or both). The exact storage
+This requires assignment-step/activation models to grow a typed grounding field
+(for example on `PlanStep`, `AssignmentActivation`, or both). The exact storage
 site is an implementation choice, but the activation handed to the Ego loop
 must already know whether grounding is required.
 
-This means: creating a weather goal (`GoalCreation`) -> `NOT_REQUIRED`.
-Running the weather goal at 06:05 (`GoalWork`) -> `REQUIRED` because the goal
+This means: creating a weather assignment (`AssignmentCreation`) -> `NOT_REQUIRED`.
+Running the weather assignment at 06:05 (`Assignment`) -> `REQUIRED` because the assignment
 step policy marks the delivery step as requiring fresh evidence.
 
 ### 2. Runtime Metadata Ownership And Propagation
@@ -278,7 +278,7 @@ ScheduledOpportunity.groundingMetadata: GroundingMetadata
 QueuedIntention.groundingMetadata: GroundingMetadata
 PendingAction.groundingMetadata: GroundingMetadata
 ActionFeedbackCue.groundingMetadata: GroundingMetadata
-GoalRunActivation.groundingMetadata: GroundingMetadata
+AssignmentActivation.groundingMetadata: GroundingMetadata
 ```
 
 **Immutability guarantee:** for a given root-scoped execution branch, the
@@ -321,9 +321,9 @@ SharedPromptSections.groundingRequirementSection(context): Section?
 
 - Returns `null` when `NOT_REQUIRED`
 - Returns one short section when `REQUIRED`
-- Included by all answer-producing planner lanes (`DirectResponsePlanner`,
+- Included by all answer-producing planner lanes (`DirectResponder`,
   `GeneralActionPlanner`, `TaskDecompositionPlanner`, `DeferredStepPlanner`,
-  `FeedbackPlanner`, `GoalWorkPlanner`, and any future equivalent lane)
+  `FeedbackPlanner`, `AssignmentPlanner`, and any future equivalent lane)
 
 The guidance should be operational, short, and only present when grounding is
 required:
@@ -566,7 +566,7 @@ This is a clean replacement, not an incremental refactor.
    and all heuristic classification methods.
 8. **Update** telemetry event shape, structured logs, and dashboard aggregation.
 9. **Add** `grounding_classifier` cognitive role to LLM runtime config.
-10. **Add** typed grounding field to goal-step activation flow so `GoalWork`
+10. **Add** typed grounding field to assignment-step activation flow so `Assignment`
     inherits policy-decided grounding without prose inference.
 
 ---
@@ -582,7 +582,7 @@ This is a clean replacement, not an incremental refactor.
    must already see `PlannerContext.groundingMetadata`.
 
 2. **Typed pre-filter skips LLM call for deterministic routes.**
-   Inputs routed to `GoalCreation`, `GoalManagement`, `ClarificationNeeded`,
+   Inputs routed to `AssignmentCreation`, `AssignmentManagement`, `ClarificationNeeded`,
    and `Noop` must set `GroundingRequirement.NOT_REQUIRED` without any LLM call.
    Verify by checking both:
    - no `grounding_classifier` LLM call event is emitted for these routes
@@ -604,10 +604,10 @@ This is a clean replacement, not an incremental refactor.
    lanes named in the spec, not just the initial input lane.
 
 5. **Grounding gate allows operational confirmations.**
-   A `contact_user` action confirming a goal creation (or any system operation
+   A `contact_user` action confirming an assignment creation (or any system operation
    where grounding is `NOT_REQUIRED`) must pass the gate without denial.
    **Regression test:** Reproduce the triggering incident (create a recurring
-   weather goal via interactive input). The confirmation message must be
+   weather assignment via interactive input). The confirmation message must be
    delivered without denial.
 
 6. **Grounding gate blocks ungrounded volatile-fact answers.**
@@ -642,7 +642,7 @@ This is a clean replacement, not an incremental refactor.
 9. **Metadata propagation preserves grounding unchanged.**
    Once `GroundingMetadata` is set on a root input, all downstream runtime
    envelopes created from it must carry the same value unless a documented
-   policy transition explicitly replaces it (for example a new goal-work root
+   policy transition explicitly replaces it (for example a new assignment-work root
    with its own typed grounding policy). Validation must check the concrete
    carrier set named in the spec, not just one representative object.
 
@@ -653,11 +653,11 @@ This is a clean replacement, not an incremental refactor.
     must assert that the inherited value is copied by runtime code and not
     reconstructed from prompt or action text.
 
-11. **Goal work grounding is per-step.**
-    When a goal fires via cron (`EgoTrigger.GoalWork`), the `GoalRunActivation`
-    must already carry typed grounding metadata determined by goal-step policy.
-    `GoalWorkPlanner` must consume that metadata, not infer it from free text
-    and not reuse the original goal-creation input semantics.
+11. **Assignment work grounding is per-step.**
+    When an assignment fires via cron (`EgoTrigger.Assignment`), the `AssignmentActivation`
+    must already carry typed grounding metadata determined by assignment-step policy.
+    `AssignmentPlanner` must consume that metadata, not infer it from free text
+    and not reuse the original assignment-creation input semantics.
 
 12. **Forced-terminal behavior preserves grounding semantics.**
     Forced-terminal actions must use a typed flag, not a summary-string
@@ -744,7 +744,7 @@ This is a clean replacement, not an incremental refactor.
     - intention -> pending action
     - action -> feedback cue
     - feedback cue -> replanning context
-    - goal work activation -> planner context
+    - assignment work activation -> planner context
 
 20. **Unit test: planner context visibility.**
     Every answer-producing lane must receive `groundingMetadata` in
@@ -781,15 +781,15 @@ This is a clean replacement, not an incremental refactor.
       threshold
     - forced-terminal + grounding `REQUIRED` + no evidence attempted
 
-24. **Unit test: goal-work typed grounding.**
-    Verify that `GoalRunActivation` arrives with typed grounding metadata and
-    `GoalWorkPlanner` consumes it without inspecting free-text step prose for
+24. **Unit test: assignment-work typed grounding.**
+    Verify that `AssignmentActivation` arrives with typed grounding metadata and
+    `AssignmentPlanner` consumes it without inspecting free-text step prose for
     grounding semantics. Include a negative assertion that changing the prose
     alone does not alter the grounding requirement when the typed policy input
     remains constant.
 
-25. **Scenario pack: goal creation confirmation.**
-    Deterministic scenario that creates a recurring goal and verifies the
+25. **Scenario pack: assignment creation confirmation.**
+    Deterministic scenario that creates a recurring assignment and verifies the
     confirmation is delivered without denial.
 
 26. **Scenario pack: volatile-fact grounding enforcement.**

@@ -118,8 +118,8 @@ The terminal is reserved for runtime control commands only (e.g., `exit`).
 # Disable the Id (no autonomous impulses)
 ./run-neopsyke --no-id
 
-# Run without goals
-NEOPSYKE_GOALS_ENABLED=false ./run-neopsyke
+# Run without assignments
+NEOPSYKE_ASSIGNMENTS_ENABLED=false ./run-neopsyke
 ```
 
 ---
@@ -205,57 +205,57 @@ If the action succeeds and satisfies the need, the drive resets. If denied, the 
 
 You do not need to do anything to trigger this — it happens autonomously when the agent is not busy with user requests.
 
-### Goals
+### Assignments
 
-Goals are durable, persistent objectives that survive across sessions. You create them through natural conversation:
+Assignments are durable, persistent commitments that survive across sessions. You create them through natural conversation:
 
-**Research goal (one-shot execution):**
+**Research assignment (one-shot execution):**
 
 ```
 You: I need you to research the current state of WebAssembly support in Kotlin.
      Find out what tools exist, what the limitations are, and write a summary.
 
-NeoPsyke: [creates a goal → generates a plan with steps → executes:
+NeoPsyke: [creates an assignment → generates a plan with steps → executes:
            web search → fetch relevant pages → synthesize findings →
-           produce summary → complete goal]
+           produce summary → complete assignment]
 ```
 
-**Monitoring goal (recurring):**
+**Monitoring assignment (recurring):**
 
 ```
 You: Check the Kotlin blog every morning for new posts and let me know
      if anything is published.
 
-NeoPsyke: [creates a recurring goal with a daily schedule →
+NeoPsyke: [creates a recurring assignment with a daily schedule →
            on each trigger: fetches the blog → checks for new content →
            contacts you only if something new is found]
 ```
 
-Recurring goals require explicit approval in the action control panel before they are created.
+Recurring assignments require explicit approval in the action control panel before they are created.
 
-**Scheduled goal with a deadline:**
+**Scheduled assignment with a deadline:**
 
 ```
 You: Remind me to review the quarterly metrics report by Friday at 5pm.
 
-NeoPsyke: [creates a goal with a timer wait condition →
+NeoPsyke: [creates an assignment with a timer wait condition →
            when the deadline approaches: contacts you with the reminder]
 ```
 
-**Standing audit goal:**
+**Standing audit assignment:**
 
 ```
 You: Keep an eye on our GitHub repository's open issues. If any critical
      bugs are reported, summarize them for me.
 
-NeoPsyke: [creates a monitoring goal → periodically checks →
+NeoPsyke: [creates a monitoring assignment → periodically checks →
            reports only on new critical issues, tracking what it has
            already seen via novelty fingerprints]
 ```
 
-Goals go through the full security model: the `goal_operation` action is reviewed by the Superego, and recurring goals require staging and approval. Goal state is persisted to disk and survives restarts.
+Assignments go through the full security model: the `assignment_operation` action is reviewed by the Superego, and recurring assignments require staging and approval. Assignment state is persisted to disk and survives restarts.
 
-You can check goal status through the dashboard or by asking the agent directly.
+You can check assignment status through the dashboard or by asking the agent directly.
 
 ### Reflection
 
@@ -288,4 +288,4 @@ Open `http://localhost:8787` in your browser:
 - [Evaluation](evaluation.md) — how to run tests and evals, and where to contribute.
 - [Telegram setup](telegram-setup.md) — bot token, webhook/polling, owner-only filtering.
 - [Security model](security.md) — trust model, policy enforcement, action lifecycle.
-- [Architecture notes](../AGENT_LOGIC_SUMMARY.md) — the current runtime logic reference.
+- [Architecture notes](../AGENT_RUNTIME_LOGIC.md) — the current runtime logic reference.

@@ -30,7 +30,7 @@ These are already decided and should not be reopened casually:
    explicitly sanitizes and classifies them.
 8. Connector subprocesses get an explicit environment: minimal runtime vars plus
    declared secret handles only; no ambient `System.getenv()` passthrough.
-9. Workflow examples (Morning Briefing, Inbox Management) are goal compositions,
+9. Workflow examples (Morning Briefing, Inbox Management) are assignment compositions,
    not special workflow actions.
 10. Policy YAML is trusted operator configuration. The agent must not have write
     access to policy files.
@@ -38,7 +38,7 @@ These are already decided and should not be reopened casually:
 12. Autonomous public posting defaults to deny-until-enabled per
     connector/account.
 13. Deterministic policy is final; denials feed Ego replanning.
-14. Recurring goal creation requires stricter commit policy than one-shot goal
+14. Recurring assignment creation requires stricter commit policy than one-shot assignment
     updates.
 15. Policy/config reload requires restart in v1.
 
@@ -114,7 +114,7 @@ These are already decided and should not be reopened casually:
 
 ### 4.3 Stronger deterministic execution templates
 
-- Current reflection/contact/goal normalization is not enough for future
+- Current reflection/contact/assignment normalization is not enough for future
   Gmail send, publish, repo admin, or file mutation.
 
 ### 4.4 Universal `allowedArgumentDataTrust` enforcement
@@ -162,7 +162,7 @@ Remaining cognitive-runtime gaps (not yet blocking, future work):
   stimuli through SensoryCortex.
 - Concurrency boundary: preparation is not yet parallelized; execution remains
   mostly centralized.
-- Goal-thread continuity: goal work uses thread continuations but still enters
+- Goal-thread continuity: assignment work uses thread continuations but still enters
   via a separate queue branch rather than fully unified thread orchestration.
 
 ---
@@ -238,8 +238,8 @@ not generalized yet.
 
 ### 8.1 Deterministic tests (partially implemented)
 
-- Owner trusted chat can create a goal.
-- External participant cannot create a goal.
+- Owner trusted chat can create an assignment.
+- External participant cannot create an assignment.
 - Tainted external content cannot directly become commit payload.
 - Staged action without authorization cannot commit.
 - Policy-hidden actions do not appear in planner action set.
@@ -249,7 +249,7 @@ not generalized yet.
 
 ### 8.2 Scenario/red-team tests (not yet implemented)
 
-- Poisoned email tries to create recurring goal.
+- Poisoned email tries to create recurring assignment.
 - Poisoned RSS tries to trigger public post.
 - Calendar event title tries to write memory instructions.
 - Compacted conversation should not bypass authorization.

@@ -17,8 +17,8 @@ import ai.neopsyke.agent.model.ActionEffectClass
 import ai.neopsyke.agent.model.ActionExecutionStatus
 import ai.neopsyke.agent.model.CommitAuthorization
 import ai.neopsyke.agent.model.PendingAction
-import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
-import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.assignments.NoopAssignmentGateway
+import ai.neopsyke.agent.assignments.AssignmentGateway
 import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 
 data class ActionImplementationStatus(
@@ -38,7 +38,7 @@ class MotorCortex(
         conversationOutput: ConversationOutputGateway = RoutedConversationOutputGateway(fallbackOutput = output),
         reflectionMemoryRecorder: ReflectionMemoryRecorder,
         config: AgentConfig = AgentConfig(),
-        durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
+        assignmentGateway: AssignmentGateway = NoopAssignmentGateway,
         evidenceArtifactStore: EvidenceArtifactStore = NoopEvidenceArtifactStore,
     ) : this(
         actionRegistry = ActionRegistry.discover(
@@ -50,7 +50,7 @@ class MotorCortex(
                 conversationOutput = conversationOutput,
                 evidenceArtifactStore = evidenceArtifactStore,
                 reflectionMemoryRecorder = reflectionMemoryRecorder,
-                durableWorkGateway = durableWorkGateway,
+                assignmentGateway = assignmentGateway,
             )
         )
     )
@@ -74,11 +74,21 @@ class MotorCortex(
             .map { it.actionType }
             .toSet()
 
-    suspend fun dispatchableActionTypes(): Set<ActionType> =
-        actionImplementationStatuses()
-            .filter { it.dispatchable }
+    /**
+     * Non-suspend accessor for the cached set of available action types.
+     * Falls back to descriptor-only filtering when no startup snapshot exists yet.
+     */
+    fun cachedAvailableActionTypes(): Set<ActionType> {
+        val snapshot = lastStatusSnapshot
+            ?: return actionRegistry.descriptors()
+                .filter { it.dispatchable }
+                .map { it.actionType }
+                .toSet()
+        return snapshot
+            .filter { it.dispatchable && it.available }
             .map { it.actionType }
             .toSet()
+    }
 
     fun plannerDescriptors(): List<ActionDescriptor> =
         actionRegistry.descriptors()

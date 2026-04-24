@@ -245,7 +245,7 @@ class AttentionSchedulerTest {
             conversationContext = ai.neopsyke.agent.model.ConversationContext.default().copy(sessionId = sessionId),
             planContext = ai.neopsyke.agent.model.PlanContext(
                 planId = "plan-1",
-                planGoal = "goal",
+                planAssignment = "assignment",
                 stepIndex = 0,
                 totalSteps = 2,
                 stepDescription = "gather evidence",
@@ -356,7 +356,7 @@ class AttentionSchedulerTest {
             rootInputId = root,
             planContext = ai.neopsyke.agent.model.PlanContext(
                 planId = "p1",
-                planGoal = "goal",
+                planAssignment = "assignment",
                 stepIndex = 0,
                 totalSteps = 2,
                 stepDescription = "step"
@@ -392,7 +392,7 @@ class AttentionSchedulerTest {
             conversationContext = ctxA,
             planContext = ai.neopsyke.agent.model.PlanContext(
                 planId = "p1",
-                planGoal = "goal-a",
+                planAssignment = "assignment-a",
                 stepIndex = 0,
                 totalSteps = 1,
                 stepDescription = "step-a"
@@ -525,7 +525,7 @@ class AttentionSchedulerTest {
                 content = "plan step 1",
                 planContext = ai.neopsyke.agent.model.PlanContext(
                     planId = "p1",
-                    planGoal = "goal",
+                    planAssignment = "assignment",
                     stepIndex = 0,
                     totalSteps = 3,
                     stepDescription = "gather evidence",

@@ -70,7 +70,7 @@ class ScratchpadDumpSink(
             append("Timestamp:  ").append(timestamp).append('\n')
             append("Session:    ").append(sessionId).append('\n')
             append("Root Input: ").append(snapshot.head.rootInputId).append('\n')
-            append("Goal:       ").append(snapshot.head.goal.ifBlank { "(none)" }).append('\n')
+            append("Assignment: ").append(snapshot.head.assignment.ifBlank { "(none)" }).append('\n')
             append("Confidence: ").append("%.2f".format(snapshot.head.workspaceConfidence)).append('\n')
             append("Sections:   ").append(snapshot.head.sectionCount)
             append(" | Evidence: ").append(snapshot.head.evidenceCount)

@@ -4,7 +4,11 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
 import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.model.ActionOrigin
+import ai.neopsyke.agent.model.CognitiveThreadSecurityContext
+import ai.neopsyke.agent.model.ConversationContext
+import ai.neopsyke.agent.model.ConversationSecurityContexts
 import ai.neopsyke.agent.model.GroundingMetadata
+import ai.neopsyke.agent.model.Interlocutor
 import ai.neopsyke.agent.model.OriginSource
 import ai.neopsyke.llm.ChatRole
 import ai.neopsyke.llm.ChatModelClient
@@ -163,8 +167,7 @@ class SuperegoGatekeeperTest {
             modelClient = llm,
             config = AgentConfig(
                 superego = SuperegoConfig(
-                    maxCompletionTokens = 77,
-                    dynamicCompletionEnabled = false
+                    maxCompletionTokens = 77
                 )
             )
         )
@@ -342,6 +345,51 @@ class SuperegoGatekeeperTest {
         assertEquals(1, llm.calls.size)
         assertTrue(llm.lastMessages.last().content.contains("Action origin:"))
         assertTrue(llm.lastMessages.last().content.contains("source=id"))
+    }
+
+    @Test
+    fun `gatekeeper allows id-origin assignment review actions to proceed`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse("""{"allow":true}""")
+        }
+        val gatekeeper = Superego(
+            modelClient = llm,
+            config = AgentConfig(),
+            actionRegistry = testRegistry()
+        )
+        val assignmentAction = PendingAction(
+            id = 702,
+            urgency = Urgency.MEDIUM,
+            type = ActionType.ASSIGNMENT_OPERATION,
+            payload = """{"command":"review","work_item_id":"resp-1"}""",
+            summary = "review responsibility",
+            groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
+            conversationContext = ConversationContext(
+                sessionId = "id-review",
+                interlocutor = Interlocutor.named("Id"),
+                security = ConversationSecurityContexts.internalAutomation(
+                    provider = "id",
+                    channelId = "id-review",
+                )
+            ),
+            origin = ActionOrigin(
+                source = OriginSource.ID,
+                needId = "be-useful",
+                rootImpulseId = "imp-4"
+            )
+        )
+        val idContext = snapshot.copy(
+            origin = assignmentAction.origin,
+            conversationContext = assignmentAction.conversationContext,
+            threadSecurityContext = CognitiveThreadSecurityContext.fromConversation(
+                assignmentAction.conversationContext.security
+            ),
+        )
+
+        val decision = gatekeeper.review(assignmentAction, idContext)
+
+        assertTrue(decision.allow)
+        assertEquals(1, llm.calls.size)
     }
 
     @Test

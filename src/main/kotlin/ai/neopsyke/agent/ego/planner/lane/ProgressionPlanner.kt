@@ -117,7 +117,7 @@ class ProgressionPlanner(
                       "action_type":"$actionSchemaEnum",
                       "action_payload":"optional when decision=intend",
                       "action_summary":"required when decision=intend; <=180 chars",
-                      "plan_goal":"required when decision=plan",
+                      "plan_assignment":"required when decision=plan",
                       "plan_steps":["step 1","step 2"],
                       "reason":"optional"
                     }
@@ -164,6 +164,7 @@ class ProgressionPlanner(
         }
 
         if (TruncationRetry.isLikelyTruncated(response)) {
+            runtime.notifyTruncationRetry()
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
             runtime.call(
                 laneId = laneId,
@@ -259,17 +260,17 @@ class ProgressionPlanner(
                 }
             }
             "plan" -> {
-                val goal = payload.planGoal?.trim().orEmpty()
+                val assignment = payload.planAssignment?.trim().orEmpty()
                 val steps = payload.planSteps?.map { it.trim() }?.filter { it.isNotBlank() }
                     ?.take(config.planner.maxPlanSteps)
                     ?.map { PlanDecomposition.PlanStep(description = it) }
                     .orEmpty()
-                if (goal.isBlank() || steps.isEmpty()) {
-                    ProgressionDecision.Fail("Plan with missing goal or empty steps.")
+                if (assignment.isBlank() || steps.isEmpty()) {
+                    ProgressionDecision.Fail("Plan with missing assignment or empty steps.")
                 } else {
                     ProgressionDecision.RefinePlan(
                         urgency = Urgency.fromRaw(payload.urgency),
-                        goal = goal,
+                        assignment = assignment,
                         steps = steps,
                     )
                 }
@@ -312,12 +313,12 @@ class ProgressionPlanner(
                 .filter { it.isNotBlank() }
                 .take(config.planner.maxPlanSteps)
                 .map { TextSecurity.clamp(it, config.planner.maxPlanStepDescriptionChars) }
-            if (decision.goal.isBlank() || steps.isEmpty()) {
-                EgoDecision.Noop("Plan with missing goal or empty steps.")
+            if (decision.assignment.isBlank() || steps.isEmpty()) {
+                EgoDecision.Noop("Plan with missing assignment or empty steps.")
             } else {
                 EgoDecision.EnqueuePlan(
                     urgency = decision.urgency,
-                    goal = TextSecurity.clamp(decision.goal, config.planner.maxThoughtChars),
+                    assignment = TextSecurity.clamp(decision.assignment, config.planner.maxThoughtChars),
                     steps = steps,
                 )
             }
@@ -342,7 +343,7 @@ class ProgressionPlanner(
         @param:JsonProperty("action_payload") val actionPayload: JsonNode? = null,
         @param:JsonProperty("action_summary") val actionSummary: String? = null,
         val reason: String? = null,
-        @param:JsonProperty("plan_goal") val planGoal: String? = null,
+        @param:JsonProperty("plan_assignment") val planAssignment: String? = null,
         @param:JsonProperty("plan_steps") val planSteps: List<String>? = null,
     )
 }

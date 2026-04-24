@@ -90,7 +90,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("live_eval.timeout", d.LiveEval.Timeout)
 	v.SetDefault("live_eval.preserve_memory", d.LiveEval.PreserveMemory)
-	v.SetDefault("live_eval.goals_enabled", d.LiveEval.GoalsEnabled)
+	v.SetDefault("live_eval.assignments_enabled", d.LiveEval.AssignmentsEnabled)
 	v.SetDefault("live_eval.llm_config_file", d.LiveEval.LLMConfigFile)
 	v.SetDefault("live_eval.neopsyke_cmd", d.LiveEval.NeopsykeCmd)
 

@@ -30,7 +30,7 @@ class HierarchicalEgoPlanner(
     private val instrumentation: AgentInstrumentation,
     private val inputPlanner: PlannerLane,
     private val progressionPlanner: PlannerLane,
-    private val durableWorkLanePlanner: PlannerLane,
+    private val assignmentLanePlanner: PlannerLane,
     private val impulsePlanner: PlannerLane,
 ) : Ego.Planner {
 
@@ -56,7 +56,7 @@ class HierarchicalEgoPlanner(
             is EgoTrigger.IncomingInput -> inputPlanner
             is EgoTrigger.Continuation -> progressionPlanner
             is EgoTrigger.ActionFeedback -> progressionPlanner
-            is EgoTrigger.DurableWork -> durableWorkLanePlanner
+            is EgoTrigger.Assignment -> assignmentLanePlanner
             is EgoTrigger.IncomingImpulse -> impulsePlanner
         }
 
@@ -96,7 +96,7 @@ class HierarchicalEgoPlanner(
             is EgoTrigger.Continuation -> "continuation"
             is EgoTrigger.ActionFeedback -> "feedback"
             is EgoTrigger.IncomingImpulse -> "impulse"
-            is EgoTrigger.DurableWork -> "durable-work"
+            is EgoTrigger.Assignment -> "assignment"
         }
 
         fun rootInputId(trigger: EgoTrigger): String? = when (trigger) {
@@ -104,7 +104,7 @@ class HierarchicalEgoPlanner(
             is EgoTrigger.Continuation -> trigger.continuation.rootInputId
             is EgoTrigger.ActionFeedback -> trigger.feedback.cue.rootInputId
             is EgoTrigger.IncomingImpulse -> trigger.impulse.rootImpulseId
-            is EgoTrigger.DurableWork -> trigger.workUnit.workItemId
+            is EgoTrigger.Assignment -> trigger.workUnit.workItemId
         }
 
         fun plannerChatMetadata(
@@ -151,7 +151,7 @@ class HierarchicalEgoPlanner(
                         planStepDescription = plan?.stepDescription,
                     )
                 }
-                is EgoTrigger.DurableWork -> base.copy(originSource = OriginSource.DURABLE_WORK.name.lowercase(Locale.ROOT))
+                is EgoTrigger.Assignment -> base.copy(originSource = OriginSource.ASSIGNMENT.name.lowercase(Locale.ROOT))
             }
         }
     }

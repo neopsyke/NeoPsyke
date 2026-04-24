@@ -25,7 +25,7 @@ type LiveEvalOpts struct {
 	CacheReplayFile  string
 	SessionReplayDir string
 	Record           bool
-	GoalsEnabled     *bool
+	AssignmentsEnabled *bool
 	PreserveMemory   bool
 	RunDirOverride   string // if set, use this as the run dir (for BBH cases)
 	NeopsykeCmd      string
@@ -192,7 +192,7 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	envSet("NEOPSYKE_LOGBOOK_DB_PATH", filepath.Join(stateDir, "logbook.db"))
 	envSet("NEOPSYKE_METRICS_DB", filepath.Join(stateDir, "metrics.db"))
 	envSet("NEOPSYKE_ACTION_CONTROL_DB_PATH", filepath.Join(stateDir, "action-control.db"))
-	envSet("NEOPSYKE_GOALS_WORKSPACE_ROOT", filepath.Join(artifactsDir, "goals"))
+	envSet("NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT", filepath.Join(artifactsDir, "assignments"))
 	envSet("FREUD_RUN_DIR", runDir)
 	envSet("FREUD_ARTIFACT_DIR", artifactsDir)
 	envSet("NEOPSYKE_ID_ENABLED", "false")
@@ -200,8 +200,8 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 	if opts.LLMConfigFile != "" {
 		envSet("NEOPSYKE_LLM_CONFIG_FILE", ResolveAbsPath(opts.LLMConfigFile, repoRoot))
 	}
-	if opts.GoalsEnabled != nil {
-		envSet("NEOPSYKE_GOALS_ENABLED", strconv.FormatBool(*opts.GoalsEnabled))
+	if opts.AssignmentsEnabled != nil {
+		envSet("NEOPSYKE_ASSIGNMENTS_ENABLED", strconv.FormatBool(*opts.AssignmentsEnabled))
 	}
 	if opts.GradleUserHome != "" {
 		envSet("GRADLE_USER_HOME", gradleHome)
@@ -212,8 +212,8 @@ func LiveEval(opts LiveEvalOpts) (*LiveEvalResult, error) {
 
 	// Build command
 	cmdArgs := []string{"--freud-live", "--freud-live-timeout", strconv.Itoa(opts.Timeout), "--no-id"}
-	if opts.GoalsEnabled != nil && *opts.GoalsEnabled {
-		cmdArgs = append(cmdArgs, "--goals")
+	if opts.AssignmentsEnabled != nil && *opts.AssignmentsEnabled {
+		cmdArgs = append(cmdArgs, "--assignments")
 	}
 
 	// Set up timeout context (grace period beyond neopsyke's own timeout)

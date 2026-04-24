@@ -42,8 +42,8 @@ func init() {
 	evalCmd.Flags().StringVar(&evalSessionReplay, "session-replay", "", "replay a recorded session directory")
 	evalCmd.Flags().StringVar(&evalLane, "lane", "", "load profile for LLM routing: low-llm | high-llm")
 
-	evalCmd.Flags().Bool("goals", false, "enable goals subsystem")
-	evalCmd.Flags().Bool("no-goals", false, "disable goals subsystem")
+	evalCmd.Flags().Bool("assignments", false, "enable assignments subsystem")
+	evalCmd.Flags().Bool("no-assignments", false, "disable assignments subsystem")
 }
 
 func runEval(cmd *cobra.Command, args []string) error {
@@ -56,9 +56,9 @@ func runEval(cmd *cobra.Command, args []string) error {
 		cfg.LiveEval.Timeout = evalTimeout
 	}
 
-	goals := resolveGoals(cmd)
-	if goals != nil {
-		cfg.LiveEval.GoalsEnabled = *goals
+	assignments := resolveAssignments(cmd)
+	if assignments != nil {
+		cfg.LiveEval.AssignmentsEnabled = *assignments
 	}
 
 	errs := config.Validate(cfg, "eval", &config.ValidationOpts{
@@ -84,7 +84,7 @@ func runEval(cmd *cobra.Command, args []string) error {
 		CacheReplayFile:  evalCacheReplay,
 		SessionReplayDir: evalSessionReplay,
 		Record:           evalRecord,
-		GoalsEnabled:     goals,
+		AssignmentsEnabled: assignments,
 		PreserveMemory:   cfg.LiveEval.PreserveMemory,
 		NeopsykeCmd:      cfg.LiveEval.NeopsykeCmd,
 		RunRootAbs:       cfg.Project.RunRoot,

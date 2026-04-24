@@ -995,12 +995,12 @@ class DefaultActionControlService(
                 return null
             }
 
-            ActionType.DURABLE_WORK_OPERATION -> {
-                val limit = config.durableWorkOperationPerRootInput
+            ActionType.ASSIGNMENT_OPERATION -> {
+                val limit = config.assignmentOperationPerRootInput
                 if (limit <= 0) return null
-                val matchingCount = scopedActions.count { durableWorkOperationBucket(it) == durableWorkOperationBucket(action) }
+                val matchingCount = scopedActions.count { assignmentOperationBucket(it) == assignmentOperationBucket(action) }
                 if (matchingCount >= limit) {
-                    return refusal("Action '${action.type.id}' exceeded the per-request rate limit for operation kind '${durableWorkOperationBucket(action)}'.")
+                    return refusal("Action '${action.type.id}' exceeded the per-request rate limit for operation kind '${assignmentOperationBucket(action)}'.")
                 }
                 return null
             }
@@ -1026,7 +1026,7 @@ class DefaultActionControlService(
     private fun defaultEffectClass(action: PendingAction): ActionEffectClass =
         when (action.type) {
             ActionType.CONTACT_USER -> ActionEffectClass.COMMIT_PRIVATE
-            ActionType.DURABLE_WORK_OPERATION -> ActionEffectClass.CONTROL_PLANE
+            ActionType.ASSIGNMENT_OPERATION -> ActionEffectClass.CONTROL_PLANE
             ActionType.REFLECT_INTERNAL,
             ActionType.REFLECT_EVIDENCE -> ActionEffectClass.COMMIT_STATEFUL
             else -> ActionEffectClass.OBSERVE
@@ -1044,47 +1044,39 @@ class DefaultActionControlService(
                 "contact:${channel.provider}:${channel.channelId}"
             }
 
-            ActionType.DURABLE_WORK_OPERATION -> deriveDurableWorkExecutionKey(action)
+            ActionType.ASSIGNMENT_OPERATION -> deriveAssignmentExecutionKey(action)
             EMAIL_SEND_ACTION_TYPE -> deriveEmailExecutionKey(action)
             else -> null
         }
 
-    private fun deriveDurableWorkExecutionKey(action: PendingAction): String? {
+    private fun deriveAssignmentExecutionKey(action: PendingAction): String? {
         val payload = runCatching { payloadMapper.readTree(action.payload) }.getOrNull() ?: return null
         val workItemId = payload.path("work_item_id").textValue()
             ?.ifBlank { null }
-            ?: payload.path("workItemId").textValue()?.ifBlank { null }
             ?: payload.path("work_item_reference").path("id").textValue()?.ifBlank { null }
-            // Backwards-compatible fallbacks for payloads still using goal terminology
-            ?: payload.path("goal_id").textValue()?.ifBlank { null }
-            ?: payload.path("goal_reference").path("id").textValue()?.ifBlank { null }
         if (!workItemId.isNullOrBlank()) {
             return "work:${workItemId.trim()}"
         }
-        val operation = payload.path("command").textValue()?.trim()?.lowercase()
-            ?.ifBlank { payload.path("operation").textValue()?.trim()?.lowercase() }
-            .orEmpty()
+        val operation = payload.path("command").textValue()?.trim()?.lowercase().orEmpty()
         return if (operation in setOf("pause", "resume", "reprioritize", "complete", "revise_plan", "delete_all")) {
-            "durable-work-operation:${action.rootInputId.orEmpty()}:${operation}"
+            "assignment-operation:${action.rootInputId.orEmpty()}:${operation}"
         } else {
             null
         }
     }
 
-    private fun durableWorkOperationBucket(action: PendingAction): String {
-        return durableWorkOperationBucketPayload(action.type.id, action.payload)
+    private fun assignmentOperationBucket(action: PendingAction): String {
+        return assignmentOperationBucketPayload(action.type.id, action.payload)
     }
 
-    private fun durableWorkOperationBucket(action: StagedAction): String {
-        return durableWorkOperationBucketPayload(action.actionType.id, action.payload)
+    private fun assignmentOperationBucket(action: StagedAction): String {
+        return assignmentOperationBucketPayload(action.actionType.id, action.payload)
     }
 
-    private fun durableWorkOperationBucketPayload(actionTypeId: String, payloadRaw: String): String {
+    private fun assignmentOperationBucketPayload(actionTypeId: String, payloadRaw: String): String {
         val payload = runCatching { payloadMapper.readTree(payloadRaw) }.getOrNull()
-        val operation = payload?.path("command")?.asText()?.trim()?.lowercase()
-            ?.ifBlank { payload.path("operation").asText().trim().lowercase() }
-            .orEmpty()
-        val cronExpression = payload?.path("cron_expression")?.asText()?.ifEmpty { payload.path("cronExpression").asText() }?.trim().orEmpty()
+        val operation = payload?.path("command")?.asText()?.trim()?.lowercase().orEmpty()
+        val cronExpression = payload?.path("cron_expression")?.asText()?.trim().orEmpty()
         val category = when (operation) {
             "list", "inspect" -> "work_item_read"
             "create", "revise_plan" -> if (cronExpression.isNotBlank()) "work_item_recurring_mutation" else "work_item_mutation"

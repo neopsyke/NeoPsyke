@@ -85,6 +85,7 @@ class AnthropicChatClient(
                 .joinToString(separator = "\n\n") { it.content.trim() }
                 .ifBlank { null },
             temperature = options.temperature,
+            thinking = options.reasoningEffort?.let { effort -> effortToThinking(effort) },
             outputConfig = responseFormatAdaptation.responseFormat.toAnthropicOutputConfig()
         )
 
@@ -179,6 +180,19 @@ class AnthropicChatClient(
         private const val DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
         private const val DEFAULT_MAX_TOKENS = 1024
         private const val ANTHROPIC_API_VERSION = "2023-06-01"
+        private const val THINKING_BUDGET_LOW: Int = 1024
+        private const val THINKING_BUDGET_MEDIUM: Int = 4096
+        private const val THINKING_BUDGET_HIGH: Int = 16384
+
+        private fun effortToThinking(effort: String): AnthropicThinking =
+            AnthropicThinking(
+                budgetTokens = when (effort.trim().lowercase()) {
+                    "low" -> THINKING_BUDGET_LOW
+                    "medium" -> THINKING_BUDGET_MEDIUM
+                    "high" -> THINKING_BUDGET_HIGH
+                    else -> THINKING_BUDGET_MEDIUM
+                }
+            )
 
         private fun defaultHttpClient(): OkHttpClient =
             OkHttpClient.Builder()
@@ -235,8 +249,15 @@ private data class AnthropicMessageRequest(
     val messages: List<AnthropicChatMessage>,
     val system: String? = null,
     val temperature: Double? = null,
+    val thinking: AnthropicThinking? = null,
     @param:JsonProperty("output_config")
     val outputConfig: AnthropicOutputConfig? = null,
+)
+
+private data class AnthropicThinking(
+    val type: String = "enabled",
+    @param:JsonProperty("budget_tokens")
+    val budgetTokens: Int,
 )
 
 private data class AnthropicChatMessage(

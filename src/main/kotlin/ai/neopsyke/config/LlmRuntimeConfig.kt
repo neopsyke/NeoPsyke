@@ -32,6 +32,7 @@ data class LlmEndpointConfig(
     val apiKeyEnvVar: String,
     val baseUrl: String,
     val model: String,
+    val reasoningEffort: String? = null,
 ) {
     val providerLabel: String
         get() = provider.id
@@ -128,6 +129,8 @@ data class LlmRuntimeConfig(
 private data class LlmRuntimeYamlRole(
     val provider: String? = null,
     val model: String? = null,
+    @param:JsonProperty("reasoning_effort")
+    val reasoningEffort: String? = null,
 )
 
 private data class LlmRuntimeYamlPlannerRole(
@@ -453,7 +456,8 @@ object LlmRuntimeConfigLoader {
             apiKey = providerSettings.apiKey,
             apiKeyEnvVar = providerSettings.apiKeyEnvVar,
             baseUrl = providerSettings.baseUrl,
-            model = model
+            model = model,
+            reasoningEffort = roleConfig.reasoningEffort?.trim()?.lowercase()?.ifBlank { null },
         )
     }
 
@@ -490,7 +494,8 @@ object LlmRuntimeConfigLoader {
         return lanes.mapValues { (laneKey, role) ->
             val provider = LlmProvider.parse(role.provider)
             val model = role.model?.trim()?.ifBlank { null }
-            if (provider == null && model == null) {
+            val laneReasoningEffort = role.reasoningEffort?.trim()?.lowercase()?.ifBlank { null }
+            if (provider == null && model == null && laneReasoningEffort == null) {
                 plannerEndpoint
             } else {
                 val effectiveProvider = provider ?: plannerEndpoint.provider
@@ -504,6 +509,7 @@ object LlmRuntimeConfigLoader {
                     apiKeyEnvVar = providerSettings.apiKeyEnvVar,
                     baseUrl = providerSettings.baseUrl,
                     model = effectiveModel,
+                    reasoningEffort = laneReasoningEffort ?: plannerEndpoint.reasoningEffort,
                 )
             }
         }

@@ -49,7 +49,7 @@ boundary is wrapped with a record/replay channel (JSONL, hash-based divergence):
 
 | Channel | Wraps | Hash key |
 |---------|-------|----------|
-| `signals` | `SignalSource` (user inputs, Id cues, goal cues) | order-based |
+| `signals` | `SignalSource` (user inputs, Id cues, assignment cues) | order-based |
 | `llm-cache` | `ChatModelClient` (existing, now with volatile-stripped hashes) | SHA-256 of semantic message content |
 | `memory-recall` | `Hippocampus` recall path | cue + intent + limits |
 | `logbook-recall` | `Logbook` query path | keywords + maxResults + eventTypes |
@@ -250,16 +250,16 @@ personality:
 
 ### Problem
 
-The LLM planner can use `contact_user` to tell the user "Goal created: Daily
-8:22 am AI news summary" without ever dispatching a `goal_operation:CREATE`
+The LLM planner can use `contact_user` to tell the user "Assignment created: Daily
+8:22 am AI news summary" without ever dispatching a `assignment_operation:CREATE`
 action. This is **action hallucination** — the model claims via free-text output
 that it performed a system action it never actually executed.
 
-**Observed incident (2026-03-25):** User asked to create a second goal. The
+**Observed incident (2026-03-25):** User asked to create a second assignment. The
 planner correctly requested confirmation via `contact_user`. When the user
-confirmed, instead of dispatching `goal_operation:CREATE`, the planner issued
-another `contact_user` with payload claiming the goal was created. No
-`goal_operation` was executed. The user saw confirmation but no goal existed.
+confirmed, instead of dispatching `assignment_operation:CREATE`, the planner issued
+another `contact_user` with payload claiming the assignment was created. No
+`assignment_operation` was executed. The user saw confirmation but no assignment existed.
 
 **Why it goes undetected today:**
 - `contact_user` has `requiresFollowUpThought = false` — no verification cycle.
@@ -288,7 +288,7 @@ This fits the existing NeoPsyke architecture perfectly:
 Add an **action-claim detector** to the `DeterministicDecisionVerifier` that:
 
 1. **Pattern-matches** the `contact_user` payload for phrases that claim an
-   action was performed (e.g., "goal created", "email sent", "reminder set").
+   action was performed (e.g., "assignment created", "email sent", "reminder set").
 2. **Cross-references** against the set of action types that were actually
    dispatched and executed for the current `rootInputId`.
 3. **Denies** the `contact_user` action if a claim is detected but the
@@ -329,8 +329,8 @@ contact_user action proposed
         → if NOT: deny with reason "CLAIMED_ACTION_NOT_EXECUTED"
     → if denied: return DecisionVerifierDecision(allow=false, ...)
       → ActionReviewPipeline enqueues follow-up thought:
-        "contact_user denied: message claims 'goal created' but no
-         goal_operation was dispatched. Dispatch the actual action."
+        "contact_user denied: message claims 'assignment created' but no
+         assignment_operation was dispatched. Dispatch the actual action."
 ```
 
 #### Changes to DecisionVerifierContext
@@ -458,14 +458,14 @@ When the verifier denies a `contact_user` for action-claim hallucination, the
 existing `ActionReviewPipeline` denial flow handles it: the action is rejected,
 a thought is enqueued with the denial reason, and the planner re-evaluates.
 The denial reason explicitly says "Dispatch the actual action before reporting
-the outcome," guiding the planner to use `goal_operation` instead of
+the outcome," guiding the planner to use `assignment_operation` instead of
 `contact_user`.
 
 ### Edge Cases and Mitigations
 
 | Edge Case | Mitigation |
 |-----------|------------|
-| Payload legitimately discusses goals without claiming creation (e.g., "I can create a goal for you, would you like that?") | Patterns must match **past-tense/completed** phrasing ("goal created", "goal set up"), not future/conditional ("can create", "would you like to create") |
+| Payload legitimately discusses assignments without claiming creation (e.g., "I can create an assignment for you, would you like that?") | Patterns must match **past-tense/completed** phrasing ("assignment created", "assignment set up"), not future/conditional ("can create", "would you like to create") |
 | Action was staged but not yet authorized | `executedActionTypes` only includes fully executed actions, not staged ones. Staged actions correctly won't appear, so the verifier would deny — which is correct because the action hasn't happened yet |
 | Action was executed but in a different root input | Per-`rootInputId` scoping ensures cross-input leakage doesn't occur. The planner must dispatch the action within the same input processing cycle |
 | False positive from pattern matching | The patterns are conservative (past-tense action verbs + specific nouns). Review and tune the pattern list based on production false-positive rates. Add a WARN-level log on every denial for observability |
@@ -491,9 +491,9 @@ the outcome," guiding the planner to use `goal_operation` instead of
    - Pass `executedActionTypes` when constructing `DecisionVerifierContext`
 
 4. **`src/test/kotlin/ai/neopsyke/agent/ego/DecisionVerifierTest.kt`**
-   - Test: payload claiming "goal created" without execution → denied
-   - Test: payload claiming "goal created" with execution → allowed
-   - Test: payload asking "shall I create a goal?" → allowed (no false positive)
+   - Test: payload claiming "assignment created" without execution → denied
+   - Test: payload claiming "assignment created" with execution → allowed
+   - Test: payload asking "shall I create an assignment?" → allowed (no false positive)
    - Test: multiple claims, one executed, one not → denied for the unexecuted one
    - Test: empty `executedActionTypes` with no claims → existing behavior unchanged
 
@@ -505,9 +505,9 @@ the outcome," guiding the planner to use `goal_operation` instead of
 ### Verification
 
 1. `./gradlew test` — all existing tests pass, new tests pass.
-2. Manual scenario: Run the agent, ask to create a recurring goal. If the
+2. Manual scenario: Run the agent, ask to create a recurring assignment. If the
    planner attempts to claim creation via `contact_user` without dispatching
-   `goal_operation`, the verifier denies it and the planner retries with the
+   `assignment_operation`, the verifier denies it and the planner retries with the
    actual action.
 3. Check logs for `CLAIMED_ACTION_NOT_EXECUTED` denial events to confirm
    detection is working.
@@ -578,7 +578,7 @@ Possible future placement:
 - [The Reasoning Trap: How Reasoning Amplifies Tool Hallucination](https://arxiv.org/html/2510.22977v1)
 - [Blueprint First, Model Second](https://arxiv.org/pdf/2508.02721)
 - Incident log: run `20260325T071119Z-1289`, events id=466 (planner hallucinated
-  goal creation via contact_user without dispatching goal_operation)
+  assignment creation via contact_user without dispatching assignment_operation)
 
 ---
 
@@ -603,7 +603,7 @@ A survey of current approaches (Claude Code, Browser-Use, OpenAI, Firecrawl,
 Jina Reader, JetBrains NeurIPS research) identified four viable patterns:
 
 1. **Secondary LLM summarization** (Claude Code / Browser-Use pattern) --
-   cheap model summarizes page against the agent's goal. Proven but lossy
+   cheap model summarizes page against the active assignment. Proven but lossy
    and adds latency per fetch.
 2. **Observation masking** (JetBrains "Complexity Trap", NeurIPS 2025) --
    show full content on first step, mask on subsequent steps. Cheapest option
@@ -616,7 +616,7 @@ Jina Reader, JetBrains NeurIPS research) identified four viable patterns:
 
 **Option 4 was selected** as the best fit for Psyke's architecture.
 
-### Goal
+### Objective
 
 Split web content retrieval into two complementary actions:
 
@@ -628,7 +628,7 @@ Split web content retrieval into two complementary actions:
   from the full cached page content.
 
 The planner decides when and what to extract, keeping context usage
-goal-directed rather than dumping raw content.
+assignment-directed rather than dumping raw content.
 
 ### Design
 

@@ -153,7 +153,7 @@ class DeliberationProgressMonitor(
             }
 
             is EgoDecision.EnqueuePlan -> {
-                "plan:${normalize(decision.goal)}:steps=${decision.steps.size}"
+                "plan:${normalize(decision.assignment)}:steps=${decision.steps.size}"
             }
 
             is EgoDecision.Noop -> {

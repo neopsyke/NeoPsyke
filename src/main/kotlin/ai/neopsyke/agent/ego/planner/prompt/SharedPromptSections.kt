@@ -15,7 +15,7 @@ import java.util.Locale
  */
 object SharedPromptSections {
 
-    const val GOAL_WORKING_CONTEXT_MAX_CHARS: Int = 1_200
+    const val ASSIGNMENTING_CONTEXT_MAX_CHARS: Int = 1_200
 
     fun formatTriggerText(trigger: EgoTrigger): String =
         when (trigger) {
@@ -57,7 +57,7 @@ object SharedPromptSections {
                 val planInfo = continuation.planContext?.let { ctx ->
                     """
                     Active plan context:
-                    plan_workItem=${ctx.planGoal}
+                    plan_workItem=${ctx.planAssignment}
                     step=${ctx.stepIndex + 1}/${ctx.totalSteps}
                     step_description=${ctx.stepDescription}
                     Re-evaluate this step in light of current context. You may refine, skip, or act.
@@ -89,10 +89,10 @@ object SharedPromptSections {
                     .filter { it.isNotBlank() }
                 parts.joinToString("\n")
             }
-            is EgoTrigger.DurableWork -> {
+            is EgoTrigger.Assignment -> {
                 val wu = trigger.workUnit
                 buildString {
-                    append("GOAL_WORK(goal=, step=${wu.stepId}): ${wu.stepDescription}")
+                    append("ASSIGNMENT(assignment=, step=${wu.stepId}): ${wu.stepDescription}")
                     if (wu.runtimeFacts.isNotEmpty()) {
                         append("\nruntime_facts=")
                         append(wu.runtimeFacts.entries.joinToString(", ") { "${it.key}: ${it.value}" })
@@ -107,7 +107,7 @@ object SharedPromptSections {
                     }
                     if (wu.workingContext.isNotBlank()) {
                         append("\nworking_context=")
-                        append(wu.workingContext.take(GOAL_WORKING_CONTEXT_MAX_CHARS))
+                        append(wu.workingContext.take(ASSIGNMENTING_CONTEXT_MAX_CHARS))
                     }
                 }
             }
@@ -121,16 +121,8 @@ object SharedPromptSections {
             .ifBlank { "contact_user" }
 
     fun actionGuidanceBlock(context: PlannerContext): String {
-        val dispatchableActions = if (context.dispatchableActions.isEmpty()) {
-            context.availableActions
-        } else {
-            context.dispatchableActions
-        }
-        val plannerVisibleActions = dispatchableActions
-            .filter { context.availableActions.contains(it) }
-            .toSet()
         return context.actionDefinitions
-            .filter { plannerVisibleActions.contains(it.actionType) }
+            .filter { context.availableActions.contains(it.actionType) }
             .sortedBy { it.actionType.id }
             .joinToString("\n") { definition ->
                 val example = definition.payloadSchemaExample?.trim().orEmpty()
@@ -154,15 +146,7 @@ object SharedPromptSections {
     }
 
     fun plannerVisibleActionSchemaEnum(context: PlannerContext): String {
-        val dispatchableActions = if (context.dispatchableActions.isEmpty()) {
-            context.availableActions
-        } else {
-            context.dispatchableActions
-        }
-        val plannerVisibleActions = dispatchableActions
-            .filter { context.availableActions.contains(it) }
-            .toSet()
-        return plannerVisibleActions
+        return context.availableActions
             .map { it.id }
             .sorted()
             .joinToString("|")
@@ -190,17 +174,6 @@ object SharedPromptSections {
             .sorted()
             .joinToString(", ")
             .ifBlank { "none" }
-        val dispatchableActions = if (context.dispatchableActions.isEmpty()) {
-            context.availableActions
-        } else {
-            context.dispatchableActions
-        }
-        val unavailableActionList = dispatchableActions
-            .filterNot { context.availableActions.contains(it) }
-            .map { it.id }
-            .sorted()
-            .joinToString(", ")
-            .ifBlank { "none" }
         return PromptBudgetAllocator.Section(
             key = "planner_action_availability",
             role = ChatRole.USER,
@@ -210,8 +183,7 @@ object SharedPromptSections {
             content = """
                 Runtime action availability:
                 available_action_types=$availableActionList
-                unavailable_action_types=$unavailableActionList
-                Never propose unavailable_action_types.
+                Only propose actions from available_action_types.
             """.trimIndent()
         )
     }
@@ -328,12 +300,24 @@ object SharedPromptSections {
         }
 
     fun activeWorkItemsSection(context: PlannerContext): PromptBudgetAllocator.Section? =
-        context.goalWorkSummary.takeIf { it.isNotBlank() }?.let {
+        context.assignmentSummary.takeIf { it.isNotBlank() }?.let {
             PromptBudgetAllocator.Section(
-                key = "planner_active_goals",
+                key = "planner_active_assignments",
                 role = ChatRole.USER,
                 band = PromptBudgetAllocator.Band.OPTIONAL,
-                content = "Persistent goals (resolve references into typed goal_reference / goal_id fields for durable_work_operation):\n$it"
+                content = "Active assignment items (resolve numbered references into typed work_item_reference fields for assignment_operation):\n$it"
+            )
+        }
+
+    fun reviewableResponsibilitiesSection(context: PlannerContext): PromptBudgetAllocator.Section? =
+        context.reviewableResponsibilitySummary.takeIf { it.isNotBlank() }?.let {
+            PromptBudgetAllocator.Section(
+                key = "planner_reviewable_responsibilities",
+                role = ChatRole.USER,
+                band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
+                importance = PromptBudgetAllocator.Importance.HIGH,
+                floorTokens = 24,
+                content = "Responsibilities eligible for review:\n$it"
             )
         }
 
@@ -386,7 +370,14 @@ object SharedPromptSections {
                 band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
                 importance = PromptBudgetAllocator.Importance.HIGH,
                 floorTokens = 40,
-                content = buildSelfMotivatedContext(idState),
+                content = buildString {
+                    append(buildSelfMotivatedContext(idState))
+                    context.reviewableResponsibilitySummary.takeIf { it.isNotBlank() }?.let {
+                        append("\n\nReviewable responsibility slate:\n")
+                        append(it)
+                        append("\nIf advancing an existing responsibility is the best useful move, you may choose action_type=assignment_operation with a typed review command against one numbered responsibility.")
+                    }
+                },
             )
         }
 

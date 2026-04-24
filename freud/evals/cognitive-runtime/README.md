@@ -29,6 +29,6 @@ The inputs intentionally target the architectural seams under migration:
 - `phase-6-policy-control.txt`
 - `phase-7-convergence.txt`
 
-Goal-runtime eval coverage has moved to `freud/evals/plan-refinement/`.
+Assignment-runtime eval coverage has moved to `freud/evals/plan-refinement/`.
 
 The security architecture is documented in `docs/security.md`.

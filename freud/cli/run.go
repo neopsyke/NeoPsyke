@@ -28,7 +28,7 @@ var (
 	runSkipSteps      []string
 	runContinueOnFail bool
 	runTimeout        int
-	runGoals          *bool
+	runAssignments    *bool
 )
 
 func init() {
@@ -42,8 +42,8 @@ func init() {
 	runCmd.Flags().BoolVar(&runContinueOnFail, "continue-on-fail", false, "don't stop on first failure")
 	runCmd.Flags().IntVar(&runTimeout, "timeout", 0, "override live_eval.timeout (seconds)")
 
-	runCmd.Flags().Bool("goals", false, "enable goals subsystem")
-	runCmd.Flags().Bool("no-goals", false, "disable goals subsystem")
+	runCmd.Flags().Bool("assignments", false, "enable assignments subsystem")
+	runCmd.Flags().Bool("no-assignments", false, "disable assignments subsystem")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -61,9 +61,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 		cfg.Runtime.ContinueOnFail = true
 	}
 
-	goals := resolveGoals(cmd)
-	if goals != nil {
-		cfg.LiveEval.GoalsEnabled = *goals
+	assignments := resolveAssignments(cmd)
+	if assignments != nil {
+		cfg.LiveEval.AssignmentsEnabled = *assignments
 	}
 
 	errs := config.Validate(cfg, "run", &config.ValidationOpts{
@@ -88,7 +88,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		FromStep:       runFromStep,
 		OnlyStep:       runOnlyStep,
 		SkipSteps:      runSkipSteps,
-		GoalsEnabled:   goals,
+		AssignmentsEnabled: assignments,
 		Cfg:            cfg,
 		Verbose:        verbose,
 	})
@@ -101,17 +101,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// resolveGoals returns nil if neither --goals nor --no-goals was set,
+// resolveAssignments returns nil if neither --assignments nor --no-assignments was set,
 // or a pointer to the resolved value.
-func resolveGoals(cmd *cobra.Command) *bool {
-	goalsSet := cmd.Flags().Changed("goals")
-	noGoalsSet := cmd.Flags().Changed("no-goals")
+func resolveAssignments(cmd *cobra.Command) *bool {
+	assignmentsSet := cmd.Flags().Changed("assignments")
+	noAssignmentsSet := cmd.Flags().Changed("no-assignments")
 
-	if noGoalsSet {
+	if noAssignmentsSet {
 		v := false
 		return &v
 	}
-	if goalsSet {
+	if assignmentsSet {
 		v := true
 		return &v
 	}

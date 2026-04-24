@@ -1,6 +1,6 @@
 package ai.neopsyke.agent.config
 
-import ai.neopsyke.agent.durablework.DurableWorkConfig
+import ai.neopsyke.agent.assignments.AssignmentConfig
 import ai.neopsyke.agent.model.PolicyScope
 import ai.neopsyke.dashboard.InnerVoiceConfig
 
@@ -18,7 +18,7 @@ data class AgentConfig(
     val builtinTools: BuiltinToolsConfig = BuiltinToolsConfig(),
     val nativeIntegrations: NativeIntegrationsConfig = NativeIntegrationsConfig(),
     val innerVoice: InnerVoiceConfig = InnerVoiceConfig(),
-    val durableWork: DurableWorkConfig = DurableWorkConfig(),
+    val assignment: AssignmentConfig = AssignmentConfig(),
     val loopDelayMs: Int = 0,
     val maxPendingContinuations: Int = 64,
     val maxPendingActions: Int = 32,

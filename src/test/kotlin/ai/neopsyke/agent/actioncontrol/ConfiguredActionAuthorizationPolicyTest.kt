@@ -120,16 +120,16 @@ class ConfiguredActionAuthorizationPolicyTest {
     }
 
     @Test
-    fun `recurring goal mutation is staged even for trusted owner`() {
+    fun `recurring assignment mutation is staged even for trusted owner`() {
         val policy = ConfiguredActionAuthorizationPolicy()
         val context = ownerContext()
         val decision = policy.authorize(
             action = PendingAction(
                 id = 3,
                 urgency = Urgency.HIGH,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"create","title":"Reminder","instruction":"Ping me","cron_expression":"0 9 * * *"}""",
-                summary = "create recurring goal",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"create","title":"Reminder","instruction":"Ping me","cron_expression":"0 9 * * *"}""",
+                summary = "create recurring assignment",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
@@ -138,20 +138,20 @@ class ConfiguredActionAuthorizationPolicyTest {
         )
 
         assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
-        assertEquals("POLICY_RECURRING_GOAL_STAGE_REQUIRED", decision.reasonCode)
+        assertEquals("POLICY_RECURRING_ASSIGNMENT_STAGE_REQUIRED", decision.reasonCode)
     }
 
     @Test
-    fun `goal operation is denied when action arguments come from tainted thread data`() {
+    fun `assignment operation is denied when action arguments come from tainted thread data`() {
         val policy = ConfiguredActionAuthorizationPolicy()
         val context = ownerContext()
         val decision = policy.authorize(
             action = PendingAction(
                 id = 4,
                 urgency = Urgency.HIGH,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"create","title":"Injected","instruction":"Do the thing"}""",
-                summary = "create tainted goal",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"create","title":"Injected","instruction":"Do the thing"}""",
+                summary = "create tainted assignment",
                 argumentDataTrust = DataTrust.SANITIZED_EXTERNAL_DATA,
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
@@ -165,16 +165,16 @@ class ConfiguredActionAuthorizationPolicyTest {
     }
 
     @Test
-    fun `exact goal delete is allowed only for owner direct channels`() {
+    fun `exact assignment delete is allowed only for owner direct channels`() {
         val policy = ConfiguredActionAuthorizationPolicy()
         val context = ownerContext()
         val decision = policy.authorize(
             action = PendingAction(
                 id = 5,
                 urgency = Urgency.HIGH,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
-                summary = "delete goal",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"delete","work_item_id":"assignment-123"}""",
+                summary = "delete assignment",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
@@ -194,9 +194,9 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 6,
                 urgency = Urgency.HIGH,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"delete_all"}""",
-                summary = "delete all goals",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"delete_all"}""",
+                summary = "delete all assignments",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
@@ -206,7 +206,7 @@ class ConfiguredActionAuthorizationPolicyTest {
 
         assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
         assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
-        assertEquals("POLICY_GOAL_DELETE_ALL_STAGE_REQUIRED", decision.reasonCode)
+        assertEquals("POLICY_ASSIGNMENT_DELETE_ALL_STAGE_REQUIRED", decision.reasonCode)
     }
 
     @Test
@@ -218,9 +218,9 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 61,
                 urgency = Urgency.HIGH,
-                type = ActionType.DURABLE_WORK_OPERATION,
+                type = ActionType.ASSIGNMENT_OPERATION,
                 payload = """{"command":"delete_all"}""",
-                summary = "delete all goals",
+                summary = "delete all assignments",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
@@ -230,7 +230,7 @@ class ConfiguredActionAuthorizationPolicyTest {
 
         assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
         assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
-        assertEquals("POLICY_GOAL_DELETE_ALL_STAGE_REQUIRED", decision.reasonCode)
+        assertEquals("POLICY_ASSIGNMENT_DELETE_ALL_STAGE_REQUIRED", decision.reasonCode)
     }
 
     @Test
@@ -241,9 +241,9 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 300,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
-                summary = "stage goal delete",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"delete","work_item_id":"assignment-123"}""",
+                summary = "stage assignment delete",
                 conversationContext = context,
                 intentionKind = IntentionKind.STAGE,
                 requestedCommitMode = CommitMode.POLICY_AUTONOMOUS,
@@ -266,9 +266,9 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 301,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
-                summary = "request approval for goal delete",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"delete","work_item_id":"assignment-123"}""",
+                summary = "request approval for assignment delete",
                 conversationContext = context,
                 intentionKind = IntentionKind.REQUEST_AUTHORIZATION,
                 requestedCommitMode = CommitMode.APPROVAL_BACKED,
@@ -291,9 +291,9 @@ class ConfiguredActionAuthorizationPolicyTest {
             action = PendingAction(
                 id = 302,
                 urgency = Urgency.MEDIUM,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
-                summary = "commit goal delete without stage",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"delete","work_item_id":"assignment-123"}""",
+                summary = "commit assignment delete without stage",
                 conversationContext = context,
                 intentionKind = IntentionKind.COMMIT,
                 requestedCommitMode = CommitMode.APPROVAL_BACKED,
@@ -308,16 +308,16 @@ class ConfiguredActionAuthorizationPolicyTest {
     }
 
     @Test
-    fun `ambiguous goal delete is staged even for trusted owner direct channel`() {
+    fun `ambiguous assignment delete is staged even for trusted owner direct channel`() {
         val policy = ConfiguredActionAuthorizationPolicy()
         val context = ownerContext()
         val decision = policy.authorize(
             action = PendingAction(
                 id = 7,
                 urgency = Urgency.HIGH,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"delete"}""",
-                summary = "delete some goal",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"delete"}""",
+                summary = "delete some assignment",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
@@ -327,20 +327,20 @@ class ConfiguredActionAuthorizationPolicyTest {
 
         assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
         assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
-        assertEquals("POLICY_GOAL_DELETE_AMBIGUOUS_STAGE_REQUIRED", decision.reasonCode)
+        assertEquals("POLICY_ASSIGNMENT_DELETE_AMBIGUOUS_STAGE_REQUIRED", decision.reasonCode)
     }
 
     @Test
-    fun `exact goal delete from external participant is staged`() {
+    fun `exact assignment delete from external participant is staged`() {
         val policy = ConfiguredActionAuthorizationPolicy()
         val context = externalContext()
         val decision = policy.authorize(
             action = PendingAction(
                 id = 8,
                 urgency = Urgency.HIGH,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
-                summary = "delete goal from external",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"delete","work_item_id":"assignment-123"}""",
+                summary = "delete assignment from external",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
@@ -354,16 +354,16 @@ class ConfiguredActionAuthorizationPolicyTest {
     }
 
     @Test
-    fun `exact goal delete from owner group channel is staged`() {
+    fun `exact assignment delete from owner group channel is staged`() {
         val policy = ConfiguredActionAuthorizationPolicy()
         val context = ownerGroupContext()
         val decision = policy.authorize(
             action = PendingAction(
                 id = 9,
                 urgency = Urgency.HIGH,
-                type = ActionType.DURABLE_WORK_OPERATION,
-                payload = """{"operation":"delete","work_item_id":"goal-123"}""",
-                summary = "delete goal from owner group channel",
+                type = ActionType.ASSIGNMENT_OPERATION,
+                payload = """{"command":"delete","work_item_id":"assignment-123"}""",
+                summary = "delete assignment from owner group channel",
                 conversationContext = context,
                 groundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
             ),
@@ -373,6 +373,6 @@ class ConfiguredActionAuthorizationPolicyTest {
 
         assertEquals(AuthorizationProgress.ALLOW_STAGE, decision.progress)
         assertEquals(CommitMode.APPROVAL_BACKED, decision.commitMode)
-        assertEquals("POLICY_GOAL_DELETE_OWNER_DIRECT_REQUIRED", decision.reasonCode)
+        assertEquals("POLICY_ASSIGNMENT_DELETE_OWNER_DIRECT_REQUIRED", decision.reasonCode)
     }
 }

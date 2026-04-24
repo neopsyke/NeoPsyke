@@ -282,7 +282,7 @@ object AgentEvents {
                 "root_input_id" to rootInputId,
                 "is_empty" to ambientContext.isEmpty(),
                 "rendered_context" to ambientContext.render(),
-                "active_goals" to ambientContext.activeWorkItems,
+                "active_assignments" to ambientContext.activeWorkItems,
                 "recent_scratchpad_themes" to ambientContext.recentScratchpadThemes,
                 "recent_useful_actions_updates" to ambientContext.recentUsefulActionsOrUpdates,
                 "unresolved_open_loops" to ambientContext.unresolvedOpenLoops,
@@ -472,12 +472,12 @@ object AgentEvents {
             )
         )
 
-    fun planCreated(planId: String, goal: String, stepCount: Int, urgency: String, steps: List<String> = emptyList(), rootInputId: String? = null): AgentEvent =
+    fun planCreated(planId: String, assignment: String, stepCount: Int, urgency: String, steps: List<String> = emptyList(), rootInputId: String? = null): AgentEvent =
         AgentEvent(
             type = "plan_created",
             data = mapOf(
                 "plan_id" to planId,
-                "goal" to goal,
+                "assignment" to assignment,
                 "step_count" to stepCount,
                 "urgency" to urgency,
                 "steps" to steps,
@@ -519,12 +519,12 @@ object AgentEvents {
             )
         )
 
-    fun durableWorkMissingPlan(
+    fun assignmentMissingPlan(
         workItemId: String,
         path: String,
     ): AgentEvent =
         AgentEvent(
-            type = "durable_work_missing_plan",
+            type = "assignment_missing_plan",
             data = mapOf(
                 "work_item_id" to workItemId,
                 "path" to path,
@@ -694,60 +694,60 @@ object AgentEvents {
             )
         )
 
-    // ── Goal events ───────────────────────────────────────────────────
+    // ── Assignment events ─────────────────────────────────────────────
 
-    fun durableWorkCreated(goalId: String, title: String, priority: String): AgentEvent =
+    fun assignmentCreated(assignmentId: String, title: String, priority: String): AgentEvent =
         AgentEvent(
-            type = "durable_work_created",
-            data = mapOf("goal_id" to goalId, "title" to title, "priority" to priority)
+            type = "assignment_created",
+            data = mapOf("assignment_id" to assignmentId, "title" to title, "priority" to priority)
         )
 
-    fun durableWorkStatusChanged(goalId: String, oldStatus: String, newStatus: String): AgentEvent =
+    fun assignmentStatusChanged(assignmentId: String, oldStatus: String, newStatus: String): AgentEvent =
         AgentEvent(
-            type = "durable_work_status_changed",
-            data = mapOf("goal_id" to goalId, "previous_status" to oldStatus, "current_status" to newStatus)
+            type = "assignment_status_changed",
+            data = mapOf("assignment_id" to assignmentId, "previous_status" to oldStatus, "current_status" to newStatus)
         )
 
-    fun durableWorkStepStarted(goalId: String, stepId: String, description: String): AgentEvent =
+    fun assignmentStepStarted(assignmentId: String, stepId: String, description: String): AgentEvent =
         AgentEvent(
-            type = "durable_work_step_started",
-            data = mapOf("goal_id" to goalId, "step_id" to stepId, "description" to description)
+            type = "assignment_step_started",
+            data = mapOf("assignment_id" to assignmentId, "step_id" to stepId, "description" to description)
         )
 
-    fun durableWorkStepCompleted(goalId: String, stepId: String, success: Boolean, attempts: Int): AgentEvent =
+    fun assignmentStepCompleted(assignmentId: String, stepId: String, success: Boolean, attempts: Int): AgentEvent =
         AgentEvent(
-            type = "durable_work_step_completed",
+            type = "assignment_step_completed",
             data = mapOf(
-                "goal_id" to goalId, "step_id" to stepId,
+                "assignment_id" to assignmentId, "step_id" to stepId,
                 "success" to success, "attempts" to attempts,
             )
         )
 
-    fun durableWorkCycleCompleted(goalId: String, stepId: String, actionsExecuted: Int): AgentEvent =
+    fun assignmentCycleCompleted(assignmentId: String, stepId: String, actionsExecuted: Int): AgentEvent =
         AgentEvent(
-            type = "durable_work_cycle_completed",
+            type = "assignment_cycle_completed",
             data = mapOf(
-                "goal_id" to goalId, "step_id" to stepId,
+                "assignment_id" to assignmentId, "step_id" to stepId,
                 "actions_executed" to actionsExecuted,
             )
         )
 
-    fun durableWorkWakeUp(goalId: String, path: String, signalType: String): AgentEvent =
+    fun assignmentWakeUp(assignmentId: String, path: String, signalType: String): AgentEvent =
         AgentEvent(
-            type = "durable_work_wake_up",
-            data = mapOf("goal_id" to goalId, "path" to path, "signal_type" to signalType)
+            type = "assignment_wake_up",
+            data = mapOf("assignment_id" to assignmentId, "path" to path, "signal_type" to signalType)
         )
 
-    fun durableWorkBlocked(goalId: String, stepId: String, conditionType: String): AgentEvent =
+    fun assignmentBlocked(assignmentId: String, stepId: String, conditionType: String): AgentEvent =
         AgentEvent(
-            type = "durable_work_blocked",
-            data = mapOf("goal_id" to goalId, "step_id" to stepId, "condition_type" to conditionType)
+            type = "assignment_blocked",
+            data = mapOf("assignment_id" to assignmentId, "step_id" to stepId, "condition_type" to conditionType)
         )
 
-    fun durableWorkCompleted(goalId: String): AgentEvent =
+    fun assignmentCompleted(assignmentId: String): AgentEvent =
         AgentEvent(
-            type = "durable_work_completed",
-            data = mapOf("goal_id" to goalId)
+            type = "assignment_completed",
+            data = mapOf("assignment_id" to assignmentId)
         )
 
     // ── Cognitive pipeline observability ────────────────────────────────
@@ -758,9 +758,9 @@ object AgentEvents {
             data = mapOf("reason" to reason)
         )
 
-    fun durableWorkUnavailable(cueType: String): AgentEvent =
+    fun assignmentUnavailable(cueType: String): AgentEvent =
         AgentEvent(
-            type = "durable_work_unavailable",
+            type = "assignment_unavailable",
             data = mapOf("cue_type" to cueType)
         )
 }

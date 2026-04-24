@@ -2,9 +2,9 @@ package ai.neopsyke.agent.model
 
 import ai.neopsyke.agent.cortex.motor.actions.async.AsyncActionWait
 import ai.neopsyke.agent.id.ConvergenceMode
-import ai.neopsyke.agent.durablework.DurableWorkActivation
-import ai.neopsyke.agent.durablework.StepStatus
-import ai.neopsyke.agent.durablework.WorkItemStatus
+import ai.neopsyke.agent.assignments.AssignmentActivation
+import ai.neopsyke.agent.assignments.StepStatus
+import ai.neopsyke.agent.assignments.WorkItemStatus
 import java.util.UUID
 
 /**
@@ -45,7 +45,7 @@ data class AmbientContext(
         if (isEmpty()) return ""
         return buildString {
             append("Optional relevance signals:\n")
-            appendSection("active_goals", activeWorkItems)
+            appendSection("active_assignments", activeWorkItems)
             appendSection("recent_scratchpad_themes", recentScratchpadThemes)
             appendSection("recent_useful_actions_updates", recentUsefulActionsOrUpdates)
             appendSection("unresolved_open_loops", unresolvedOpenLoops)
@@ -65,7 +65,7 @@ data class AmbientContext(
     }
 }
 
-data class DurableWorkPlanStepSnapshot(
+data class AssignmentPlanStepSnapshot(
     val id: String,
     val description: String,
     val status: StepStatus,
@@ -76,8 +76,9 @@ data class DurableWorkPlanStepSnapshot(
     val maxAttempts: Int = 3,
 )
 
-data class DurableWorkItemSnapshot(
+data class AssignmentItemSnapshot(
     val workItemId: String,
+    val kind: ai.neopsyke.agent.assignments.WorkItemKind = ai.neopsyke.agent.assignments.WorkItemKind.RECURRENT_TASK,
     val title: String,
     val instruction: String,
     val completionCriteria: String,
@@ -85,7 +86,7 @@ data class DurableWorkItemSnapshot(
     val planRevision: Int,
     val failureCountInWindow: Int = 0,
     val latestArtifactSummary: String? = null,
-    val planSteps: List<DurableWorkPlanStepSnapshot> = emptyList(),
+    val planSteps: List<AssignmentPlanStepSnapshot> = emptyList(),
 )
 
 data class PlannerContext(
@@ -116,13 +117,15 @@ data class PlannerContext(
     ),
     val allowedCommitModes: Set<CommitMode> = CommitMode.entries.toSet(),
     val availableActions: Set<ActionType> = ActionType.entries.toSet(),
-    val dispatchableActions: Set<ActionType> = availableActions,
+    val availableContactChannels: Set<String> = emptySet(),
     val actionDefinitions: List<ActionPlanningDefinition> = emptyList(),
     val conversationContext: ConversationContext = ConversationContext.default(),
     val idState: IdStateSnapshot? = null,
-    val goalWorkSummary: String = "",
-    val goalIndex: Map<Int, String> = emptyMap(),
-    val goalSnapshots: Map<String, DurableWorkItemSnapshot> = emptyMap(),
+    val assignmentSummary: String = "",
+    val assignmentIndex: Map<Int, String> = emptyMap(),
+    val assignmentSnapshots: Map<String, AssignmentItemSnapshot> = emptyMap(),
+    val reviewableResponsibilitySummary: String = "",
+    val reviewableResponsibilityIndex: Map<Int, String> = emptyMap(),
     val groundingMetadata: GroundingMetadata = GroundingMetadata.NOT_REQUIRED_PREFILTER,
 )
 
@@ -154,7 +157,7 @@ sealed interface EgoTrigger {
     data class Continuation(val continuation: QueuedContinuation) : EgoTrigger
     data class ActionFeedback(val feedback: PendingFeedback) : EgoTrigger
     data class IncomingImpulse(val impulse: PendingImpulse) : EgoTrigger
-    data class DurableWork(val workUnit: DurableWorkActivation) : EgoTrigger
+    data class Assignment(val workUnit: AssignmentActivation) : EgoTrigger
 }
 
 sealed interface EgoDecision {
@@ -182,7 +185,7 @@ sealed interface EgoDecision {
 
     data class EnqueuePlan(
         val urgency: Urgency,
-        val goal: String,
+        val assignment: String,
         val steps: List<String>,
     ) : EgoDecision
 }

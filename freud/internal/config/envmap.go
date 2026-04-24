@@ -16,7 +16,7 @@ var LaneNames = []string{"low-llm", "high-llm"}
 // that don't follow the FREUD_ prefix convention.
 var ManualEnvBindings = map[string]string{
 	"NEOPSYKE_LLM_CONFIG_FILE":             "live_eval.llm_config_file",
-	"NEOPSYKE_GOALS_ENABLED":               "live_eval.goals_enabled",
+	"NEOPSYKE_ASSIGNMENTS_ENABLED":               "live_eval.assignments_enabled",
 	"NEOPSYKE_ID_ENABLED":                  "runtime.id_enabled",
 	"EGO_SCRATCHPAD_DEBUG_CAPTURE_ENABLED": "runtime.scratchpad_debug",
 	"FREUD_BBH_MIN_PASS_RATE_PERCENT":      "bbh.min_pass_rate",

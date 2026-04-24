@@ -30,6 +30,7 @@ import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.dashboard.DashboardStateStore
+import ai.neopsyke.support.StubChatModelClient
 import ai.neopsyke.session.SessionRecordingManager
 import ai.neopsyke.session.SessionRecordingMode
 import java.nio.file.Files
@@ -163,11 +164,12 @@ class ApprovalE2ETest {
         val dashboardStore = DashboardStateStore()
         dashboardStore.ensureChatSession(staged.conversationContext.sessionId)
         dashboardStore.ensureChatSession(ConversationContext.DEFAULT_SESSION_ID)
+        val llmClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }
         SqliteApprovalStore(tempDb.toString()).use { store ->
             val runtime = ApprovalRuntime(
                 config = AgentConfig(), store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = TelegramChannelConfig(enabled = false), telegramSink = null,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), llmClient),
                 forwardNormalInput = { _, _, _, _ -> true }, onApprovalExecuted = {}, onApprovalDenied = {},
             )
             runtime.onApprovalStaged(staged.summary, staged, "Owner approval required.", "NEEDS_APPROVAL", staged.conversationContext)
@@ -191,11 +193,12 @@ class ApprovalE2ETest {
         val dashboardStore = DashboardStateStore()
         dashboardStore.ensureChatSession(staged.conversationContext.sessionId)
         dashboardStore.ensureChatSession(ConversationContext.DEFAULT_SESSION_ID)
+        val llmClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"deny"}""") }
         SqliteApprovalStore(tempDb.toString()).use { store ->
             val runtime = ApprovalRuntime(
                 config = AgentConfig(), store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = TelegramChannelConfig(enabled = false), telegramSink = null,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), llmClient),
                 forwardNormalInput = { _, _, _, _ -> true }, onApprovalExecuted = {}, onApprovalDenied = {},
             )
             runtime.onApprovalStaged(staged.summary, staged, "Owner approval required.", "NEEDS_APPROVAL", staged.conversationContext)
@@ -220,11 +223,12 @@ class ApprovalE2ETest {
         dashboardStore.ensureChatSession(staged.conversationContext.sessionId)
         dashboardStore.ensureChatSession(ConversationContext.DEFAULT_SESSION_ID)
         val forwarded = mutableListOf<Pair<String, ConversationContext>>()
+        val llmClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"deny_and_reissue"}""") }
         SqliteApprovalStore(tempDb.toString()).use { store ->
             val runtime = ApprovalRuntime(
                 config = AgentConfig(), store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = TelegramChannelConfig(enabled = false), telegramSink = null,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), llmClient),
                 forwardNormalInput = { content, source, _, context -> forwarded += "$source::$content" to context; true },
                 onApprovalExecuted = {}, onApprovalDenied = {},
             )
@@ -323,11 +327,12 @@ class ApprovalE2ETest {
         dashboardStore.ensureChatSession(ConversationContext.DEFAULT_SESSION_ID)
         val telegramSink = FakeTelegramSink()
         val telegramConfig = TelegramChannelConfig(enabled = true, ownerChatId = "tg-owner", ownerUserId = "owner")
+        val llmClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }
         SqliteApprovalStore(tempDb.toString()).use { store ->
             val runtime = ApprovalRuntime(
                 config = AgentConfig(), store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = telegramConfig, telegramSink = telegramSink,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), llmClient),
                 forwardNormalInput = { _, _, _, _ -> true }, onApprovalExecuted = {}, onApprovalDenied = {},
             )
             runtime.onApprovalStaged(staged.summary, staged, "Approval.", "NEEDS_APPROVAL", tgCtx)
@@ -348,18 +353,21 @@ class ApprovalE2ETest {
     }
 
     @Test
-    fun `7 fallback classifier uses deterministic path with expected default behavior`() = runBlocking {
+    fun `7 classifier uses LLM path with expected default behavior`() = runBlocking {
         val staged = stagedAction()
         val tempDb = Files.createTempFile("e2e-classifier", ".db")
         val actionControl = FakeActionControlService(staged)
         val dashboardStore = DashboardStateStore()
         dashboardStore.ensureChatSession(staged.conversationContext.sessionId)
         dashboardStore.ensureChatSession(ConversationContext.DEFAULT_SESSION_ID)
+        val llmClient = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"approve"}""")
+        }
         SqliteApprovalStore(tempDb.toString()).use { store ->
             val runtime = ApprovalRuntime(
                 config = AgentConfig(), store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = TelegramChannelConfig(enabled = false), telegramSink = null,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), llmClient),
                 forwardNormalInput = { _, _, _, _ -> true }, onApprovalExecuted = {}, onApprovalDenied = {},
             )
             runtime.onApprovalStaged(staged.summary, staged, "Approval.", "NEEDS_APPROVAL", staged.conversationContext)
@@ -368,7 +376,7 @@ class ApprovalE2ETest {
             assertEquals(1, actionControl.authorizeCalls)
             val request = store.requestByStagedActionId(staged.id)
             assertNotNull(request)
-            assertEquals(false, request.usedModelAssistance)
+            assertEquals(true, request.usedModelAssistance)
 
             runtime.close()
             dashboardStore.close()
@@ -389,10 +397,11 @@ class ApprovalE2ETest {
         SessionRecordingManager(mode = SessionRecordingMode.RECORD, sessionDir = sessionDir).use { recordingManager ->
             SqliteApprovalStore(recordDb.toString()).use { store ->
                 val actionControl = FakeActionControlService(staged)
+                val recordLlm = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }
                 val runtime = ApprovalRuntime(
                     config = AgentConfig(), store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                     telegramConfig = TelegramChannelConfig(enabled = false), telegramSink = null,
-                    interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                    interpreter = DefaultApprovalInterpreter(AgentConfig(), recordLlm),
                     forwardNormalInput = { _, _, _, _ -> true }, onApprovalExecuted = {}, onApprovalDenied = {},
                     sessionRecordingManager = recordingManager,
                 )

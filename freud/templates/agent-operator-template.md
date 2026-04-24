@@ -16,7 +16,7 @@ You are a coding agent working in this repository. Follow AGENTS.md and use the 
 
 Feature:
 - feature_id: <feature-id-slug>
-- goal: <one-sentence outcome>
+- assignment: <one-sentence outcome>
 
 Acceptance Checks:
      1. Propose a deterministic behavior check

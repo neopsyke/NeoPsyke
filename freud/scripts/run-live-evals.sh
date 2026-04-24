@@ -41,7 +41,7 @@ run_eval() {
         PASS=$((PASS + 1))
         RESULTS+=("PASS  $name")
     elif [ "$verdict" = "timeout" ] && [ "$expect_timeout" = "true" ]; then
-        # For goal evals, timeout is expected (approval blocks). Verify the
+        # For assignment evals, timeout is expected (approval blocks). Verify the
         # pipeline completed up to staging by checking telemetry events.
         local pipeline_ok=true
         if [ -n "$run_dir" ] && [ -f "$run_dir/logs/events.jsonl" ]; then
@@ -70,16 +70,16 @@ run_eval() {
 echo "=== Live Eval Pack (lane=$LANE) ==="
 echo ""
 
-# Cognitive-runtime evals (no goals)
+# Cognitive-runtime evals (no assignments)
 for f in freud/evals/cognitive-runtime/phase-*.txt; do
     [ -f "$f" ] || continue
     run_eval "$f" "" false
 done
 
-# Plan-refinement evals (goals enabled, timeout expected)
+# Plan-refinement evals (assignments enabled, timeout expected)
 for f in freud/evals/plan-refinement/*.txt; do
     [ -f "$f" ] || continue
-    run_eval "$f" "--goals" true
+    run_eval "$f" "--assignments" true
 done
 
 echo ""

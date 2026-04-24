@@ -11,7 +11,7 @@ sealed interface ProgressionDecision {
 
     data class RefinePlan(
         val urgency: Urgency = Urgency.MEDIUM,
-        val goal: String,
+        val assignment: String,
         val steps: List<PlanDecomposition.PlanStep>,
     ) : ProgressionDecision
 

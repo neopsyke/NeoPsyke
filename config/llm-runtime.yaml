@@ -1,4 +1,6 @@
 providers:
+  # Anthropic: when reasoning_effort is not set, extended thinking is disabled entirely
+  # (the thinking field is omitted and the model uses standard non-thinking mode).
   anthropic:
     api_key_env: ANTHROPIC_API_KEY
     base_url: https://api.anthropic.com/v1
@@ -31,62 +33,97 @@ providers:
     default_model: gpt-4o-mini
     default_web_search_model: gpt-4o-mini
 
+# reasoning_effort: low | medium | high (omit to use provider default)
+# - OpenAI/Groq: maps to reasoning_effort API parameter (default: medium)
+# - Anthropic: maps to thinking budget tokens (low=1024, medium=4096, high=16384)
+# - Gemini: maps to reasoning_effort via OpenAI-compat (default: provider decides)
+# - Mistral/Ollama: ignored (no reasoning models)
 cognitive_roles:
   planner:
     provider: groq
     model: openai/gpt-oss-120b
+    reasoning_effort: medium  # core planning engine — needs solid reasoning
     lanes:
       input_intent_router:
         provider: groq
         model: openai/gpt-oss-120b
+        reasoning_effort: low  # simple intent routing — fast classification
       direct_response:
         provider: groq
         model: openai/gpt-oss-120b
+        reasoning_effort: medium
       general_action:
         provider: groq
         model: openai/gpt-oss-120b
+        reasoning_effort: medium
       task_decomposition:
         provider: groq
         model: openai/gpt-oss-120b
-      goal_creation:
+        reasoning_effort: medium
+      assignment_generic:
         provider: groq
         model: openai/gpt-oss-120b
-      goal_management:
+        reasoning_effort: low
+      assignment_recurrent_task:
         provider: groq
         model: openai/gpt-oss-120b
+        reasoning_effort: medium
+      assignment_responsibility:
+        provider: groq
+        model: openai/gpt-oss-120b
+        reasoning_effort: high
+      assignment_creation:
+        provider: groq
+        model: openai/gpt-oss-120b
+        reasoning_effort: medium
+      assignment_management:
+        provider: groq
+        model: openai/gpt-oss-120b
+        reasoning_effort: low  # lifecycle ops (pause/resume/delete) are straightforward
       deferred_step:
         provider: groq
         model: openai/gpt-oss-120b
+        reasoning_effort: medium
       feedback:
         provider: groq
         model: openai/gpt-oss-120b
-      goal_work:
+        reasoning_effort: medium
+      assignment:
         provider: groq
         model: openai/gpt-oss-120b
+        reasoning_effort: medium
       impulse:
         provider: groq
         model: openai/gpt-oss-120b
+        reasoning_effort: low  # id-driven impulse responses — keep fast
       grounding_classifier:
         provider: openai
         model: gpt-5-nano
+        reasoning_effort: low  # binary classification — requires/not_required
   superego_primary:
     provider: groq
     model: openai/gpt-oss-120b
+    reasoning_effort: low  # allow/deny safety check — fast pass/fail
   superego_escalation:
     provider: openai
     model: gpt-4.1-mini
+    reasoning_effort: medium  # escalated edge cases need more careful review
   meta_reasoner:
     provider: groq
     model: openai/gpt-oss-120b
+    reasoning_effort: medium  # deliberation pressure assessment — moderate complexity
   meta_reasoner_fallback:
     provider: openai
     model: gpt-5-mini
+    reasoning_effort: medium
   memory_advisor:
     provider: groq
     model: openai/gpt-oss-120b
+    reasoning_effort: low  # save/skip memory assessment — straightforward
   approval_interpreter:
     provider: openai
     model: gpt-5-nano
+    reasoning_effort: low  # simple classification — approve/deny/reissue
 
 web_search:
   provider: groq

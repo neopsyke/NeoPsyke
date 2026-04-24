@@ -2,12 +2,12 @@
 
 ## Status
 - Draft
-- Scope: Ego planner redesign and adjacent goal-operation semantics
+- Scope: Ego planner redesign and adjacent assignment-operation semantics
 
 ## Purpose
 - Replace the current monolithic planner with a typed hierarchical planner architecture.
 - Preserve all current end-to-end functionality and behavior, including current planner-driven feature coverage, while improving separation of concerns, prompt scope, architectural clarity, and future extensibility.
-- Remove deterministic natural-language routing and semantic text heuristics from the planner stack and adjacent goal-operation execution path.
+- Remove deterministic natural-language routing and semantic text heuristics from the planner stack and adjacent assignment-operation execution path.
 
 ## Problem Statement
 - [`LlmEgoPlanner`](../../src/main/kotlin/ai/neopsyke/agent/ego/LlmEgoPlanner.kt) currently combines multiple responsibilities in one class:
@@ -15,12 +15,12 @@
   - prompt construction
   - model calling and retry behavior
   - structured output repair and parsing
-  - goal creation handling
+  - assignment creation handling
   - plan generation
   - next-action selection
   - post-planner action verification
 - The current design requires a broad prompt and wide decision surface for many planner calls.
-- Current goal-related routing and execution still depend on deterministic text heuristics in multiple places, which is brittle and does not scale across languages or model choices.
+- Current assignment-related routing and execution still depend on deterministic text heuristics in multiple places, which is brittle and does not scale across languages or model choices.
 - The current action verifier is not accepted as a stable architectural component for the redesign. It is disabled by default and tends to overwrite or rewrite prior planner outputs instead of acting as a trustworthy evaluator.
 
 ## Core Design Decisions
@@ -30,7 +30,7 @@
 - Allow deterministic routing only when based on typed runtime metadata already present in the opportunity, trigger, provenance, principal, policy, trust, or similar structured facts.
 - Disallow deterministic routing on any natural-language or free-text input at every stage.
 - Require semantic routing over natural-language input to be model-based and to return typed results.
-- Move goal semantics into typed semantic planner outputs rather than deterministic execution-time normalization.
+- Move assignment semantics into typed semantic planner outputs rather than deterministic execution-time normalization.
 - Give every sub-planner its own LLM configuration so it can use an independent model/provider/settings from other planner layers.
 - Remove the current action verifier from the target planner architecture.
 - Defer evaluator-optimizer design to a later iteration, likely outside the planner core and closer to meta-reasoner/analyzer structures.
@@ -61,7 +61,7 @@
 - Scoped exception for this redesign:
   - the existing `DeterministicDecisionVerifier` evidence-gating path is not being redesigned here
   - its current deterministic text heuristics remain a known out-of-scope issue tracked separately
-  - this exception does not permit any new deterministic natural-language routing or semantic heuristics in the planner/orchestrator/goal-semantic paths covered by this redesign
+  - this exception does not permit any new deterministic natural-language routing or semantic heuristics in the planner/orchestrator/assignment-semantic paths covered by this redesign
 
 ## Goals
 - Preserve all current end-to-end functionality and behavior during migration, except for the explicitly approved removals and reshaping in this spec.
@@ -107,7 +107,7 @@
   - `InputPlanner`
   - `DeferredStepPlanner`
   - `FeedbackPlanner`
-  - `GoalWorkPlanner`
+  - `AssignmentPlanner`
   - `ImpulsePlanner`
 - Additional lanes may be introduced later if a branch remains semantically overloaded.
 - A lane may itself return another typed routing result when the next step is semantically ambiguous.
@@ -122,8 +122,8 @@
 - Examples of useful intermediate types:
   - `PlannerLane`
   - `InputRoute`
-  - `GoalCommand`
-  - `GoalReference`
+  - `AssignmentCommand`
+  - `WorkItemReference`
   - `PlanDecomposition`
   - `ExecutionCandidate`
 - Intermediate types must be expressive enough to avoid pushing semantics back into execution-time text normalization.
@@ -155,9 +155,9 @@
 - Used for `ActionFeedback`.
 - It decides what a completed/failed/waiting action implies for the next agent step.
 
-#### `GoalWorkPlanner`
-- Used for `EgoTrigger.GoalWork`.
-- It handles active goal-runtime work and should remain separate from user-facing goal creation/management semantics.
+#### `AssignmentPlanner`
+- Used for `EgoTrigger.Assignment`.
+- It handles active assignment-runtime work and should remain separate from user-facing assignment creation/management semantics.
 
 #### `ImpulsePlanner`
 - Used for Id/self-motivated work.
@@ -169,7 +169,7 @@
 - Semantic router for fresh user input.
 - It returns a typed route rather than a final action decision.
 
-#### `DirectResponsePlanner`
+#### `DirectResponder`
 - Used when the request can be answered directly from current context.
 - It should produce a terminal answer decision or clarification request.
 
@@ -180,11 +180,11 @@
 - Used when the request requires a multi-step task or plan decomposition.
 - It should emit typed plan structures rather than unstructured string lists.
 
-#### `GoalCreationPlanner`
-- Used only for semantic goal creation.
+#### `AssignmentCreationPlanner`
+- Used only for semantic assignment creation.
 
-#### `GoalManagementPlanner`
-- Used only for semantic operations on existing goals.
+#### `AssignmentManagementPlanner`
+- Used only for semantic operations on existing assignments.
 
 ## Proposed Typed Outputs
 
@@ -198,8 +198,8 @@
 - `ClarificationRequest`
 
 ### Goals
-- `GoalCommand`
-- `GoalReference`
+- `AssignmentCommand`
+- `WorkItemReference`
 
 ## Proposed Lane Output Shapes
 
@@ -207,8 +207,8 @@
 - `InputRoute.DirectResponse`
 - `InputRoute.GeneralAction`
 - `InputRoute.MultiStepTask`
-- `InputRoute.GoalCreation`
-- `InputRoute.GoalManagement`
+- `InputRoute.AssignmentCreation`
+- `InputRoute.AssignmentManagement`
 - `InputRoute.ClarificationNeeded`
 - `InputRoute.Noop`
 
@@ -229,12 +229,12 @@
 - `FeedbackDecision.MarkBlocked`
 - `FeedbackDecision.MarkDone`
 
-### `GoalWorkPlanner`
-- `GoalWorkDecision.ExecuteStep`
-- `GoalWorkDecision.DeferUntilCondition`
-- `GoalWorkDecision.MarkStepComplete`
-- `GoalWorkDecision.RequestClarification`
-- `GoalWorkDecision.FailStep`
+### `AssignmentPlanner`
+- `AssignmentDecision.ExecuteStep`
+- `AssignmentDecision.DeferUntilCondition`
+- `AssignmentDecision.MarkStepComplete`
+- `AssignmentDecision.RequestClarification`
+- `AssignmentDecision.FailStep`
 
 ### `ImpulsePlanner`
 - `ImpulseDecision.Research`
@@ -242,38 +242,38 @@
 - `ImpulseDecision.ContactUser`
 - `ImpulseDecision.Noop`
 
-## Goal Semantics Requirements
+## Assignment Semantics Requirements
 
 ### Current Problem
-- Goal-related semantics are currently split across planner-time and execution-time heuristics.
-- This includes text-triggered goal-creation routing and plugin-side operation normalization / goal identifier matching.
+- Assignment-related semantics are currently split across planner-time and execution-time heuristics.
+- This includes text-triggered assignment-creation routing and plugin-side operation normalization / assignment identifier matching.
 - That shape is explicitly out of bounds for the redesign.
 
 ### Requirement
-- Goal semantics must be resolved semantically and returned as typed goal commands before execution.
-- The goal execution plugin must become a validator/executor over typed semantic intent, not a second semantic interpreter.
-- Goal-command adaptation into execution payloads, if still needed during migration, must happen from typed semantic structures rather than from raw natural-language reinterpretation.
+- Assignment semantics must be resolved semantically and returned as typed assignment commands before execution.
+- The assignment execution plugin must become a validator/executor over typed semantic intent, not a second semantic interpreter.
+- Assignment-command adaptation into execution payloads, if still needed during migration, must happen from typed semantic structures rather than from raw natural-language reinterpretation.
 
 ### Target Shape
-- Introduce a typed goal command model, for example:
-  - `GoalCommand.Create`
-  - `GoalCommand.List`
-  - `GoalCommand.Status`
-  - `GoalCommand.Pause`
-  - `GoalCommand.Resume`
-  - `GoalCommand.Complete`
-  - `GoalCommand.Delete`
-  - `GoalCommand.DeleteAll`
-  - `GoalCommand.Update`
-  - `GoalCommand.RevisePlan`
-  - `GoalCommand.Reprioritize`
-- Goal reference handling should also become typed, for example:
-  - `GoalReference.ByInternalId`
-  - `GoalReference.ByResolvedEntity`
-  - `GoalReference.Ambiguous`
-  - `GoalReference.Unresolved`
-- Goal references should be represented by typed resolution results rather than string heuristics.
-- If a natural-language goal reference is ambiguous, the semantic planner should resolve it or request clarification.
+- Introduce a typed assignment command model, for example:
+  - `AssignmentCommand.Create`
+  - `AssignmentCommand.List`
+  - `AssignmentCommand.Status`
+  - `AssignmentCommand.Pause`
+  - `AssignmentCommand.Resume`
+  - `AssignmentCommand.Complete`
+  - `AssignmentCommand.Delete`
+  - `AssignmentCommand.DeleteAll`
+  - `AssignmentCommand.Update`
+  - `AssignmentCommand.RevisePlan`
+  - `AssignmentCommand.Reprioritize`
+- Assignment reference handling should also become typed, for example:
+  - `WorkItemReference.ByInternalId`
+  - `WorkItemReference.ByResolvedEntity`
+  - `WorkItemReference.Ambiguous`
+  - `WorkItemReference.Unresolved`
+- Assignment references should be represented by typed resolution results rather than string heuristics.
+- If a natural-language assignment reference is ambiguous, the semantic planner should resolve it or request clarification.
 - Execution-time code must not use deterministic text heuristics to reinterpret semantic intent.
 
 ## LLM Configuration Requirements
@@ -325,7 +325,7 @@
 - If a final runtime boundary still intentionally uses serialized payloads, those payloads must be generated directly from typed planner results, not from downstream text heuristics.
 - Add black-box tests around typed planner contracts and resulting `EgoDecision` behavior.
 - Remove natural-language routing heuristics as part of the migration, not as a later cleanup.
-- Remove goal-operation semantic heuristics from execution-time plugin code as part of the migration to typed goal commands.
+- Remove assignment-operation semantic heuristics from execution-time plugin code as part of the migration to typed assignment commands.
 - Keep planner behavior observable with explicit telemetry per lane.
 
 ## Recommended Delivery Phases
@@ -335,25 +335,25 @@
   - `HierarchicalEgoPlanner`
   - `InputPlanner`
   - `InputIntentRouter`
-  - `DirectResponsePlanner`
+  - `DirectResponder`
   - `GeneralActionPlanner`
   - `TaskDecompositionPlanner`
-  - `GoalCreationPlanner`
-  - `GoalManagementPlanner`
-  - typed `GoalCommand`
+  - `AssignmentCreationPlanner`
+  - `AssignmentManagementPlanner`
+  - typed `AssignmentCommand`
 - Remove the current action verifier from the planner path.
 
 ### Phase 2
 - Introduce:
   - `DeferredStepPlanner`
   - `FeedbackPlanner`
-  - `GoalWorkPlanner`
+  - `AssignmentPlanner`
   - `ImpulsePlanner`
 - Continue narrowing prompts and replacing monolithic planner responsibilities with lane-specific planners.
 
 ## Acceptance Summary
 - No planner/orchestrator routing logic performs deterministic interpretation of natural-language input.
-- No goal-operation execution path performs deterministic semantic reinterpretation of planner text.
+- No assignment-operation execution path performs deterministic semantic reinterpretation of planner text.
 - The existing `DeterministicDecisionVerifier` evidence-gating path is excluded from this redesign's acceptance scope and tracked separately.
 - All current end-to-end functionality and behavior covered by the planner stack are preserved unless explicitly approved otherwise in this spec.
 - The immediate redesign stays within a single-agent typed hierarchical planner architecture.
@@ -393,13 +393,13 @@ replaced the current planner without losing required behavior.
   - fresh input planning
   - deferred intention / continuation planning
   - action feedback planning
-  - goal-work planning
+  - assignment-work planning
   - Id/self-motivated planning
   - direct answer path
   - single-action path
   - multi-step planning path
-  - goal creation
-  - goal management
+  - assignment creation
+  - assignment management
   - allowed-intention shaping
   - allowed-commit-mode shaping
   - action-availability shaping
@@ -416,7 +416,7 @@ replaced the current planner without losing required behavior.
   - `DeferredIntention`
   - `ActionFeedback`
   - `IncomingImpulse`
-  - `GoalWork`
+  - `Assignment`
 - For each trigger family, tests must show:
   - correct lane entry
   - correct typed intermediate result or final `EgoDecision`
@@ -429,8 +429,8 @@ replaced the current planner without losing required behavior.
   - deferred continuation
   - explicit next action/intention
   - multi-step plan decomposition
-  - goal creation intent
-  - goal management intent
+  - assignment creation intent
+  - assignment management intent
   - clarification request when semantic resolution is insufficient
 - Tests must cover at least one positive and one negative/guardrail case for each decision shape.
 
@@ -443,12 +443,12 @@ replaced the current planner without losing required behavior.
   - dispatchable actions
   - conversation / thread trust and provenance shaping
   - plan-context restrictions such as resolution-draft gating
-  - goal-runtime constraints
+  - assignment-runtime constraints
   - Id convergence constraints
 - If a lane receives fewer inputs than the old monolithic planner, tests must still show that all required constraints remain enforced.
 
 ### 6. No Text-Heuristic Regression Rule
-- The redesign is not accepted if any planner, router, goal semantic resolver, or execution-adjacent semantic adapter performs deterministic natural-language interpretation.
+- The redesign is not accepted if any planner, router, assignment semantic resolver, or execution-adjacent semantic adapter performs deterministic natural-language interpretation.
 - Verification must include both:
   - tests that prove semantic routing succeeds on natural-language inputs through model-based typed outputs
   - a code-level audit that no planner-semantic path relies on regex, keyword matching, substring matching, token overlap scoring, or comparable deterministic text heuristics
@@ -458,17 +458,17 @@ replaced the current planner without losing required behavior.
   - this exception must be documented explicitly in the parity/signoff artifacts
   - no new deterministic natural-language heuristics may be added there as part of this redesign
 
-### 7. Goal-Semantics Acceptance Rule
-- Goal behavior is accepted only if goal creation and goal management semantics are resolved before execution as typed goal commands.
-- The goal execution path must not reinterpret planner intent from raw text.
+### 7. Assignment-Semantics Acceptance Rule
+- Assignment behavior is accepted only if assignment creation and assignment management semantics are resolved before execution as typed assignment commands.
+- The assignment execution path must not reinterpret planner intent from raw text.
 - Acceptance requires tests for:
-  - goal creation
-  - goal listing / status
-  - goal pause / resume
-  - goal completion / delete
-  - goal update / revise-plan / reprioritize as applicable
-  - ambiguous goal references
-  - unresolved goal references
+  - assignment creation
+  - assignment listing / status
+  - assignment pause / resume
+  - assignment completion / delete
+  - assignment update / revise-plan / reprioritize as applicable
+  - ambiguous assignment references
+  - unresolved assignment references
 - Multilingual phrasing support remains a design goal of the architecture, but multilingual acceptance coverage is not a required signoff item for this iteration.
 
 ### 8. Removed-Action-Verifier Rule
@@ -501,8 +501,8 @@ replaced the current planner without losing required behavior.
 - The redesign is not accepted until runtime behavior documentation reflects the new planner structure.
 - Required docs updates at signoff:
   - this spec reflects the final implemented architecture
-  - `AGENT_LOGIC_SUMMARY.md` reflects the final planner/orchestrator flow
-  - `AGENT_LOGIC_DIAGRAM.md` reflects the final planner/orchestrator flow
+  - `AGENT_RUNTIME_LOGIC.md` reflects the final planner/orchestrator flow
+  - the affected files under `docs/agent-logic/` reflect the final planner/orchestrator flow
 - If the implemented hierarchy differs from this spec, the spec must be updated before signoff.
 
 ### 12. Final Verification Rule

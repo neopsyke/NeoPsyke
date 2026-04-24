@@ -212,14 +212,14 @@ func BBHSmoke(opts BBHOpts) (*BBHResult, error) {
 		}
 
 		// Call LiveEval directly (in-process)
-		goalsDisabled := false
+		assignmentsDisabled := false
 		evalResult, evalErr := LiveEval(LiveEvalOpts{
 			InputFile:        inputPath,
 			ExpectedFile:     expectedPath,
 			Timeout:          opts.Timeout,
 			SessionReplayDir: caseReplayDir,
 			Record:           opts.Record,
-			GoalsEnabled:     &goalsDisabled,
+			AssignmentsEnabled: &assignmentsDisabled,
 			PreserveMemory:   opts.PreserveMemory,
 			RunDirOverride:   caseDir,
 			NeopsykeCmd:      opts.NeopsykeCmd,

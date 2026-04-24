@@ -20,8 +20,8 @@ import ai.neopsyke.agent.memory.longterm.Hippocampus
 import ai.neopsyke.agent.memory.longterm.LongTermMemoryAdvisor
 import ai.neopsyke.agent.memory.longterm.NoopHippocampus
 import ai.neopsyke.agent.memory.longterm.NoopLongTermMemoryAdvisor
-import ai.neopsyke.agent.durablework.NoopDurableWorkGateway
-import ai.neopsyke.agent.durablework.DurableWorkGateway
+import ai.neopsyke.agent.assignments.NoopAssignmentGateway
+import ai.neopsyke.agent.assignments.AssignmentGateway
 import ai.neopsyke.agent.superego.Superego
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
@@ -40,7 +40,7 @@ fun buildTestEgo(
     logbook: Logbook? = null,
     logbookSummarizer: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
     runId: String? = null,
-    durableWorkGateway: DurableWorkGateway = NoopDurableWorkGateway,
+    assignmentGateway: AssignmentGateway = NoopAssignmentGateway,
     actionControlService: ActionControlService? = null,
     planRefiner: PlanRefiner = NoopPlanRefiner(),
 ): Ego {
@@ -67,8 +67,8 @@ fun buildTestEgo(
             ?: LegacyCompatibleActionControlService { action, authorization ->
                 motorCortex.execute(action, config.searchResultCount, authorization)
             },
-        goalRegistry = durableWorkGateway,
-        durableWorkGateway = durableWorkGateway,
+        assignmentRegistry = assignmentGateway,
+        assignmentGateway = assignmentGateway,
         planRefiner = planRefiner,
     )
 }

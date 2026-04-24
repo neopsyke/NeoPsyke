@@ -24,7 +24,7 @@ import ai.neopsyke.dashboard.InnerVoiceConfig
 import ai.neopsyke.agent.config.PlannerConfig
 import ai.neopsyke.agent.ego.planner.LaneConfig
 import ai.neopsyke.agent.ego.planner.StructuredOutputMode
-import ai.neopsyke.agent.durablework.DurableWorkConfig
+import ai.neopsyke.agent.assignments.AssignmentConfig
 import ai.neopsyke.agent.config.SuperegoConfig
 import ai.neopsyke.agent.config.ScratchpadConfig
 import java.nio.file.Path
@@ -67,7 +67,7 @@ private data class AgentRuntimeYamlAgent(
     val builtinTools: AgentRuntimeYamlBuiltinTools? = null,
     val nativeIntegrations: AgentRuntimeYamlNativeIntegrations? = null,
     val innerVoice: AgentRuntimeYamlInnerVoice? = null,
-    val durableWork: AgentRuntimeYamlDurableWork? = null,
+    val assignment: AgentRuntimeYamlAssignment? = null,
     val runtime: AgentRuntimeYamlRuntime? = null,
 )
 
@@ -104,10 +104,6 @@ private data class AgentRuntimeYamlPlannerLane(
 
 private data class AgentRuntimeYamlSuperego(
     val maxCompletionTokens: Int? = null,
-    val dynamicCompletionEnabled: Boolean? = null,
-    val dynamicCompletionHardMaxTokens: Int? = null,
-    val dynamicPromptToCompletionRatio: Double? = null,
-    val dynamicCompletionMinPromptTokens: Int? = null,
     val twoStageReviewEnabled: Boolean? = null,
     val twoStageLowConfidenceThreshold: Double? = null,
     val twoStageEscalateOnMediumPolicyRisk: Boolean? = null,
@@ -127,10 +123,6 @@ private data class AgentRuntimeYamlMemory(
     val longTermMemoryAssessCooldownSteps: Int? = null,
     val longTermMemoryMinConfidence: Double? = null,
     val longTermMemoryMaxTokens: Int? = null,
-    val longTermMemoryDynamicCompletionEnabled: Boolean? = null,
-    val longTermMemoryDynamicCompletionHardMaxTokens: Int? = null,
-    val longTermMemoryDynamicPromptToCompletionRatio: Double? = null,
-    val longTermMemoryDynamicCompletionMinPromptTokens: Int? = null,
     val longTermMemoryMaxSummaryChars: Int? = null,
     val longTermMemoryForceAssessOnAllowedAction: Boolean? = null,
     val longTermMemoryForceAssessOnTerminalAnswer: Boolean? = null,
@@ -170,10 +162,6 @@ private data class AgentRuntimeYamlMetaReasoner(
     val deliberationPressureAssessmentThreshold: Double? = null,
     val cooldownSteps: Int? = null,
     val maxTokens: Int? = null,
-    val dynamicCompletionEnabled: Boolean? = null,
-    val dynamicCompletionHardMaxTokens: Int? = null,
-    val dynamicPromptToCompletionRatio: Double? = null,
-    val dynamicCompletionMinPromptTokens: Int? = null,
     val forcedTerminalPressureThreshold: Double? = null,
     val forcedTerminalStaleStreakThreshold: Int? = null,
 )
@@ -203,7 +191,7 @@ private data class AgentRuntimeYamlActionControl(
     val contactUserPerRootInput: Int? = null,
     val reflectionFamilyPerRootInput: Int? = null,
     val reflectEvidencePerRootInput: Int? = null,
-    val durableWorkOperationPerRootInput: Int? = null,
+    val assignmentOperationPerRootInput: Int? = null,
     val commitPrivatePerTypePerRootInput: Int? = null,
     val commitStatefulPerTypePerRootInput: Int? = null,
     val commitPublicPerTypePerRootInput: Int? = null,
@@ -296,7 +284,7 @@ private data class AgentRuntimeYamlInnerVoice(
     val maxEventsPerSession: Int? = null,
 )
 
-private data class AgentRuntimeYamlDurableWork(
+private data class AgentRuntimeYamlAssignment(
     val enabled: Boolean? = null,
     val workspaceRoot: String? = null,
     val maxActiveWorkItems: Int? = null,
@@ -357,7 +345,7 @@ object AgentRuntimeSettingsLoader {
         val telegramYaml = nativeIntegrationsYaml.telegram!!
         val googleWorkspaceYaml = nativeIntegrationsYaml.googleWorkspace!!
         val innerVoiceYaml = agentYaml.innerVoice!!
-        val durableWorkYaml = agentYaml.durableWork!!
+        val assignmentYaml = agentYaml.assignment!!
         val runtimeYaml = agentYaml.runtime!!
 
         val policyScope = ai.neopsyke.agent.model.PolicyScope.fromId(
@@ -444,26 +432,6 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_SUPEREGO_MAX_COMPLETION_TOKENS"],
                     superegoYaml.maxCompletionTokens,
                     defaults.superego.maxCompletionTokens
-                ),
-                dynamicCompletionEnabled = readBoolean(
-                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_ENABLED"],
-                    superegoYaml.dynamicCompletionEnabled,
-                    defaults.superego.dynamicCompletionEnabled
-                ),
-                dynamicCompletionHardMaxTokens = readPositiveInt(
-                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
-                    superegoYaml.dynamicCompletionHardMaxTokens,
-                    defaults.superego.dynamicCompletionHardMaxTokens
-                ),
-                dynamicPromptToCompletionRatio = readProbability(
-                    env["EGO_SUPEREGO_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
-                    superegoYaml.dynamicPromptToCompletionRatio,
-                    defaults.superego.dynamicPromptToCompletionRatio
-                ),
-                dynamicCompletionMinPromptTokens = readPositiveInt(
-                    env["EGO_SUPEREGO_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
-                    superegoYaml.dynamicCompletionMinPromptTokens,
-                    defaults.superego.dynamicCompletionMinPromptTokens
                 ),
                 twoStageReviewEnabled = readBoolean(
                     env["EGO_SUPEREGO_TWO_STAGE_REVIEW_ENABLED"],
@@ -639,26 +607,6 @@ object AgentRuntimeSettingsLoader {
                     memoryYaml.longTermMemoryMaxTokens,
                     defaults.memory.longTermMemoryMaxTokens
                 ),
-                longTermMemoryDynamicCompletionEnabled = readBoolean(
-                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_ENABLED"],
-                    memoryYaml.longTermMemoryDynamicCompletionEnabled,
-                    defaults.memory.longTermMemoryDynamicCompletionEnabled
-                ),
-                longTermMemoryDynamicCompletionHardMaxTokens = readPositiveInt(
-                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
-                    memoryYaml.longTermMemoryDynamicCompletionHardMaxTokens,
-                    defaults.memory.longTermMemoryDynamicCompletionHardMaxTokens
-                ),
-                longTermMemoryDynamicPromptToCompletionRatio = readProbability(
-                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
-                    memoryYaml.longTermMemoryDynamicPromptToCompletionRatio,
-                    defaults.memory.longTermMemoryDynamicPromptToCompletionRatio
-                ),
-                longTermMemoryDynamicCompletionMinPromptTokens = readPositiveInt(
-                    env["EGO_LONG_TERM_MEMORY_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
-                    memoryYaml.longTermMemoryDynamicCompletionMinPromptTokens,
-                    defaults.memory.longTermMemoryDynamicCompletionMinPromptTokens
-                ),
                 longTermMemoryMaxSummaryChars = readPositiveInt(
                     env["EGO_LONG_TERM_MEMORY_MAX_SUMMARY_CHARS"],
                     memoryYaml.longTermMemoryMaxSummaryChars,
@@ -730,26 +678,6 @@ object AgentRuntimeSettingsLoader {
                     env["EGO_META_REASONER_MAX_TOKENS"],
                     metaReasonerYaml.maxTokens,
                     defaults.metaReasoner.maxTokens
-                ),
-                dynamicCompletionEnabled = readBoolean(
-                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_ENABLED"],
-                    metaReasonerYaml.dynamicCompletionEnabled,
-                    defaults.metaReasoner.dynamicCompletionEnabled
-                ),
-                dynamicCompletionHardMaxTokens = readPositiveInt(
-                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_HARD_MAX_TOKENS"],
-                    metaReasonerYaml.dynamicCompletionHardMaxTokens,
-                    defaults.metaReasoner.dynamicCompletionHardMaxTokens
-                ),
-                dynamicPromptToCompletionRatio = readProbability(
-                    env["EGO_META_REASONER_DYNAMIC_PROMPT_TO_COMPLETION_RATIO"],
-                    metaReasonerYaml.dynamicPromptToCompletionRatio,
-                    defaults.metaReasoner.dynamicPromptToCompletionRatio
-                ),
-                dynamicCompletionMinPromptTokens = readPositiveInt(
-                    env["EGO_META_REASONER_DYNAMIC_COMPLETION_MIN_PROMPT_TOKENS"],
-                    metaReasonerYaml.dynamicCompletionMinPromptTokens,
-                    defaults.metaReasoner.dynamicCompletionMinPromptTokens
                 ),
                 forcedTerminalPressureThreshold = readProbability(
                     env["EGO_FORCE_TERMINAL_PRESSURE_THRESHOLD"],
@@ -870,10 +798,10 @@ object AgentRuntimeSettingsLoader {
                     actionControlYaml.reflectEvidencePerRootInput,
                     defaults.actionControl.reflectEvidencePerRootInput
                 ),
-                durableWorkOperationPerRootInput = readPositiveInt(
-                    env["NEOPSYKE_ACTION_CONTROL_DURABLE_WORK_OPERATION_PER_ROOT_INPUT"],
-                    actionControlYaml.durableWorkOperationPerRootInput,
-                    defaults.actionControl.durableWorkOperationPerRootInput
+                assignmentOperationPerRootInput = readPositiveInt(
+                    env["NEOPSYKE_ACTION_CONTROL_ASSIGNMENT_OPERATION_PER_ROOT_INPUT"],
+                    actionControlYaml.assignmentOperationPerRootInput,
+                    defaults.actionControl.assignmentOperationPerRootInput
                 ),
                 commitPrivatePerTypePerRootInput = readPositiveInt(
                     env["NEOPSYKE_ACTION_CONTROL_COMMIT_PRIVATE_PER_TYPE_PER_ROOT_INPUT"],
@@ -1186,61 +1114,61 @@ object AgentRuntimeSettingsLoader {
                     defaults.innerVoice.maxEventsPerSession
                 ),
             ),
-            durableWork = DurableWorkConfig(
+            assignment = AssignmentConfig(
                 enabled = readBoolean(
-                    env["NEOPSYKE_GOALS_ENABLED"],
-                    yaml = durableWorkYaml.enabled,
-                    fallback = defaults.durableWork.enabled
+                    env["NEOPSYKE_ASSIGNMENTS_ENABLED"],
+                    yaml = assignmentYaml.enabled,
+                    fallback = defaults.assignment.enabled
                 ),
                 workspaceRoot = readPath(
-                    env["NEOPSYKE_GOALS_WORKSPACE_ROOT"],
-                    yaml = durableWorkYaml.workspaceRoot,
-                    fallback = defaults.durableWork.workspaceRoot
+                    env["NEOPSYKE_ASSIGNMENTS_WORKSPACE_ROOT"],
+                    yaml = assignmentYaml.workspaceRoot,
+                    fallback = defaults.assignment.workspaceRoot
                 ),
                 maxActiveWorkItems = readPositiveInt(
-                    env["NEOPSYKE_GOALS_MAX_ACTIVE_GOALS"],
-                    yaml = durableWorkYaml.maxActiveWorkItems,
-                    fallback = defaults.durableWork.maxActiveWorkItems
+                    env["NEOPSYKE_ASSIGNMENTS_MAX_ACTIVE_ASSIGNMENTS"],
+                    yaml = assignmentYaml.maxActiveWorkItems,
+                    fallback = defaults.assignment.maxActiveWorkItems
                 ),
                 maxStepsPerPlan = readPositiveInt(
-                    env["NEOPSYKE_GOALS_MAX_STEPS_PER_PLAN"],
-                    yaml = durableWorkYaml.maxStepsPerPlan,
-                    fallback = defaults.durableWork.maxStepsPerPlan
+                    env["NEOPSYKE_ASSIGNMENTS_MAX_STEPS_PER_PLAN"],
+                    yaml = assignmentYaml.maxStepsPerPlan,
+                    fallback = defaults.assignment.maxStepsPerPlan
                 ),
                 actionsPerCycle = readPositiveInt(
-                    env["NEOPSYKE_GOALS_ACTIONS_PER_CYCLE"],
-                    yaml = durableWorkYaml.actionsPerCycle,
-                    fallback = defaults.durableWork.actionsPerCycle
+                    env["NEOPSYKE_ASSIGNMENTS_ACTIONS_PER_CYCLE"],
+                    yaml = assignmentYaml.actionsPerCycle,
+                    fallback = defaults.assignment.actionsPerCycle
                 ),
                 snapshotEveryNEvents = readPositiveInt(
-                    env["NEOPSYKE_GOALS_SNAPSHOT_EVERY_N_EVENTS"],
-                    yaml = durableWorkYaml.snapshotEveryNEvents,
-                    fallback = defaults.durableWork.snapshotEveryNEvents
+                    env["NEOPSYKE_ASSIGNMENTS_SNAPSHOT_EVERY_N_EVENTS"],
+                    yaml = assignmentYaml.snapshotEveryNEvents,
+                    fallback = defaults.assignment.snapshotEveryNEvents
                 ),
                 timerResolutionMs = readPositiveLong(
-                    env["NEOPSYKE_GOALS_TIMER_RESOLUTION_MS"],
-                    yaml = durableWorkYaml.timerResolutionMs,
-                    fallback = defaults.durableWork.timerResolutionMs
+                    env["NEOPSYKE_ASSIGNMENTS_TIMER_RESOLUTION_MS"],
+                    yaml = assignmentYaml.timerResolutionMs,
+                    fallback = defaults.assignment.timerResolutionMs
                 ),
                 conditionCheckIntervalMs = readPositiveLong(
-                    env["NEOPSYKE_GOALS_CONDITION_CHECK_INTERVAL_MS"],
-                    yaml = durableWorkYaml.conditionCheckIntervalMs,
-                    fallback = defaults.durableWork.conditionCheckIntervalMs
+                    env["NEOPSYKE_ASSIGNMENTS_CONDITION_CHECK_INTERVAL_MS"],
+                    yaml = assignmentYaml.conditionCheckIntervalMs,
+                    fallback = defaults.assignment.conditionCheckIntervalMs
                 ),
                 completedWorkItemRetentionDays = readPositiveInt(
-                    env["NEOPSYKE_GOALS_COMPLETED_RETENTION_DAYS"],
-                    yaml = durableWorkYaml.completedWorkItemRetentionDays,
-                    fallback = defaults.durableWork.completedWorkItemRetentionDays
+                    env["NEOPSYKE_ASSIGNMENTS_COMPLETED_RETENTION_DAYS"],
+                    yaml = assignmentYaml.completedWorkItemRetentionDays,
+                    fallback = defaults.assignment.completedWorkItemRetentionDays
                 ),
                 maxWorkspaceBytes = readPositiveLong(
-                    env["NEOPSYKE_GOALS_MAX_WORKSPACE_BYTES"],
-                    yaml = durableWorkYaml.maxWorkspaceBytes,
-                    fallback = defaults.durableWork.maxWorkspaceBytes
+                    env["NEOPSYKE_ASSIGNMENTS_MAX_WORKSPACE_BYTES"],
+                    yaml = assignmentYaml.maxWorkspaceBytes,
+                    fallback = defaults.assignment.maxWorkspaceBytes
                 ),
                 allowRuntimePlanFallback = readBoolean(
-                    env["NEOPSYKE_GOALS_ALLOW_RUNTIME_PLAN_FALLBACK"],
-                    yaml = durableWorkYaml.allowRuntimePlanFallback,
-                    fallback = defaults.durableWork.allowRuntimePlanFallback,
+                    env["NEOPSYKE_ASSIGNMENTS_ALLOW_RUNTIME_PLAN_FALLBACK"],
+                    yaml = assignmentYaml.allowRuntimePlanFallback,
+                    fallback = defaults.assignment.allowRuntimePlanFallback,
                 ),
             ),
             loopDelayMs = readNonNegativeInt(
@@ -1331,7 +1259,7 @@ object AgentRuntimeSettingsLoader {
         requireSection(nativeIntegrations.telegram, "agent.native_integrations.telegram")
         requireSection(nativeIntegrations.googleWorkspace, "agent.native_integrations.google_workspace")
         requireSection(agent.innerVoice, "agent.inner_voice")
-        requireSection(agent.durableWork, "agent.durable_work")
+        requireSection(agent.assignment, "agent.assignment")
         requireSection(agent.runtime, "agent.runtime")
     }
 

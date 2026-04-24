@@ -65,6 +65,7 @@ class GeminiChatClient(
             messages = messages.map { GeminiChatMessage(role = it.role.apiValue, content = it.content) },
             temperature = options.temperature,
             maxTokens = options.maxTokens,
+            reasoningEffort = options.reasoningEffort,
             responseFormat = responseFormatAdaptation.responseFormat.toGeminiResponseFormat()
         )
 
@@ -222,6 +223,8 @@ private data class GeminiChatCompletionRequest(
     val temperature: Double? = null,
     @param:JsonProperty("max_tokens")
     val maxTokens: Int? = null,
+    @param:JsonProperty("reasoning_effort")
+    val reasoningEffort: String? = null,
     @param:JsonProperty("response_format")
     val responseFormat: GeminiResponseFormat? = null,
 )

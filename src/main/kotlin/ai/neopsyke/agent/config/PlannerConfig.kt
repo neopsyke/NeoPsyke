@@ -17,6 +17,7 @@ data class PlannerConfig(
     val actionRetryBudgetNonRetryableFailures: Int = 3,
     val actionRetryCooldownSteps: Int = 10,
     val planRefinementEnabled: Boolean = true,
+    val responsibilityIntakePromptTokens: Int = 3_600,
     val laneDefaults: LaneConfig = LaneConfig(),
     val lanes: Map<String, LaneConfig> = emptyMap(),
 )

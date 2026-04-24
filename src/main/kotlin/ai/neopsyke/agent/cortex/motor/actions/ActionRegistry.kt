@@ -31,13 +31,6 @@ class ActionRegistry private constructor(
             .map { it.descriptor }
             .sortedBy { it.actionType.id }
 
-    fun dispatchableActionTypes(): Set<ActionType> =
-        pluginByType.values
-            .map { it.descriptor }
-            .filter { it.dispatchable }
-            .map { it.actionType }
-            .toSet()
-
     suspend fun healthCheck(actionType: ActionType): ActionPluginHealth =
         pluginByType[actionType]?.healthCheck()
             ?: ActionPluginHealth(

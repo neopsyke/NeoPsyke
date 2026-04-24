@@ -21,8 +21,7 @@ class LongTermMemoryAdvisorTest {
             modelClient = llm,
             config = AgentConfig(
                 memory = MemoryConfig(
-                    longTermMemoryMaxTokens = 111,
-                    longTermMemoryDynamicCompletionEnabled = false
+                    longTermMemoryMaxTokens = 111
                 )
             )
         )
@@ -57,9 +56,7 @@ class LongTermMemoryAdvisorTest {
         val advisor = LlmLongTermMemoryAdvisor(
             modelClient = llm,
             config = AgentConfig(
-                memory = MemoryConfig(
-                    longTermMemoryDynamicCompletionEnabled = false
-                )
+                memory = MemoryConfig()
             )
         )
 
@@ -89,9 +86,7 @@ class LongTermMemoryAdvisorTest {
         val advisor = LlmLongTermMemoryAdvisor(
             modelClient = llm,
             config = AgentConfig(
-                memory = MemoryConfig(
-                    longTermMemoryDynamicCompletionEnabled = false
-                )
+                memory = MemoryConfig()
             )
         )
 
@@ -121,9 +116,7 @@ class LongTermMemoryAdvisorTest {
         val advisor = LlmLongTermMemoryAdvisor(
             modelClient = llm,
             config = AgentConfig(
-                memory = MemoryConfig(
-                    longTermMemoryDynamicCompletionEnabled = false
-                )
+                memory = MemoryConfig()
             )
         )
 
@@ -152,7 +145,6 @@ class LongTermMemoryAdvisorTest {
             modelClient = llm,
             config = AgentConfig(
                 memory = MemoryConfig(
-                    longTermMemoryDynamicCompletionEnabled = false,
                     longTermMemoryPromptCompressionEnabled = true,
                     longTermMemoryPromptDialogueMaxChars = 220,
                     longTermMemoryPromptRecallMaxChars = 180
@@ -190,9 +182,7 @@ class LongTermMemoryAdvisorTest {
         val advisor = LlmLongTermMemoryAdvisor(
             modelClient = llm,
             config = AgentConfig(
-                memory = MemoryConfig(
-                    longTermMemoryDynamicCompletionEnabled = false
-                )
+                memory = MemoryConfig()
             )
         )
 
@@ -224,9 +214,7 @@ class LongTermMemoryAdvisorTest {
         val advisor = LlmLongTermMemoryAdvisor(
             modelClient = llm,
             config = AgentConfig(
-                memory = MemoryConfig(
-                    longTermMemoryDynamicCompletionEnabled = false
-                )
+                memory = MemoryConfig()
             )
         )
 
@@ -271,7 +259,7 @@ class LongTermMemoryAdvisorTest {
             val advisor = LlmLongTermMemoryAdvisor(
                 modelClient = llm,
                 config = AgentConfig(
-                    memory = MemoryConfig(longTermMemoryDynamicCompletionEnabled = false)
+                    memory = MemoryConfig()
                 )
             )
             val decision = advisor.assess(
@@ -304,7 +292,7 @@ class LongTermMemoryAdvisorTest {
             val advisor = LlmLongTermMemoryAdvisor(
                 modelClient = llm,
                 config = AgentConfig(
-                    memory = MemoryConfig(longTermMemoryDynamicCompletionEnabled = false)
+                    memory = MemoryConfig()
                 )
             )
             val decision = advisor.assess(

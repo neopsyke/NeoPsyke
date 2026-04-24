@@ -34,7 +34,7 @@ type PipelineStep struct {
 type LiveEvalConfig struct {
 	Timeout        int    `mapstructure:"timeout"`
 	PreserveMemory bool   `mapstructure:"preserve_memory"`
-	GoalsEnabled   bool   `mapstructure:"goals_enabled"`
+	AssignmentsEnabled bool `mapstructure:"assignments_enabled"`
 	LLMConfigFile  string `mapstructure:"llm_config_file"`
 	NeopsykeCmd    string `mapstructure:"neopsyke_cmd"`
 }
@@ -107,7 +107,7 @@ func DefaultConfig() *FreudConfig {
 		LiveEval: LiveEvalConfig{
 			Timeout:        120,
 			PreserveMemory: false,
-			GoalsEnabled:   false,
+			AssignmentsEnabled: false,
 			LLMConfigFile:  "",
 			NeopsykeCmd:    "./run-neopsyke.sh",
 		},

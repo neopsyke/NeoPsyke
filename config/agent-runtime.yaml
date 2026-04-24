@@ -28,7 +28,7 @@ agent:
     max_action_payload_chars: 4000
     max_action_summary_chars: 180
     max_prompt_tokens: 2400
-    max_completion_tokens: 900
+    max_completion_tokens: 4096
     llm_retry_attempts: 2
     max_run_total_tokens: 0
     max_run_tokens_per_provider: 0
@@ -40,11 +40,7 @@ agent:
     action_retry_cooldown_steps: 10
 
   superego:
-    max_completion_tokens: 192
-    dynamic_completion_enabled: true
-    dynamic_completion_hard_max_tokens: 640
-    dynamic_prompt_to_completion_ratio: 0.10
-    dynamic_completion_min_prompt_tokens: 160
+    max_completion_tokens: 1024
     two_stage_review_enabled: false
     two_stage_low_confidence_threshold: 0.60
     two_stage_escalate_on_medium_policy_risk: true
@@ -62,11 +58,7 @@ agent:
     long_term_memory_assess_every_steps: 16
     long_term_memory_assess_cooldown_steps: 8
     long_term_memory_min_confidence: 0.65
-    long_term_memory_max_tokens: 1024
-    long_term_memory_dynamic_completion_enabled: true
-    long_term_memory_dynamic_completion_hard_max_tokens: 2048
-    long_term_memory_dynamic_prompt_to_completion_ratio: 0.08
-    long_term_memory_dynamic_completion_min_prompt_tokens: 160
+    long_term_memory_max_tokens: 2048
     long_term_memory_max_summary_chars: 320
     long_term_memory_force_assess_on_allowed_action: false
     long_term_memory_force_assess_on_terminal_answer: true
@@ -103,11 +95,7 @@ agent:
     deliberation_pressure_assessment_every_steps: 8
     deliberation_pressure_assessment_threshold: 0.68
     cooldown_steps: 6
-    max_tokens: 512
-    dynamic_completion_enabled: true
-    dynamic_completion_hard_max_tokens: 640
-    dynamic_prompt_to_completion_ratio: 0.10
-    dynamic_completion_min_prompt_tokens: 160
+    max_tokens: 2048
     forced_terminal_pressure_threshold: 0.98
     forced_terminal_stale_streak_threshold: 8
 
@@ -135,7 +123,7 @@ agent:
     contact_user_per_root_input: 5
     reflection_family_per_root_input: 2
     reflect_evidence_per_root_input: 1
-    durable_work_operation_per_root_input: 3
+    assignment_operation_per_root_input: 3
     commit_private_per_type_per_root_input: 3
     commit_stateful_per_type_per_root_input: 2
     commit_public_per_type_per_root_input: 1
@@ -165,7 +153,7 @@ agent:
     max_content_chars: 500
     max_events_per_session: 100
 
-  durable_work:
+  assignment:
     enabled: true
     workspace_root: .neopsyke/work-items
     max_active_work_items: 10

@@ -8,7 +8,6 @@ import ai.neopsyke.agent.model.PendingAction
 internal data class DecisionVerifierContext(
     val externalEvidence: DeliberationEngine.ExternalEvidenceProgress? = null,
     val availableActions: Set<ActionType> = emptySet(),
-    val dispatchableActions: Set<ActionType> = emptySet(),
     val evidenceActionTypes: Set<ActionType> = emptySet(),
     val groundingTechnicalFailureBudgetExceeded: Boolean = false,
 )
@@ -44,7 +43,7 @@ internal object NoopDecisionVerifier : DecisionVerifier {
  * - [PendingAction.groundingMetadata] (carried typed metadata)
  * - [PendingAction.isForcedTerminal] (typed forced-terminal marker)
  * - [DeliberationEngine.ExternalEvidenceProgress] (typed evidence state)
- * - evidence action availability/dispatchability
+ * - evidence action availability
  */
 internal class GroundingGate : DecisionVerifier {
     override fun review(action: PendingAction, context: DecisionVerifierContext): DecisionVerifierDecision {
@@ -58,8 +57,7 @@ internal class GroundingGate : DecisionVerifier {
         val evidenceGathered = evidence?.hadSuccessfulEvidence == true
         val evidenceFailedTechnically = evidence?.hadExternalFailures == true
         val evidenceActionsAvailable = context.evidenceActionTypes.any { it in context.availableActions }
-        val evidenceActionsDispatchable = context.evidenceActionTypes.any { it in context.dispatchableActions }
-        val evidenceUnavailable = !evidenceActionsAvailable || !evidenceActionsDispatchable
+        val evidenceUnavailable = !evidenceActionsAvailable
         val forcedTerminal = action.isForcedTerminal
 
         fun decision(allow: Boolean, reason: String = "", reasonCode: String? = null) =

@@ -35,7 +35,7 @@ class PlannerRuntimeTest {
                         structuredOutput = StructuredOutputMode.RELAXED,
                     ),
                     lanes = mapOf(
-                        LaneId.GOAL.configKey to LaneConfig(
+                        LaneId.ASSIGNMENT.configKey to LaneConfig(
                             provider = "mistral",
                             model = "mistral-small-latest",
                             temperature = 0.0,
@@ -47,7 +47,7 @@ class PlannerRuntimeTest {
             instrumentation = NoopAgentInstrumentation,
         )
 
-        val resolved = runtime.resolvedConfig(LaneId.GOAL)
+        val resolved = runtime.resolvedConfig(LaneId.ASSIGNMENT)
         assertEquals("mistral", resolved.provider)
         assertEquals("mistral-small-latest", resolved.model)
         assertEquals(0.0, resolved.temperature)

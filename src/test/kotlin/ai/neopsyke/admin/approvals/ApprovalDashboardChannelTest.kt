@@ -30,6 +30,8 @@ import ai.neopsyke.agent.model.StagedAction
 import ai.neopsyke.agent.model.StagedActionStatus
 import ai.neopsyke.agent.model.Urgency
 import ai.neopsyke.dashboard.DashboardStateStore
+import ai.neopsyke.llm.ChatModelClient
+import ai.neopsyke.support.StubChatModelClient
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -165,6 +167,7 @@ class ApprovalDashboardChannelTest {
     private suspend fun withRuntime(
         staged: StagedAction,
         config: AgentConfig = AgentConfig(),
+        interpreterClient: ChatModelClient? = null,
         block: suspend (ApprovalRuntime, SqliteApprovalStore, FakeActionControlService, DashboardStateStore) -> Unit,
     ) {
         val tempDb = Files.createTempFile("approval-dash", ".db")
@@ -176,7 +179,7 @@ class ApprovalDashboardChannelTest {
             val runtime = ApprovalRuntime(
                 config = config, store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = TelegramChannelConfig(enabled = false), telegramSink = null,
-                interpreter = DefaultApprovalInterpreter(config),
+                interpreter = DefaultApprovalInterpreter(config, interpreterClient),
                 forwardNormalInput = { _, _, _, _ -> true },
                 onApprovalExecuted = {}, onApprovalDenied = {},
             )
@@ -220,7 +223,7 @@ class ApprovalDashboardChannelTest {
             val runtime = ApprovalRuntime(
                 config = AgentConfig(), store = store, actionControlService = actionControl, dashboardStore = dashboardStore,
                 telegramConfig = TelegramChannelConfig(enabled = false), telegramSink = null,
-                interpreter = DefaultApprovalInterpreter(AgentConfig()),
+                interpreter = DefaultApprovalInterpreter(AgentConfig(), StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }),
                 forwardNormalInput = { content, _, _, _ -> forwarded += content; true },
                 onApprovalExecuted = {}, onApprovalDenied = {},
             )
@@ -241,7 +244,7 @@ class ApprovalDashboardChannelTest {
     @Test
     fun `3 natural language approval resolution`() = runBlocking {
         val staged = stagedAction()
-        withRuntime(staged) { runtime, store, actionControl, _ ->
+        withRuntime(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"approve"}""") }) { runtime, store, actionControl, _ ->
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
                 reason = "Approval required.", reasonCode = "NEEDS_APPROVAL",
@@ -256,7 +259,7 @@ class ApprovalDashboardChannelTest {
     @Test
     fun `4 natural language denial resolution`() = runBlocking {
         val staged = stagedAction()
-        withRuntime(staged) { runtime, store, actionControl, _ ->
+        withRuntime(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"deny"}""") }) { runtime, store, actionControl, _ ->
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
                 reason = "Approval required.", reasonCode = "NEEDS_APPROVAL",
@@ -271,7 +274,7 @@ class ApprovalDashboardChannelTest {
     @Test
     fun `5 explanatory question behavior`() = runBlocking {
         val staged = stagedAction()
-        withRuntime(staged) { runtime, store, actionControl, _ ->
+        withRuntime(staged, interpreterClient = StubChatModelClient().apply { enqueueRawResponse("""{"decision":"explain"}""") }) { runtime, store, actionControl, _ ->
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
                 reason = "Approval required.", reasonCode = "NEEDS_APPROVAL",
@@ -306,10 +309,10 @@ class ApprovalDashboardChannelTest {
     @Test
     fun `7 channel specific liveness eligibility semantics`() = runBlocking {
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session", interlocutor = Interlocutor.named("System"),
+            sessionId = "assignment-session", interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT))
         // Dashboard requires live subscriber — it is deliverable but not live
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(dashboardRequiresLiveSubscriber = true))
         withRuntime(staged, config = config) { runtime, store, _, _ ->
@@ -331,10 +334,10 @@ class ApprovalDashboardChannelTest {
     @Test
     fun `8 dashboard not open does not win non conversation routing as live`() = runBlocking {
         val nonOwnerCtx = ConversationContext(
-            sessionId = "goal-session", interlocutor = Interlocutor.named("System"),
+            sessionId = "assignment-session", interlocutor = Interlocutor.named("System"),
             security = ConversationSecurityContexts.default(),
         )
-        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.DURABLE_WORK))
+        val staged = stagedAction(ctx = nonOwnerCtx).copy(origin = ActionOrigin(ai.neopsyke.agent.model.OriginSource.ASSIGNMENT))
         // Dashboard requires live subscriber; channel priority prefers dashboard
         val config = AgentConfig(approvals = ApprovalRuntimeConfig(
             dashboardRequiresLiveSubscriber = true,
@@ -372,7 +375,10 @@ class ApprovalDashboardChannelTest {
     @Test
     fun `10 duplicate inbound event handling and idempotent terminal resolution`() = runBlocking {
         val staged = stagedAction()
-        withRuntime(staged) { runtime, store, actionControl, _ ->
+        withRuntime(staged, interpreterClient = StubChatModelClient().apply {
+            enqueueRawResponse("""{"decision":"approve"}""")
+            enqueueRawResponse("""{"decision":"approve"}""")
+        }) { runtime, store, actionControl, _ ->
             runtime.onApprovalStaged(
                 actionSummary = staged.summary, stagedAction = staged,
                 reason = "Approval required.", reasonCode = "NEEDS_APPROVAL",

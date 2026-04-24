@@ -3,9 +3,9 @@
 NeoPsyke is at version 0.1.0 — early and experimental. The following are known rough edges
 we're actively working on. Contributions and feedback are welcome.
 
-## Goals
+## Assignments
 
-The goal subsystem is **experimental and unstable**. Goal lifecycle management (creation,
+The assignment subsystem is **experimental and unstable**. Assignment lifecycle management (creation,
 tracking, completion) works in basic scenarios but needs significantly more testing across
 edge cases. Expect breaking changes as the design evolves.
 
