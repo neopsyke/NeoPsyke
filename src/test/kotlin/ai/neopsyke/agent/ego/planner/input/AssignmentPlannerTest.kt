@@ -11,6 +11,8 @@ import ai.neopsyke.agent.ego.planner.model.AssignmentRouteTarget
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.AssignmentItemSnapshot
 import ai.neopsyke.agent.model.AssignmentPlanStepSnapshot
+import ai.neopsyke.agent.model.DialogueRole
+import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.PendingInput
@@ -21,6 +23,7 @@ import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import ai.neopsyke.support.StubChatModelClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -398,7 +401,14 @@ class AssignmentPlannerTest {
         )
         val decision = planner.plan(
             trigger = EgoTrigger.IncomingInput(PendingInput(id = 2, content = "use Prenzlauer Berg or Friedrichshain and stay under 2200 EUR")),
-            context = context,
+            context = context.copy(
+                recentDialogue = listOf(
+                    DialogueTurn(
+                        role = DialogueRole.ASSISTANT,
+                        content = "What neighborhoods and budget should I use?",
+                    )
+                )
+            ),
             target = AssignmentRouteTarget.RESPONSIBILITY,
         )
 
@@ -410,6 +420,96 @@ class AssignmentPlannerTest {
         assertTrue(intention.payload.contains(""""cron_expression":"0 9 * * *""""))
         assertTrue(intention.payload.contains(""""command":"create""""))
         assertTrue(intention.payload.contains(WorkItemKind.RESPONSIBILITY.name))
+    }
+
+    @Test
+    fun `responsibility planner does not reuse stale intake draft without clarification continuity`() {
+        val llm = StubChatModelClient().apply {
+            enqueueRawResponse(
+                """
+                {
+                  "command":"clarify",
+                  "work_item_kind":"RESPONSIBILITY",
+                  "work_item_reference":null,
+                  "title":"Apartment search",
+                  "instruction":null,
+                  "completion_criteria":null,
+                  "priority":"medium",
+                  "cron_expression":null,
+                  "contact_channel":"dashboard",
+                  "operator_summary":"Keep watching Berlin apartments",
+                  "plan_steps":null,
+                  "assistant_response":null,
+                  "clarification_question":"What neighborhoods and budget should I use?",
+                  "responsibility_summary":"Watch for strong apartment matches in Berlin.",
+                  "known_preferences":["Berlin"],
+                  "known_constraints":["Need budget"],
+                  "known_signals_of_success":["Useful shortlist"],
+                  "review_cadence_hint":"daily",
+                  "delivery_hint":"dashboard",
+                  "open_questions":["Need budget"],
+                  "ready_to_create":false,
+                  "reason":"missing budget"
+                }
+                """.trimIndent()
+            )
+            enqueueRawResponse(
+                """
+                {
+                  "command":"clarify",
+                  "work_item_kind":"RESPONSIBILITY",
+                  "work_item_reference":null,
+                  "title":"Garden monitoring",
+                  "instruction":null,
+                  "completion_criteria":null,
+                  "priority":"medium",
+                  "cron_expression":null,
+                  "contact_channel":"dashboard",
+                  "operator_summary":"Watch garden watering needs",
+                  "plan_steps":null,
+                  "assistant_response":null,
+                  "clarification_question":"Which plants and watering cadence should I monitor?",
+                  "responsibility_summary":"Watch garden watering needs.",
+                  "known_preferences":["garden"],
+                  "known_constraints":[],
+                  "known_signals_of_success":[],
+                  "review_cadence_hint":"weekly",
+                  "delivery_hint":"dashboard",
+                  "open_questions":["Need plant list"],
+                  "ready_to_create":false,
+                  "reason":"new responsibility needs details"
+                }
+                """.trimIndent()
+            )
+        }
+        val runtime = PlannerRuntime(
+            defaultModelClient = llm,
+            config = AgentConfig(),
+            instrumentation = NoopAgentInstrumentation,
+        )
+        val planner = AssignmentCommandBuilder(runtime, AgentConfig(), NoopAgentInstrumentation, NoopPlanRefiner())
+        val context = PlannerContext(
+            recentDialogue = emptyList(),
+            queue = QueueSnapshot(0, 0, 0),
+            availableContactChannels = setOf("dashboard"),
+            conversationContext = ai.neopsyke.agent.model.ConversationContext.default(),
+        )
+
+        planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 1, content = "help me keep an eye on apartments in Berlin")),
+            context = context,
+            target = AssignmentRouteTarget.RESPONSIBILITY,
+        )
+        planner.plan(
+            trigger = EgoTrigger.IncomingInput(PendingInput(id = 2, content = "help me stay on top of garden watering")),
+            context = context,
+            target = AssignmentRouteTarget.RESPONSIBILITY,
+        )
+
+        val prompt = llm.lastMessages.joinToString("\n") { it.content }
+        assertFalse(prompt.contains("Current responsibility intake draft:"))
+        assertFalse(prompt.contains("Apartment search"))
+        assertFalse(prompt.contains("Need budget"))
     }
 
     @Test

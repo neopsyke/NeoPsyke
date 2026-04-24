@@ -25,6 +25,8 @@ import ai.neopsyke.agent.assignments.WorkItemPriority
 import ai.neopsyke.agent.model.ActionType
 import ai.neopsyke.agent.model.CommitMode
 import ai.neopsyke.agent.model.AssignmentItemSnapshot
+import ai.neopsyke.agent.model.DialogueRole
+import ai.neopsyke.agent.model.DialogueTurn
 import ai.neopsyke.agent.model.EgoDecision
 import ai.neopsyke.agent.model.EgoTrigger
 import ai.neopsyke.agent.model.IntentionKind
@@ -83,7 +85,10 @@ class AssignmentCommandBuilder(
                 "\"on the dashboard\" or \"in the app\" -> \"dashboard\" if available."
         }
         val responsibilityDraft = if (target == AssignmentRouteTarget.RESPONSIBILITY) {
-            responsibilityIntakeStore.get(context.conversationContext.sessionId)
+            responsibilityIntakeStore.activeForContinuation(
+                sessionId = context.conversationContext.sessionId,
+                recentDialogue = context.recentDialogue,
+            )
         } else {
             null
         }
@@ -169,7 +174,7 @@ class AssignmentCommandBuilder(
         }
 
         return when (command) {
-            "clarify" -> handleResponsibilityClarification(payload, trigger, context)
+            "clarify" -> handleResponsibilityClarification(payload, trigger, context, responsibilityDraft)
             "create" -> handleCreate(
                 payload = payload,
                 context = context,
@@ -180,7 +185,7 @@ class AssignmentCommandBuilder(
                 },
                 responsibilityDraft = responsibilityDraft,
             )
-            "fallback" -> handleFallback(payload)
+            "fallback" -> handleFallback(payload, context, target)
             else -> handleManagement(command, payload, context)
         }
     }
@@ -301,15 +306,20 @@ class AssignmentCommandBuilder(
         payload: AssignmentPayload,
         trigger: EgoTrigger.IncomingInput,
         context: PlannerContext,
+        existingDraft: ResponsibilityDraft?,
     ): EgoDecision {
         val draft = responsibilityIntakeStore.merge(
             sessionId = context.conversationContext.sessionId,
-            existing = responsibilityIntakeStore.get(context.conversationContext.sessionId),
+            existing = existingDraft,
             payload = payload,
         )
         val question = payload.clarificationQuestion?.trim()?.ifBlank { null }
             ?: draft.openQuestions.firstOrNull()
             ?: "What outcomes, constraints, and cadence should this responsibility cover?"
+        responsibilityIntakeStore.recordClarificationQuestion(
+            sessionId = context.conversationContext.sessionId,
+            question = question,
+        )
         logger.debug {
             "Responsibility clarification requested for session=${context.conversationContext.sessionId} " +
                 "question='${question.take(80)}' user='${trigger.input.content.take(80)}'"
@@ -317,7 +327,14 @@ class AssignmentCommandBuilder(
         return contactUser(question, "Clarify responsibility setup")
     }
 
-    private fun handleFallback(payload: AssignmentPayload): EgoDecision {
+    private fun handleFallback(
+        payload: AssignmentPayload,
+        context: PlannerContext,
+        target: AssignmentRouteTarget,
+    ): EgoDecision {
+        if (target == AssignmentRouteTarget.RESPONSIBILITY) {
+            responsibilityIntakeStore.clear(context.conversationContext.sessionId)
+        }
         val response = payload.assistantResponse?.trim().orEmpty()
         if (response.isBlank()) {
             return contactUser(
@@ -950,6 +967,7 @@ private data class ResponsibilityDraft(
     val deliveryHint: String? = null,
     val openQuestions: List<String> = emptyList(),
     val readyToCreate: Boolean = false,
+    val lastClarificationQuestion: String? = null,
 ) {
     fun operatorSummary(): String =
         buildString {
@@ -976,10 +994,26 @@ private data class ResponsibilityDraft(
 private class ResponsibilityIntakeStore {
     private val drafts = ConcurrentHashMap<String, ResponsibilityDraft>()
 
-    fun get(sessionId: String): ResponsibilityDraft? = drafts[sessionId]
+    fun activeForContinuation(sessionId: String, recentDialogue: List<DialogueTurn>): ResponsibilityDraft? {
+        val draft = drafts[sessionId] ?: return null
+        val expectedQuestion = draft.lastClarificationQuestion?.trim()?.ifBlank { null } ?: return null
+        val lastAssistantTurn = recentDialogue
+            .asReversed()
+            .firstOrNull { it.role == DialogueRole.ASSISTANT }
+            ?.content
+            ?.trim()
+            ?.ifBlank { null }
+        return if (lastAssistantTurn == expectedQuestion) draft else null
+    }
 
     fun clear(sessionId: String) {
         drafts.remove(sessionId)
+    }
+
+    fun recordClarificationQuestion(sessionId: String, question: String) {
+        drafts.computeIfPresent(sessionId) { _, draft ->
+            draft.copy(lastClarificationQuestion = question.trim().ifBlank { null })
+        }
     }
 
     fun merge(
@@ -1000,6 +1034,7 @@ private class ResponsibilityIntakeStore {
             deliveryHint = payload.deliveryHint?.trim()?.ifBlank { null } ?: existing?.deliveryHint,
             openQuestions = payload.openQuestions.orEmpty().takeIf { it.isNotEmpty() } ?: existing?.openQuestions.orEmpty(),
             readyToCreate = payload.readyToCreate ?: existing?.readyToCreate ?: false,
+            lastClarificationQuestion = existing?.lastClarificationQuestion,
         )
         drafts[sessionId] = draft
         return draft

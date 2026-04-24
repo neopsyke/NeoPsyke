@@ -174,6 +174,22 @@ private const val PROVIDER_HEALTH_CHECK_RETRY_DELAY_MS: Long = 250L
 private const val FREUD_LIVE_SESSION_ID: String = "freud-live"
 private const val FREUD_LIVE_INTERLOCUTOR_ID: String = "freud-live-user"
 
+private fun normalizedReasoningEffort(endpoint: LlmEndpointConfig): String? =
+    endpoint.reasoningEffort?.trim()?.lowercase()?.ifBlank { null }
+
+private fun maybeReasoningEffortWrap(client: ChatModelClient, endpoint: LlmEndpointConfig): ChatModelClient =
+    normalizedReasoningEffort(endpoint)?.let { effort -> ReasoningEffortChatClient(client, effort) } ?: client
+
+private fun endpointClientKey(endpoint: LlmEndpointConfig): String =
+    listOf(
+        endpoint.providerLabel.lowercase(),
+        endpoint.model.trim(),
+        normalizedReasoningEffort(endpoint).orEmpty(),
+    ).joinToString("::")
+
+private fun sameProviderAndModel(endpoint: LlmEndpointConfig, provider: String, model: String): Boolean =
+    endpoint.providerLabel.equals(provider, ignoreCase = true) && endpoint.model.trim() == model
+
 internal object AppModeRunners {
     private data class InteractiveLlmStartupConfig(
         val metaReasonerFallback: LlmEndpointConfig?,
@@ -264,9 +280,12 @@ internal object AppModeRunners {
                         if (!checkProviderHealth(endpoint = llm.planner, modeLabel = "eval_reasoning_model", roleLabel = "planner")) {
                             return
                         }
-                        createChatClient(
-                            endpoint = llm.planner,
-                            callObserver = callObserver
+                        maybeReasoningEffortWrap(
+                            createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserver
+                            ),
+                            llm.planner,
                         )
                     }
                 }
@@ -399,9 +418,12 @@ internal object AppModeRunners {
                 // Memory advisor client — uses the memory_advisor cognitive role.
                 UsageTrackingChatClient(
                     delegate = InstrumentedChatModelClient(
-                        delegate = createChatClient(
-                            endpoint = llm.memoryAdvisor,
-                            callObserver = callObserverFor(llm.memoryAdvisor)
+                        delegate = maybeReasoningEffortWrap(
+                            createChatClient(
+                                endpoint = llm.memoryAdvisor,
+                                callObserver = callObserverFor(llm.memoryAdvisor)
+                            ),
+                            llm.memoryAdvisor,
                         ),
                         hooks = listOf(rawResponseHook)
                     )
@@ -409,9 +431,12 @@ internal object AppModeRunners {
                 // Judge client — uses the planner cognitive role for recall evaluation.
                 UsageTrackingChatClient(
                     delegate = InstrumentedChatModelClient(
-                        delegate = createChatClient(
-                            endpoint = llm.planner,
-                            callObserver = callObserverFor(llm.planner)
+                        delegate = maybeReasoningEffortWrap(
+                            createChatClient(
+                                endpoint = llm.planner,
+                                callObserver = callObserverFor(llm.planner)
+                            ),
+                            llm.planner,
                         ),
                         hooks = listOf(rawResponseHook)
                     )
@@ -1034,15 +1059,15 @@ internal object AppModeRunners {
                     fun maybeCacheWrap(client: ChatModelClient): ChatModelClient =
                         llmCacheManager?.wrapClient(client) ?: client
 
-                    fun maybeReasoningEffortWrap(client: ChatModelClient, endpoint: ai.neopsyke.config.LlmEndpointConfig): ChatModelClient =
-                        endpoint.reasoningEffort?.let { effort -> ReasoningEffortChatClient(client, effort) } ?: client
-
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = maybeCacheWrap(createChatClient(
-                                endpoint = llm.planner,
-                                callObserver = callObserverForProvider(llm.planner.providerLabel)
-                            )),
+                            delegate = maybeReasoningEffortWrap(
+                                maybeCacheWrap(createChatClient(
+                                    endpoint = llm.planner,
+                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
+                                )),
+                                llm.planner,
+                            ),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
@@ -1056,10 +1081,13 @@ internal object AppModeRunners {
                             )
                             InstrumentedChatModelClient(
                                 delegate = TokenBudgetGuardedChatClient(
-                                    delegate = maybeCacheWrap(createChatClient(
-                                        endpoint = superegoReviewRouting.primaryEndpoint,
-                                        callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
-                                    )),
+                                    delegate = maybeReasoningEffortWrap(
+                                        maybeCacheWrap(createChatClient(
+                                            endpoint = superegoReviewRouting.primaryEndpoint,
+                                            callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
+                                        )),
+                                        superegoReviewRouting.primaryEndpoint,
+                                    ),
                                     budgetGate = tokenBudgetGate,
                                     provider = superegoReviewRouting.primaryEndpoint.providerLabel,
                                     role = LlmRoleLabels.SUPEREGO
@@ -1069,10 +1097,13 @@ internal object AppModeRunners {
                                 val superegoEscalationClient = superegoReviewRouting.escalationEndpoint?.let { escalationEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = escalationEndpoint,
-                                                callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = escalationEndpoint,
+                                                    callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
+                                                )),
+                                                escalationEndpoint,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = escalationEndpoint.providerLabel,
                                             role = LlmRoleLabels.SUPEREGO
@@ -1083,10 +1114,13 @@ internal object AppModeRunners {
                                 val metaReasonerFallbackClient = metaReasonerFallbackEndpoint?.let { fallbackEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = fallbackEndpoint,
-                                                callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = fallbackEndpoint,
+                                                    callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
+                                                )),
+                                                fallbackEndpoint,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = fallbackEndpoint.providerLabel,
                                             role = LlmRoleLabels.META_REASONER
@@ -1096,10 +1130,13 @@ internal object AppModeRunners {
                                 }
                                 InstrumentedChatModelClient(
                                     delegate = TokenBudgetGuardedChatClient(
-                                        delegate = maybeCacheWrap(createChatClient(
-                                            endpoint = llm.metaReasoner,
-                                            callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
-                                        )),
+                                        delegate = maybeReasoningEffortWrap(
+                                            maybeCacheWrap(createChatClient(
+                                                endpoint = llm.metaReasoner,
+                                                callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
+                                            )),
+                                            llm.metaReasoner,
+                                        ),
                                         budgetGate = tokenBudgetGate,
                                         provider = llm.metaReasoner.providerLabel,
                                         role = LlmRoleLabels.META_REASONER
@@ -1108,10 +1145,13 @@ internal object AppModeRunners {
                                 ).use { metaReasonerClient ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = llm.memoryAdvisor,
-                                                callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = llm.memoryAdvisor,
+                                                    callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
+                                                )),
+                                                llm.memoryAdvisor,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = llm.memoryAdvisor.providerLabel,
                                             role = LlmRoleLabels.MEMORY_ADVISOR
@@ -1621,15 +1661,15 @@ internal object AppModeRunners {
                     fun maybeCacheWrap(client: ChatModelClient): ChatModelClient =
                         llmCacheManager?.wrapClient(client) ?: client
 
-                    fun maybeReasoningEffortWrap(client: ChatModelClient, endpoint: ai.neopsyke.config.LlmEndpointConfig): ChatModelClient =
-                        endpoint.reasoningEffort?.let { effort -> ReasoningEffortChatClient(client, effort) } ?: client
-
                     InstrumentedChatModelClient(
                         delegate = TokenBudgetGuardedChatClient(
-                            delegate = maybeCacheWrap(createChatClient(
-                                endpoint = llm.planner,
-                                callObserver = callObserverForProvider(llm.planner.providerLabel)
-                            )),
+                            delegate = maybeReasoningEffortWrap(
+                                maybeCacheWrap(createChatClient(
+                                    endpoint = llm.planner,
+                                    callObserver = callObserverForProvider(llm.planner.providerLabel)
+                                )),
+                                llm.planner,
+                            ),
                             budgetGate = tokenBudgetGate,
                             provider = llm.planner.providerLabel,
                             role = LlmRoleLabels.PLANNER
@@ -1643,10 +1683,13 @@ internal object AppModeRunners {
                             )
                             InstrumentedChatModelClient(
                                 delegate = TokenBudgetGuardedChatClient(
-                                    delegate = maybeCacheWrap(createChatClient(
-                                        endpoint = superegoReviewRouting.primaryEndpoint,
-                                        callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
-                                    )),
+                                    delegate = maybeReasoningEffortWrap(
+                                        maybeCacheWrap(createChatClient(
+                                            endpoint = superegoReviewRouting.primaryEndpoint,
+                                            callObserver = callObserverForProvider(superegoReviewRouting.primaryEndpoint.providerLabel)
+                                        )),
+                                        superegoReviewRouting.primaryEndpoint,
+                                    ),
                                     budgetGate = tokenBudgetGate,
                                     provider = superegoReviewRouting.primaryEndpoint.providerLabel,
                                     role = LlmRoleLabels.SUPEREGO
@@ -1656,10 +1699,13 @@ internal object AppModeRunners {
                                 val superegoEscalationClient = superegoReviewRouting.escalationEndpoint?.let { escalationEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = escalationEndpoint,
-                                                callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = escalationEndpoint,
+                                                    callObserver = callObserverForProvider(escalationEndpoint.providerLabel)
+                                                )),
+                                                escalationEndpoint,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = escalationEndpoint.providerLabel,
                                             role = LlmRoleLabels.SUPEREGO
@@ -1670,10 +1716,13 @@ internal object AppModeRunners {
                                 val metaReasonerFallbackClient = metaReasonerFallbackEndpoint?.let { fallbackEndpoint ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = fallbackEndpoint,
-                                                callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = fallbackEndpoint,
+                                                    callObserver = callObserverForProvider(fallbackEndpoint.providerLabel)
+                                                )),
+                                                fallbackEndpoint,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = fallbackEndpoint.providerLabel,
                                             role = LlmRoleLabels.META_REASONER
@@ -1683,10 +1732,13 @@ internal object AppModeRunners {
                                 }
                                 InstrumentedChatModelClient(
                                     delegate = TokenBudgetGuardedChatClient(
-                                        delegate = maybeCacheWrap(createChatClient(
-                                            endpoint = llm.metaReasoner,
-                                            callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
-                                        )),
+                                        delegate = maybeReasoningEffortWrap(
+                                            maybeCacheWrap(createChatClient(
+                                                endpoint = llm.metaReasoner,
+                                                callObserver = callObserverForProvider(llm.metaReasoner.providerLabel)
+                                            )),
+                                            llm.metaReasoner,
+                                        ),
                                         budgetGate = tokenBudgetGate,
                                         provider = llm.metaReasoner.providerLabel,
                                         role = LlmRoleLabels.META_REASONER
@@ -1695,10 +1747,13 @@ internal object AppModeRunners {
                                 ).use { metaReasonerClient ->
                                     InstrumentedChatModelClient(
                                         delegate = TokenBudgetGuardedChatClient(
-                                            delegate = maybeCacheWrap(createChatClient(
-                                                endpoint = llm.memoryAdvisor,
-                                                callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
-                                            )),
+                                            delegate = maybeReasoningEffortWrap(
+                                                maybeCacheWrap(createChatClient(
+                                                    endpoint = llm.memoryAdvisor,
+                                                    callObserver = callObserverForProvider(llm.memoryAdvisor.providerLabel)
+                                                )),
+                                                llm.memoryAdvisor,
+                                            ),
                                             budgetGate = tokenBudgetGate,
                                             provider = llm.memoryAdvisor.providerLabel,
                                             role = LlmRoleLabels.MEMORY_ADVISOR
@@ -2841,7 +2896,7 @@ private fun plannerLaneEndpointTemplates(llm: LlmRuntimeConfig): Map<String, Llm
     return templates
 }
 
-private fun buildPlannerLaneModelClientResolver(
+internal fun buildPlannerLaneModelClientResolver(
     llm: LlmRuntimeConfig,
     plannerClient: ChatModelClient,
     createPlannerClient: (LlmEndpointConfig) -> ChatModelClient,
@@ -2851,21 +2906,27 @@ private fun buildPlannerLaneModelClientResolver(
     val plannerModel = llm.planner.model.trim()
     val clientsByKey = mutableMapOf<String, ChatModelClient>()
     val warnedUnknownProviders = mutableSetOf<String>()
+    val plannerReasoningEffort = normalizedReasoningEffort(llm.planner)
+
+    fun clientForEndpoint(endpoint: LlmEndpointConfig): ChatModelClient =
+        clientsByKey.getOrPut(endpointClientKey(endpoint)) {
+            if (sameProviderAndModel(endpoint, plannerProvider, plannerModel)) {
+                val effort = normalizedReasoningEffort(endpoint)
+                if (effort == plannerReasoningEffort) {
+                    plannerClient
+                } else {
+                    effort?.let { ReasoningEffortChatClient(plannerClient, it) } ?: plannerClient
+                }
+            } else {
+                createPlannerClient(endpoint)
+            }
+        }
 
     return { laneId, resolved ->
         // Priority 1: per-lane endpoint from llm-runtime.yaml cognitive_roles.planner.lanes
         val laneEndpoint = llm.cognitiveRoles.plannerLanes[laneId.configKey]
         if (laneEndpoint != null) {
-            val provider = laneEndpoint.providerLabel.lowercase()
-            val model = laneEndpoint.model.trim()
-            if (provider == plannerProvider && model == plannerModel) {
-                plannerClient
-            } else {
-                val cacheKey = "$provider::$model"
-                clientsByKey.getOrPut(cacheKey) {
-                    createPlannerClient(laneEndpoint)
-                }
-            }
+            clientForEndpoint(laneEndpoint)
         } else {
             // Priority 2: per-lane provider/model from agent-runtime.yaml planner.lanes
             val requestedProvider = resolved.provider?.trim()?.lowercase()?.ifBlank { null }
@@ -2884,14 +2945,7 @@ private fun buildPlannerLaneModelClientResolver(
                     null
                 } else {
                     val model = requestedModel ?: template.model
-                    if (provider == plannerProvider && model == plannerModel) {
-                        plannerClient
-                    } else {
-                        val cacheKey = "$provider::$model"
-                        clientsByKey.getOrPut(cacheKey) {
-                            createPlannerClient(template.copy(model = model))
-                        }
-                    }
+                    clientForEndpoint(template.copy(model = model))
                 }
             }
         }
