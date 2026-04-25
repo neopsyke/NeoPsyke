@@ -1,0 +1,5 @@
+id: actions/reflect_internal/payload-guidance
+version: 1
+variables: []
+text: |
+  JSON: {"summary":"First-person trusted self observation","keywords":["topic1","topic2"]}

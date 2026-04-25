@@ -1,0 +1,5 @@
+id: actions/gmail_observe_message/planner-description
+version: 1
+variables: []
+text: |
+  gmail_observe_message: fetch a Gmail message by id.

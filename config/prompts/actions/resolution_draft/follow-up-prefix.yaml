@@ -1,0 +1,5 @@
+id: actions/resolution_draft/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Resolution draft captured.

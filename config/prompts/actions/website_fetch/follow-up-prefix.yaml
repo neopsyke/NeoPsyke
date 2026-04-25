@@ -1,0 +1,5 @@
+id: actions/website_fetch/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Fetch completed.

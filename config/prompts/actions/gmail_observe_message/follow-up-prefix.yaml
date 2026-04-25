@@ -1,0 +1,5 @@
+id: actions/gmail_observe_message/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Gmail message retrieval completed.

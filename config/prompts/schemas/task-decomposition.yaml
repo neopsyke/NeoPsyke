@@ -1,0 +1,25 @@
+id: task-decomposition
+name: task_decomposition
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["assignment", "steps", "urgency"],
+    "properties": {
+      "assignment": { "type": ["string", "null"], "maxLength": 600 },
+      "steps": { "type": ["array", "null"], "items": { "type": "string", "maxLength": 120 }, "maxItems": 6 },
+      "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] }
+    }
+  }
+relaxed_schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["assignment", "steps", "urgency"],
+    "properties": {
+      "assignment": { "type": ["string", "null"] },
+      "steps": { "type": ["array", "null"], "items": { "type": "string" } },
+      "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] }
+    }
+  }

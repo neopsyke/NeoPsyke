@@ -1,0 +1,5 @@
+id: actions/reflect_evidence/planner-description
+version: 1
+variables: []
+text: |
+  reflect_evidence: persist evidence-backed learning from same-request external artifacts (artifacts are resolved automatically from scope).

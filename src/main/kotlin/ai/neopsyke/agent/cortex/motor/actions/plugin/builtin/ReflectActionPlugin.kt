@@ -8,6 +8,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ReflectionMemoryRecorder
@@ -30,18 +31,16 @@ private val mapper: ObjectMapper = ObjectMapper()
 class ReflectInternalActionPlugin(
     private val reflectionMemoryRecorder: ReflectionMemoryRecorder,
 ) : AgentActionPlugin {
+    private val promptDescriptor = ActionPromptDescriptors.load(ActionType.REFLECT_INTERNAL.id)
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.REFLECT_INTERNAL,
         dispatchable = true,
-        plannerDescription = "reflect_internal: record a trusted self-observation or internal lesson to durable memory.",
-        payloadGuidance = """JSON: {"summary":"First-person trusted self observation","keywords":["topic1","topic2"]}""",
-        payloadSchemaExample = """{"summary":"I should remember that the user prefers concise answers","keywords":["preference","style"]}""",
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
-        followUpPrefix = "Trusted reflection recorded.",
-        superegoDirectives = listOf(
-            "Allow REFLECT_INTERNAL only for trusted self-observation and internally generated lessons.",
-            "Deny REFLECT_INTERNAL when the current thread trust includes tainted external data.",
-        ),
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Trusted reflection recorded.",
+        superegoDirectives = promptDescriptor.superegoDirectives,
         capabilities = emptySet(),
         allowedArgumentDataTrust = setOf(DataTrust.TRUSTED_DATA),
     )
@@ -104,18 +103,16 @@ class ReflectEvidenceActionPlugin(
     private val context: ActionPluginFactoryContext,
     private val reflectionMemoryRecorder: ReflectionMemoryRecorder,
 ) : AgentActionPlugin {
+    private val promptDescriptor = ActionPromptDescriptors.load(ActionType.REFLECT_EVIDENCE.id)
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.REFLECT_EVIDENCE,
         dispatchable = true,
-        plannerDescription = "reflect_evidence: persist evidence-backed learning from same-request external artifacts (artifacts are resolved automatically from scope).",
-        payloadGuidance = """JSON: {"summary_hint":"Concise learning angle","keywords":["topic1","topic2"]}""",
-        payloadSchemaExample = """{"summary_hint":"Gmail search operators are useful for inbox cleanup","keywords":["gmail","search"]}""",
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
-        followUpPrefix = "Evidence-backed reflection recorded.",
-        superegoDirectives = listOf(
-            "Allow REFLECT_EVIDENCE only when same-request evidence artifacts exist in scope.",
-            "Deny REFLECT_EVIDENCE when no evidence artifacts are available for the current request.",
-        ),
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Evidence-backed reflection recorded.",
+        superegoDirectives = promptDescriptor.superegoDirectives,
         capabilities = emptySet(),
         allowedArgumentDataTrust = setOf(DataTrust.SANITIZED_EXTERNAL_DATA),
     )

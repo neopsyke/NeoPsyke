@@ -123,7 +123,7 @@ flowchart TB
 | `ImpulsePlanner` | `IncomingImpulse` | `lane/ImpulsePlanner.kt` |
 
 Each lane:
-- has its own narrower system prompt
+- has its own narrower prompt asset under `config/prompts/planner/**`
 - uses `PlannerRuntime` for model calls, retries, circuit breaking, and schema fallback
 - parses typed lane-specific decision models before mapping back to `EgoDecision`
 - validates allowed intentions, commit modes, and available actions
@@ -211,16 +211,19 @@ For `Assignment`, `assignment_target` is one of `generic`, `recurrent_task`, or 
 
 ### L2: Prompt Budget and Assembly
 - `PromptBudgetAllocator` reserves required-core and context floors with message-overhead accounting.
-- `SharedPromptSections` provides reusable prompt sections across lanes.
-- Each lane has its own prompt profile.
+- `PromptCatalog` loads hot-reloadable prompt and schema assets from `config/prompts/**` or `NEOPSYKE_PROMPTS_DIR`.
+- Static lane instructions, retry text, action descriptor fragments, and migrated JSON schemas live as prompt assets.
+- `SharedPromptSections` provides typed runtime context sections across lanes; prompt assets provide human-editable instruction and schema-framing text.
+- Rendered LLM calls carry prompt/schema id and hash metadata for observability.
 - `prompt_budget_allocation` telemetry is emitted per lane.
 
 ### L2: Structured Output and Parse Recovery
-- Lanes request schema-enforced structured output.
+- Lanes request schema-enforced structured output from schema assets.
 - `StructuredOutputHandler` parses JSON with escape-repair fallback.
 - On parse failure: truncation retry, then strict-JSON retry.
 - Per-lane circuit breaker short-circuits to `Noop` after repeated parse failures.
 - `PlannerRuntime` owns retry, provider-side schema fallback, and circuit breaking.
+- Invalid hot-reload edits keep the last valid in-memory prompt/schema and log a structured error; startup fails if the initial asset is invalid.
 
 ### L2: Action Verifier
 - Removed from the redesigned planner path.

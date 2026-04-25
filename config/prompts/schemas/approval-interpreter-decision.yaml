@@ -1,0 +1,12 @@
+id: approval-interpreter-decision
+name: approval_interpreter_decision
+strict: true
+schema: |
+  {
+    "type":"object",
+    "additionalProperties":false,
+    "properties":{
+      "decision":{"type":"string","enum":["approve","deny","deny_and_reissue","explain","unclear"]}
+    },
+    "required":["decision"]
+  }

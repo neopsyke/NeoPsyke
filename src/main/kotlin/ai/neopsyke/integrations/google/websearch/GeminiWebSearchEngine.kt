@@ -22,6 +22,7 @@ import ai.neopsyke.llm.ChatCallObserver
 import ai.neopsyke.llm.ChatCallRecord
 import ai.neopsyke.llm.ChatCallStatus
 import ai.neopsyke.llm.ChatUsage
+import ai.neopsyke.prompt.PromptCatalog
 import ai.neopsyke.llm.bindFailSafeMetricsObserver
 import java.io.IOException
 import java.net.URI
@@ -140,19 +141,10 @@ class GeminiWebSearchEngine(
     }
 
     internal fun buildRequestBody(query: String, maxResults: Int): String {
-        val prompt = """
-            Search query: $query
-            Return STRICT JSON only:
-            {
-              "summary":"short finding summary",
-              "snippets":["bullet-sized snippet", "... up to $maxResults items"],
-              "sources":[{"title":"source title","url":"https://...","snippet":"optional source snippet"}]
-            }
-            Keep snippets factual and concise.
-            Prioritize primary sources (official vendor docs, official pricing pages, standards, research papers).
-            Avoid forums, social posts, link-aggregators, and SEO summaries unless primary sources are unavailable.
-            If only secondary/community sources are available, state that clearly in summary.
-        """.trimIndent()
+        val prompt = PromptCatalog.shared.renderText(
+            "integrations/web-search-request",
+            mapOf("query" to query, "max_results" to maxResults.toString())
+        ).text
 
         val payload = mapOf(
             "model" to model,

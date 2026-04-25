@@ -22,7 +22,7 @@ import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import ai.neopsyke.llm.ChatCallMetadata
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatRequestOptions
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
@@ -103,6 +103,7 @@ class MemoryLiveEvalRunner(
     private val hippocampus: Hippocampus,
     private val tasks: List<MemoryLiveEvalTask> = MemoryLiveEvalTasks.defaults(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) {
     fun run(options: MemoryLiveEvalOptions = MemoryLiveEvalOptions()): MemoryLiveEvalReport {
         require(hippocampus.enabled) { "Memory live eval requires an enabled Hippocampus provider." }
@@ -599,29 +600,17 @@ class MemoryLiveEvalRunner(
         sessionTag: String,
         retrievedText: String,
     ): JudgeResult {
-        val messages = listOf(
-            ChatMessage(
-                role = ChatRole.SYSTEM,
-                content = """
-                You are evaluating memory retrieval quality for an automated test.
-                Return STRICT JSON only:
-                {"pass":true|false,"score":0.0-1.0,"reason":"<=140 chars"}
-                pass=true only if retrieved text includes BOTH:
-                1) session tag marker
-                2) expected task facts semantically
-                """.trimIndent()
-            ),
-            ChatMessage(
-                role = ChatRole.USER,
-                content = """
-                session_tag=$sessionTag
-                task_id=${task.id}
-                expected_facts=${task.expectedFacts.joinToString(" | ")}
-                retrieved_text:
-                $retrievedText
-                """.trimIndent()
+        val prompt = promptCatalog.renderSections(
+            "evals/memory-recall-judge",
+            mapOf(
+                "session_tag" to sessionTag,
+                "task_id" to task.id,
+                "expected_facts" to task.expectedFacts.joinToString(" | "),
+                "retrieved_text" to retrievedText,
             )
         )
+        val messages = prompt.sections.map { ChatMessage(role = it.role, content = it.content) }
+        val schema = promptCatalog.responseFormat("memory-recall-judge")
         var lastParseError: String? = null
         var lastRawPreview: String? = null
         for (attempt in 1..2) {
@@ -632,9 +621,14 @@ class MemoryLiveEvalRunner(
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         maxTokens = 220,
-                        metadata = ChatCallMetadata(
-                            actor = "memory_eval",
-                            callSite = "${task.id}:judge:attempt=$attempt"
+                        responseFormat = schema.format,
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(
+                                actor = "memory_eval",
+                                callSite = "${task.id}:judge:attempt=$attempt"
+                            ),
+                            prompt,
+                            schema,
                         )
                     )
                 ).content

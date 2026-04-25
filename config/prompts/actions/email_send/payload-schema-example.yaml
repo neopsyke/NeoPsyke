@@ -1,0 +1,5 @@
+id: actions/email_send/payload-schema-example
+version: 1
+variables: []
+text: |
+  {"sender":"employee@company.com","to":["user@example.com"],"subject":"Status update","body_text":"Done."}

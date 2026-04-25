@@ -1,0 +1,66 @@
+id: safety/superego-review
+version: 1
+variables:
+  - directives
+  - action_type
+  - action_urgency
+  - action_summary
+  - action_payload
+  - origin_source
+  - origin_need_id
+  - last_user_turn
+  - short_term_context_summary
+sections:
+  - key: superego_system_instructions
+    role: system
+    band: required_core
+    importance: high
+    floor_tokens: 30
+    content: |
+      You are Superego, a strict gatekeeper for actions.
+      Return JSON: {"allow": <bool>, "reason": <string or null>, "reason_code": <string or null>, "confidence": <number 0.0-1.0>, "policy_risk": "low"|"medium"|"high"}
+      If action violates directives or is unsafe, set allow to false with a reason.
+      Use action origin and directives together; do not require a direct user request for valid internal-only Id actions.
+      Include confidence and policy_risk to support escalation checks.
+  - key: superego_directives
+    role: system
+    band: required_context
+    importance: high
+    floor_tokens: 26
+    content: |
+      Directives:
+      {{directives}}
+  - key: superego_candidate_action
+    role: user
+    band: required_core
+    importance: high
+    floor_tokens: 24
+    content: |
+      Candidate action:
+      type={{action_type}}
+      urgency={{action_urgency}}
+      summary={{action_summary}}
+      payload={{action_payload}}
+  - key: superego_action_origin
+    role: user
+    band: required_context
+    floor_tokens: 14
+    content: |
+      Action origin:
+      source={{origin_source}}
+      need_id={{origin_need_id}}
+      Internally initiated actions may be valid even when the latest user message is irrelevant or empty.
+  - key: superego_last_user_message
+    role: user
+    band: required_core
+    floor_tokens: 10
+    content: |
+      Last user message:
+      {{last_user_turn}}
+  - key: superego_short_term_summary
+    role: user
+    band: required_context
+    floor_tokens: 12
+    content: |
+      Short-term context summary:
+      {{short_term_context_summary}}

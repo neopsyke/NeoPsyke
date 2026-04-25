@@ -65,7 +65,7 @@ flowchart LR
 - Public commits, recurring assignment operations, and assignment deletes receive stricter handling.
 - LLM review:
   - can be bypassed for Id-origin `reflect_internal`
-  - uses response schema `{ allow, reason, reason_code, confidence, policy_risk }`
+  - uses prompt/schema assets for review instructions, retry text, and response schema `{ allow, reason, reason_code, confidence, policy_risk }`
   - runs at temperature `0.0`
   - uses schema-enforced structured output and retry
   - defaults to deny on repeated parse failure
@@ -168,6 +168,7 @@ sequenceDiagram
 - Discovery uses `ServiceLoader<AgentActionPluginFactory>` plus the optional connector runtime.
 - Each plugin self-describes through `ActionDescriptor`.
 - `MotorCortex.availableActionTypes()` filters by both `dispatchable` and `available`, so planner prompts only see runtime-available actions.
+- Built-in action planner descriptions, payload guidance, payload examples, follow-up prefixes, and Superego directives are prompt-backed descriptor fragments under `config/prompts/actions/**`.
 
 ### Built-in Action Plugins
 - `contact_user` -> user-facing output, private commit

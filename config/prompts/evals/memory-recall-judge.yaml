@@ -1,0 +1,31 @@
+id: evals/memory-recall-judge
+version: 1
+variables:
+  - session_tag
+  - task_id
+  - expected_facts
+  - retrieved_text
+sections:
+  - key: memory_recall_judge_system
+    role: system
+    band: required_core
+    importance: high
+    floor_tokens: 80
+    content: |
+      You are evaluating memory retrieval quality for an automated test.
+      Return STRICT JSON only:
+      {"pass":true|false,"score":0.0-1.0,"reason":"<=140 chars"}
+      pass=true only if retrieved text includes BOTH:
+      1) session tag marker
+      2) expected task facts semantically
+  - key: memory_recall_judge_context
+    role: user
+    band: required_context
+    importance: high
+    floor_tokens: 120
+    content: |
+      session_tag={{session_tag}}
+      task_id={{task_id}}
+      expected_facts={{expected_facts}}
+      retrieved_text:
+      {{retrieved_text}}

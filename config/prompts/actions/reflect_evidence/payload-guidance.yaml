@@ -1,0 +1,5 @@
+id: actions/reflect_evidence/payload-guidance
+version: 1
+variables: []
+text: |
+  JSON: {"summary_hint":"Concise learning angle","keywords":["topic1","topic2"]}

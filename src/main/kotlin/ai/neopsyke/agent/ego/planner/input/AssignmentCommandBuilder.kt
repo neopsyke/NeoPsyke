@@ -36,8 +36,8 @@ import ai.neopsyke.agent.support.PromptBudgetAllocator
 import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentInstrumentation
-import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 import mu.KotlinLogging
 import java.util.concurrent.ConcurrentHashMap
 
@@ -55,6 +55,7 @@ class AssignmentCommandBuilder(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
     private val planRefiner: PlanRefiner,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) {
     private val responsibilityIntakeStore = ResponsibilityIntakeStore()
 
@@ -75,6 +76,9 @@ class AssignmentCommandBuilder(
             rootInputId = trigger.input.rootInputId,
         )
 
+        val systemPrompt = promptCatalog.renderText(promptProfile.systemPromptId)
+        val schemaPrompt = promptCatalog.renderText("planner/assignment-command-schema-prompt")
+        val schema = promptCatalog.responseFormat("assignment-operation")
         val assignmentInfo = context.assignmentSummary.ifBlank { "No active assignments." }
         val availableChannels = context.availableContactChannels
         val channelsLine = if (availableChannels.isEmpty()) {
@@ -100,7 +104,7 @@ class AssignmentCommandBuilder(
                 band = PromptBudgetAllocator.Band.REQUIRED_CORE,
                 importance = PromptBudgetAllocator.Importance.HIGH,
                 floorTokens = 56,
-                content = promptProfile.systemPrompt
+                content = systemPrompt.text
             ),
             PromptBudgetAllocator.Section(
                 key = "assignment_schema",
@@ -108,7 +112,7 @@ class AssignmentCommandBuilder(
                 band = PromptBudgetAllocator.Band.REQUIRED_CORE,
                 importance = PromptBudgetAllocator.Importance.HIGH,
                 floorTokens = 36,
-                content = ASSIGNMENT_SCHEMA_PROMPT
+                content = schemaPrompt.text
             ),
             PromptBudgetAllocator.Section(
                 key = "assignment_active_items",
@@ -155,8 +159,8 @@ class AssignmentCommandBuilder(
         val response = runtime.call(
             laneId = promptProfile.laneId,
             messages = allocation.messages,
-            metadata = metadata,
-            responseFormat = ASSIGNMENT_RESPONSE_FORMAT,
+            metadata = promptCatalog.metadata(metadata, systemPrompt, schema),
+            responseFormat = schema.format,
         )
 
         if (response == null) {
@@ -195,17 +199,17 @@ class AssignmentCommandBuilder(
             AssignmentRouteTarget.GENERIC -> PlannerPromptProfile(
                 laneId = LaneId.ASSIGNMENT_GENERIC,
                 callSite = "assignment_generic",
-                systemPrompt = GENERIC_SYSTEM_PROMPT,
+                systemPromptId = "planner/assignment-command-generic",
             )
             AssignmentRouteTarget.RECURRENT_TASK -> PlannerPromptProfile(
                 laneId = LaneId.ASSIGNMENT_RECURRENT_TASK,
                 callSite = "assignment_recurrent_task",
-                systemPrompt = RECURRENT_TASK_SYSTEM_PROMPT,
+                systemPromptId = "planner/assignment-command-recurrent-task",
             )
             AssignmentRouteTarget.RESPONSIBILITY -> PlannerPromptProfile(
                 laneId = LaneId.ASSIGNMENT_RESPONSIBILITY,
                 callSite = "assignment_responsibility",
-                systemPrompt = RESPONSIBILITY_SYSTEM_PROMPT,
+                systemPromptId = "planner/assignment-command-responsibility",
             )
         }
 
@@ -806,77 +810,6 @@ class AssignmentCommandBuilder(
         const val ASSIGNMENT_INSTRUCTION_MAX_CHARS: Int = 400
         const val ASSIGNMENT_COMPLETION_CRITERIA_MAX_CHARS: Int = 200
         const val DEFAULT_COMPLETION_CRITERIA: String = "User confirms the assignment is complete."
-        private const val ASSIGNMENT_SCHEMA_PROMPT: String = """
-            JSON schema:
-            {
-              "command":"create|list|status|pause|resume|review|complete|retire|delete|delete_all|update|revise_plan|reprioritize|clarify|fallback",
-              "work_item_kind":"RECURRENT_TASK|RESPONSIBILITY|null",
-              "work_item_reference":{"type":"by_position|ambiguous|unresolved","id":"<number>","candidates":["<numbers>"],"original_text":"<user words>","resolved_from":"active_assignment|reviewable_responsibility_slate|null"},
-              "title":"for create/update",
-              "instruction":"for create/update",
-              "completion_criteria":"for create/update",
-              "priority":"low|medium|high|critical (for create/update/reprioritize)",
-              "cron_expression":"5-field cron or null (for create/update)",
-              "contact_channel":"delivery channel name or null (for create/update)",
-              "operator_summary":"brief operator-facing summary or null",
-              "plan_steps":[{"id":"step1","description":"...","acceptance_criteria":"...","grounding_requirement":"required|not_required","requires":[],"produces":["artifact"],"max_attempts":3}],
-              "assistant_response":"required when command=fallback",
-              "clarification_question":"question for responsibility intake when command=clarify",
-              "responsibility_summary":"summary for responsibility intake or null",
-              "known_preferences":["..."],
-              "known_constraints":["..."],
-              "known_signals_of_success":["..."],
-              "review_cadence_hint":"optional",
-              "delivery_hint":"optional",
-              "open_questions":["..."],
-              "ready_to_create":true,
-              "reason":"optional"
-            }
-        """
-        private const val GENERIC_SYSTEM_PROMPT: String = """
-            You are the generic assignment operations planner.
-            Return STRICT JSON only.
-            Assignments are numbered starting at 1 in the active item list.
-            Allowed operations: list, status, pause, resume, review, complete, retire, delete, delete_all, reprioritize, fallback.
-            Use generic lifecycle operations only. Do not create, update, or revise plans here unless the request is impossible to interpret otherwise.
-            Resolve references by item number. Never invent internal IDs.
-            If you select from the reviewable responsibility slate, set work_item_reference.resolved_from=reviewable_responsibility_slate.
-            Otherwise set work_item_reference.resolved_from=active_assignment.
-            If the user's reference is ambiguous, return work_item_reference.type=ambiguous.
-            If no item matches, return work_item_reference.type=unresolved.
-            If the request is not an assignment lifecycle operation, use fallback.
-        """
-        private const val RECURRENT_TASK_SYSTEM_PROMPT: String = """
-            You are the recurrent-task assignment planner.
-            Return STRICT JSON only.
-            Recurrent tasks are scheduled or repeated structured tasks such as reminders, recurring searches, and monitoring checks.
-            Allowed operations: create, update, revise_plan, fallback.
-            For create/update:
-            - Set work_item_kind=RECURRENT_TASK.
-            - Prefer short, concrete titles.
-            - If the user requests a recurring schedule, set cron_expression to a standard 5-field cron string.
-            - If not recurring, cron_expression may be null for manually-triggered recurrent work.
-            - contact_channel MUST be one of the currently-available delivery channels or null.
-            - Generate concise plan_steps. Runtime-controlled delivery means a final contact_user step is optional, not mandatory.
-            For revise_plan, include revised plan_steps and a short reason.
-            If the request is not about recurrent-task create/update/revise, use fallback.
-        """
-        private const val RESPONSIBILITY_SYSTEM_PROMPT: String = """
-            You are the responsibility assignment planner.
-            Return STRICT JSON only.
-            Responsibilities are ongoing ownership commitments that can require multi-turn intake before creation.
-            Allowed operations: create, update, revise_plan, clarify, fallback.
-            For responsibility intake:
-            - Set work_item_kind=RESPONSIBILITY for create.
-            - If critical operating details are missing, return command=clarify.
-            - Use clarification_question for the next focused question.
-            - Maintain responsibility_summary, known_preferences, known_constraints, known_signals_of_success, review_cadence_hint, delivery_hint, open_questions, ready_to_create.
-            - Only return create when ready_to_create=true and the instruction contains enough operational detail to be useful without repeated re-asking.
-            - operator_summary should be a concise operator-facing summary of what the responsibility covers.
-            - Runtime-controlled delivery means a final contact_user step is optional, not mandatory.
-            If the request is not about responsibility create/update/revise, use fallback.
-        """
-
         /** Runtime fact keys available to the executor. The refiner needs to know
          *  which facts exist (for non-redundancy checks) but not their volatile
          *  values, which change between runs and break cache hashing. */
@@ -886,75 +819,13 @@ class AssignmentCommandBuilder(
             "timezone" to "available at execution time",
         )
 
-        val ASSIGNMENT_RESPONSE_FORMAT = ChatResponseFormat.JsonSchema(
-            name = "assignment_operation",
-            schemaJson = """
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["command", "work_item_kind", "work_item_reference", "title", "instruction", "completion_criteria", "priority", "cron_expression", "contact_channel", "operator_summary", "plan_steps", "assistant_response", "clarification_question", "responsibility_summary", "known_preferences", "known_constraints", "known_signals_of_success", "review_cadence_hint", "delivery_hint", "open_questions", "ready_to_create", "reason"],
-                  "properties": {
-                    "command": { "type": "string" },
-                    "work_item_kind": { "type": ["string", "null"] },
-                    "work_item_reference": {
-                      "type": ["object", "null"],
-                      "properties": {
-                        "type": { "type": "string" },
-                        "id": { "type": ["string", "null"] },
-                        "candidates": { "type": ["array", "null"], "items": { "type": "string" } },
-                        "original_text": { "type": ["string", "null"] },
-                        "resolved_from": { "type": ["string", "null"] }
-                      },
-                      "required": ["type", "id", "candidates", "original_text", "resolved_from"],
-                      "additionalProperties": false
-                    },
-                    "title": { "type": ["string", "null"], "maxLength": 80 },
-                    "instruction": { "type": ["string", "null"], "maxLength": 400 },
-                    "completion_criteria": { "type": ["string", "null"], "maxLength": 200 },
-                    "priority": { "type": ["string", "null"], "enum": ["low", "medium", "high", "critical", null] },
-                    "cron_expression": { "type": ["string", "null"], "maxLength": 40 },
-                    "contact_channel": { "type": ["string", "null"], "maxLength": 40 },
-                    "operator_summary": { "type": ["string", "null"], "maxLength": 240 },
-                    "plan_steps": {
-                      "type": ["array", "null"],
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["id", "description", "acceptance_criteria", "grounding_requirement", "requires", "produces", "max_attempts"],
-                        "properties": {
-                          "id": { "type": "string" },
-                          "description": { "type": "string" },
-                          "acceptance_criteria": { "type": "string" },
-                          "grounding_requirement": { "type": "string", "enum": ["required", "not_required"] },
-                          "requires": { "type": "array", "items": { "type": "string" } },
-                          "produces": { "type": "array", "items": { "type": "string" } },
-                          "max_attempts": { "type": "integer", "minimum": 1 }
-                        }
-                      }
-                    },
-                    "assistant_response": { "type": ["string", "null"] },
-                    "clarification_question": { "type": ["string", "null"] },
-                    "responsibility_summary": { "type": ["string", "null"] },
-                    "known_preferences": { "type": ["array", "null"], "items": { "type": "string" } },
-                    "known_constraints": { "type": ["array", "null"], "items": { "type": "string" } },
-                    "known_signals_of_success": { "type": ["array", "null"], "items": { "type": "string" } },
-                    "review_cadence_hint": { "type": ["string", "null"] },
-                    "delivery_hint": { "type": ["string", "null"] },
-                    "open_questions": { "type": ["array", "null"], "items": { "type": "string" } },
-                    "ready_to_create": { "type": ["boolean", "null"] },
-                    "reason": { "type": ["string", "null"], "maxLength": 160 }
-                  }
-                }
-            """.trimIndent(),
-            strict = true,
-        )
     }
 }
 
 private data class PlannerPromptProfile(
     val laneId: LaneId,
     val callSite: String,
-    val systemPrompt: String,
+    val systemPromptId: String,
 )
 
 private data class ResponsibilityDraft(

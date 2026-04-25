@@ -1,0 +1,5 @@
+id: actions/contact_user/payload-guidance
+version: 1
+variables: []
+text: |
+  Plain text; concise unless detail is warranted.

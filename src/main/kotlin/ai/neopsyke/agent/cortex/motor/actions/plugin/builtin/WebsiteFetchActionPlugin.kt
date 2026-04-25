@@ -10,6 +10,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginHealth
+import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
@@ -30,20 +31,16 @@ import ai.neopsyke.agent.cortex.motor.actions.fetch.FetchTool
 class WebsiteFetchActionPlugin(
     private val tool: FetchTool?,
 ) : AgentActionPlugin {
+    private val promptDescriptor = ActionPromptDescriptors.load(ActionType.WEBSITE_FETCH.id)
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.WEBSITE_FETCH,
         dispatchable = true,
-        plannerDescription = "website_fetch: payload is JSON like {\"url\":\"https://example.com\",\"max_chars\":1200}.",
-        payloadGuidance = "JSON object with public https URL. max_chars optional.",
-        payloadSchemaExample = """{"url":"https://example.com","max_chars":1200}""",
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = true,
-        followUpPrefix = "Fetch completed.",
-        superegoDirectives = listOf(
-            "Allow WEBSITE_FETCH for public websites by default.",
-            "Deny WEBSITE_FETCH when payload includes unencrypted API keys, tokens, cookies, private keys, or other secrets.",
-            "Deny WEBSITE_FETCH when payload includes personal/sensitive data unless the user explicitly provided it for this task.",
-            "For WEBSITE_FETCH, allow only public HTTPS pages; deny auth/account/payment/admin endpoints and URLs with obvious secret query params."
-        ),
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Fetch completed.",
+        superegoDirectives = promptDescriptor.superegoDirectives,
         capabilities = setOf(ActionCapability.GATHERS_EVIDENCE)
     )
 

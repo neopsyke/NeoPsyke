@@ -1,0 +1,5 @@
+id: actions/contact_user/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Message delivered.

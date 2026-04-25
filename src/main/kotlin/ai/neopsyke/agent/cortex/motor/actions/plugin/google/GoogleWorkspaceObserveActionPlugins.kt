@@ -10,6 +10,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginHealth
+import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.SecretHandle
@@ -34,6 +35,21 @@ import java.nio.file.Paths
 private const val GMAIL_SEARCH_ACTION_ID: String = "gmail_observe_search"
 private const val GMAIL_MESSAGE_ACTION_ID: String = "gmail_observe_message"
 private const val CALENDAR_EVENTS_ACTION_ID: String = "calendar_observe_events"
+
+private fun promptBackedDescriptor(actionId: String): ActionDescriptor {
+    val promptDescriptor = ActionPromptDescriptors.load(actionId)
+    return ActionDescriptor(
+        actionType = ActionType(actionId),
+        dispatchable = true,
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
+        requiresFollowUpThought = true,
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Action completed.",
+        capabilities = setOf(ActionCapability.GATHERS_EVIDENCE),
+        effectClass = ActionEffectClass.OBSERVE,
+    )
+}
 
 abstract class GoogleWorkspaceObserveActionPlugin(
     final override val descriptor: ActionDescriptor,
@@ -90,17 +106,7 @@ abstract class GoogleWorkspaceObserveActionPlugin(
 class GmailObserveSearchActionPlugin(
     clientFactory: () -> GoogleWorkspaceApiClient?,
 ) : GoogleWorkspaceObserveActionPlugin(
-    descriptor = ActionDescriptor(
-        actionType = ActionType(GMAIL_SEARCH_ACTION_ID),
-        dispatchable = true,
-        plannerDescription = "gmail_observe_search: search Gmail messages with a JSON payload.",
-        payloadGuidance = "JSON object with query, label_ids optional, and max_results optional.",
-        payloadSchemaExample = """{"query":"from:alice newer_than:7d","max_results":10}""",
-        requiresFollowUpThought = true,
-        followUpPrefix = "Gmail search completed.",
-        capabilities = setOf(ActionCapability.GATHERS_EVIDENCE),
-        effectClass = ActionEffectClass.OBSERVE,
-    ),
+    descriptor = promptBackedDescriptor(GMAIL_SEARCH_ACTION_ID),
     clientFactory = clientFactory,
 ) {
     override fun deterministicReview(
@@ -147,17 +153,7 @@ class GmailObserveSearchActionPlugin(
 class GmailObserveMessageActionPlugin(
     clientFactory: () -> GoogleWorkspaceApiClient?,
 ) : GoogleWorkspaceObserveActionPlugin(
-    descriptor = ActionDescriptor(
-        actionType = ActionType(GMAIL_MESSAGE_ACTION_ID),
-        dispatchable = true,
-        plannerDescription = "gmail_observe_message: fetch a Gmail message by id.",
-        payloadGuidance = "JSON object with required message_id field.",
-        payloadSchemaExample = """{"message_id":"185f6ab42b9"}""",
-        requiresFollowUpThought = true,
-        followUpPrefix = "Gmail message retrieval completed.",
-        capabilities = setOf(ActionCapability.GATHERS_EVIDENCE),
-        effectClass = ActionEffectClass.OBSERVE,
-    ),
+    descriptor = promptBackedDescriptor(GMAIL_MESSAGE_ACTION_ID),
     clientFactory = clientFactory,
 ) {
     override fun deterministicReview(
@@ -196,17 +192,7 @@ class GmailObserveMessageActionPlugin(
 class CalendarObserveEventsActionPlugin(
     clientFactory: () -> GoogleWorkspaceApiClient?,
 ) : GoogleWorkspaceObserveActionPlugin(
-    descriptor = ActionDescriptor(
-        actionType = ActionType(CALENDAR_EVENTS_ACTION_ID),
-        dispatchable = true,
-        plannerDescription = "calendar_observe_events: list upcoming Google Calendar events with a JSON payload.",
-        payloadGuidance = "JSON object with optional calendar_id, time_min, time_max, query, and max_results.",
-        payloadSchemaExample = """{"calendar_id":"primary","max_results":10}""",
-        requiresFollowUpThought = true,
-        followUpPrefix = "Calendar event retrieval completed.",
-        capabilities = setOf(ActionCapability.GATHERS_EVIDENCE),
-        effectClass = ActionEffectClass.OBSERVE,
-    ),
+    descriptor = promptBackedDescriptor(CALENDAR_EVENTS_ACTION_ID),
     clientFactory = clientFactory,
 ) {
     override fun deterministicReview(

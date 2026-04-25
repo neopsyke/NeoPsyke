@@ -1,0 +1,60 @@
+id: assignment-operation
+name: assignment_operation
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["command", "work_item_kind", "work_item_reference", "title", "instruction", "completion_criteria", "priority", "cron_expression", "contact_channel", "operator_summary", "plan_steps", "assistant_response", "clarification_question", "responsibility_summary", "known_preferences", "known_constraints", "known_signals_of_success", "review_cadence_hint", "delivery_hint", "open_questions", "ready_to_create", "reason"],
+    "properties": {
+      "command": { "type": "string" },
+      "work_item_kind": { "type": ["string", "null"] },
+      "work_item_reference": {
+        "type": ["object", "null"],
+        "properties": {
+          "type": { "type": "string" },
+          "id": { "type": ["string", "null"] },
+          "candidates": { "type": ["array", "null"], "items": { "type": "string" } },
+          "original_text": { "type": ["string", "null"] },
+          "resolved_from": { "type": ["string", "null"] }
+        },
+        "required": ["type", "id", "candidates", "original_text", "resolved_from"],
+        "additionalProperties": false
+      },
+      "title": { "type": ["string", "null"], "maxLength": 80 },
+      "instruction": { "type": ["string", "null"], "maxLength": 400 },
+      "completion_criteria": { "type": ["string", "null"], "maxLength": 200 },
+      "priority": { "type": ["string", "null"], "enum": ["low", "medium", "high", "critical", null] },
+      "cron_expression": { "type": ["string", "null"], "maxLength": 40 },
+      "contact_channel": { "type": ["string", "null"], "maxLength": 40 },
+      "operator_summary": { "type": ["string", "null"], "maxLength": 240 },
+      "plan_steps": {
+        "type": ["array", "null"],
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "description", "acceptance_criteria", "grounding_requirement", "requires", "produces", "max_attempts"],
+          "properties": {
+            "id": { "type": "string" },
+            "description": { "type": "string" },
+            "acceptance_criteria": { "type": "string" },
+            "grounding_requirement": { "type": "string", "enum": ["required", "not_required"] },
+            "requires": { "type": "array", "items": { "type": "string" } },
+            "produces": { "type": "array", "items": { "type": "string" } },
+            "max_attempts": { "type": "integer", "minimum": 1 }
+          }
+        }
+      },
+      "assistant_response": { "type": ["string", "null"] },
+      "clarification_question": { "type": ["string", "null"] },
+      "responsibility_summary": { "type": ["string", "null"] },
+      "known_preferences": { "type": ["array", "null"], "items": { "type": "string" } },
+      "known_constraints": { "type": ["array", "null"], "items": { "type": "string" } },
+      "known_signals_of_success": { "type": ["array", "null"], "items": { "type": "string" } },
+      "review_cadence_hint": { "type": ["string", "null"] },
+      "delivery_hint": { "type": ["string", "null"] },
+      "open_questions": { "type": ["array", "null"], "items": { "type": "string" } },
+      "ready_to_create": { "type": ["boolean", "null"] },
+      "reason": { "type": ["string", "null"], "maxLength": 160 }
+    }
+  }

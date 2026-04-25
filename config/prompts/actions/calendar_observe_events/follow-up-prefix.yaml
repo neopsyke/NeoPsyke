@@ -1,0 +1,5 @@
+id: actions/calendar_observe_events/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Calendar event retrieval completed.

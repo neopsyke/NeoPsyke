@@ -1,0 +1,25 @@
+id: approvals/interpreter
+version: 1
+variables:
+  - canonical_summary
+  - reply
+sections:
+  - key: approval_interpreter_system
+    role: system
+    band: required_core
+    importance: high
+    floor_tokens: 32
+    content: |
+      Classify the user reply into: approve, deny, deny_and_reissue, explain, or unclear.
+      approve=reply clearly accepts with no changes.
+      deny=reply clearly rejects.
+      deny_and_reissue=reply adds instructions, requests changes, or approves with modifications.
+      explain=reply asks what/why about the action.
+      unclear=cannot determine intent.
+  - key: approval_interpreter_input
+    role: user
+    band: required_core
+    importance: high
+    floor_tokens: 24
+    content: |
+      Action: {{canonical_summary}} | Reply: {{reply}}

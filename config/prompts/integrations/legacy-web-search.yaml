@@ -1,0 +1,33 @@
+id: integrations/legacy-web-search
+version: 1
+variables:
+  - query
+  - max_results
+sections:
+  - key: legacy_web_search_system_instructions
+    role: system
+    band: required_core
+    importance: medium
+    floor_tokens: 20
+    content: |
+      You are a web research assistant.
+      If your runtime has web access, use it. If not, provide best-effort knowledge and mark uncertainty.
+      Return STRICT JSON only.
+  - key: legacy_web_search_json_schema
+    role: system
+    band: required_context
+    floor_tokens: 16
+    content: |
+      JSON schema:
+      {
+        "summary":"short finding summary",
+        "snippets":["bullet-sized snippet", "... up to {{max_results}} items"]
+      }
+      Keep snippets short and factual.
+  - key: legacy_web_search_query
+    role: user
+    band: required_core
+    importance: high
+    floor_tokens: 12
+    content: |
+      Search query: {{query}}

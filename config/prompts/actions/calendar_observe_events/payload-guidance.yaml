@@ -1,0 +1,5 @@
+id: actions/calendar_observe_events/payload-guidance
+version: 1
+variables: []
+text: |
+  JSON object with optional calendar_id, time_min, time_max, query, and max_results.

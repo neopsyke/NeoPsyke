@@ -16,8 +16,7 @@ import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.support.PromptBudgetAllocator
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
-import ai.neopsyke.llm.ChatResponseFormat
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 private val logger = KotlinLogging.logger {}
 
@@ -29,6 +28,7 @@ class InputIntentRouter(
     private val runtime: PlannerRuntime,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) {
     fun route(trigger: EgoTrigger.IncomingInput, context: PlannerContext): InputRoute {
         val rootInputId = trigger.input.rootInputId
@@ -44,57 +44,22 @@ class InputIntentRouter(
         val routeOptions = buildRouteOptions(assignmentsAvailable)
         val actionSummary = context.availableActions.map { it.id }.sorted().joinToString(", ")
 
+        val prompt = promptCatalog.renderSections(
+            "planner/input-intent-router",
+            mapOf(
+                "route_options" to routeOptions,
+                "action_summary" to actionSummary,
+                "user_input" to trigger.input.content,
+            )
+        )
+        val schema = promptCatalog.responseFormat("input-intent-route")
         val sections = listOfNotNull(
-            PromptBudgetAllocator.Section(
-                key = "router_system",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.HIGH,
-                floorTokens = 48,
-                content = """
-                    You are an intent classifier for an action planner.
-                    Given a user input, classify the intent into exactly one route type.
-                    Return STRICT JSON only.
-                    Routes:
-                    $routeOptions
-                    Rules:
-                    - direct_response: the request can be answered directly from current context without external tools.
-                    - general_action: the request requires one explicit action (search, fetch, contact, etc.).
-                    - multi_step_task: the request requires multiple sequential stages.
-                    - assignment: the user wants to create, manage, or interact with persistent recurrent tasks or responsibilities.
-                    - If route=assignment, you MUST also set assignment_target:
-                      - generic: shared lifecycle work like list, status, pause, resume, review, complete, retire, delete, delete_all, reprioritize.
-                      - recurrent_task: create/update/revise for reminders, recurring searches, scheduled monitoring, and other repeated structured tasks.
-                      - responsibility: create/update/revise for broad ongoing ownership where the agent may need multi-turn intake before creating the item.
-                    - clarification: you cannot confidently distinguish between materially different routes.
-                    - noop: no actionable intent detected.
-                    Available actions: $actionSummary
-                    Do not default to general_action when the route is genuinely ambiguous.
-                    If uncertain between materially different routes, return clarification.
-                """.trimIndent()
-            ),
-            PromptBudgetAllocator.Section(
-                key = "router_schema",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.HIGH,
-                floorTokens = 24,
-                content = """
-                    JSON schema:
-                    {"route":"$routeOptions","assignment_target":"generic|recurrent_task|responsibility|null","reasoning":"short explanation"}
-                """.trimIndent()
-            ),
+            prompt.sections[0],
+            prompt.sections[1],
             SharedPromptSections.recentDialogueSection(context),
             SharedPromptSections.shortTermSummarySection(context),
             SharedPromptSections.actionAvailabilitySection(context),
-            PromptBudgetAllocator.Section(
-                key = "router_trigger",
-                role = ChatRole.USER,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.HIGH,
-                floorTokens = 24,
-                content = "User input:\n${trigger.input.content}"
-            )
+            prompt.sections[2],
         )
 
         val allocation = PromptBudgetAllocator.allocate(sections, config.maxLlmPromptTokens)
@@ -103,8 +68,8 @@ class InputIntentRouter(
         val response = runtime.call(
             laneId = LaneId.INPUT_INTENT_ROUTER,
             messages = allocation.messages,
-            metadata = metadata,
-            responseFormat = ROUTER_RESPONSE_FORMAT,
+            metadata = promptCatalog.metadata(metadata, prompt, schema),
+            responseFormat = schema.format,
         )
 
         if (response == null) {
@@ -168,22 +133,4 @@ class InputIntentRouter(
             }
         }
 
-    private companion object {
-        val ROUTER_RESPONSE_FORMAT = ChatResponseFormat.JsonSchema(
-            name = "input_intent_route",
-            schemaJson = """
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["route", "reasoning"],
-                  "properties": {
-                    "route": { "type": "string" },
-                    "assignment_target": { "type": ["string", "null"] },
-                    "reasoning": { "type": ["string", "null"] }
-                  }
-                }
-            """.trimIndent(),
-            strict = true,
-        )
-    }
 }

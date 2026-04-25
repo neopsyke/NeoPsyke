@@ -1,0 +1,5 @@
+id: actions/gmail_observe_search/payload-guidance
+version: 1
+variables: []
+text: |
+  JSON object with query, label_ids optional, and max_results optional.

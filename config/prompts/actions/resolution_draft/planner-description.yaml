@@ -1,0 +1,5 @@
+id: actions/resolution_draft/planner-description
+version: 1
+variables: []
+text: |
+  resolution_draft: payload is an internal draft chunk for workspace synthesis; not user-visible.

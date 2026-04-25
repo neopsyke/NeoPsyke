@@ -1,0 +1,5 @@
+id: actions/reflect_evidence/payload-schema-example
+version: 1
+variables: []
+text: |
+  {"summary_hint":"Gmail search operators are useful for inbox cleanup","keywords":["gmail","search"]}

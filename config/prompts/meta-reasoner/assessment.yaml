@@ -1,0 +1,66 @@
+id: meta-reasoner/assessment
+version: 1
+variables:
+  - trigger_type
+  - trigger_content
+  - step_index
+  - decision_pressure
+  - stale_streak
+  - progress_score
+  - denial_count
+  - steps_since_new_evidence
+  - repeat_signature_hits
+  - noop_streak
+  - pending_inputs
+  - pending_continuations
+  - pending_actions
+  - pending_intentions
+  - long_term_memory_recall
+  - short_term_context_summary
+  - recent_dialogue
+sections:
+  - key: meta_reasoner_system
+    role: system
+    band: required_core
+    importance: high
+    floor_tokens: 32
+    content: |
+      You are MetaReasoner for Ego's continuation loop.
+      Decide if continued deliberation is productive or stale.
+      Return only data that matches the response format schema.
+      Use finalize_now when repeated loops or high pressure suggest diminishing returns.
+      Use request_tool_then_finalize only if one decisive external action can unlock a better final answer.
+  - key: meta_reasoner_context
+    role: user
+    band: required_core
+    importance: high
+    floor_tokens: 80
+    content: |
+      Trigger:
+      type={{trigger_type}}
+      content={{trigger_content}}
+
+      Deliberation state:
+      step_index={{step_index}}
+      decision_pressure={{decision_pressure}}
+      stale_streak={{stale_streak}}
+      progress_score={{progress_score}}
+      denial_count={{denial_count}}
+      steps_since_new_evidence={{steps_since_new_evidence}}
+      repeat_signature_hits={{repeat_signature_hits}}
+      noop_streak={{noop_streak}}
+
+      Queue:
+      pending_inputs={{pending_inputs}}
+      pending_continuations={{pending_continuations}}
+      pending_actions={{pending_actions}}
+      pending_intentions={{pending_intentions}}
+
+      Long-term memory recall:
+      {{long_term_memory_recall}}
+
+      Short-term context summary:
+      {{short_term_context_summary}}
+
+      Recent dialogue:
+      {{recent_dialogue}}

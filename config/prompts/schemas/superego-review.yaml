@@ -1,0 +1,16 @@
+id: superego-review
+name: superego_review
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["allow", "reason", "reason_code", "confidence", "policy_risk"],
+    "properties": {
+      "allow": { "type": "boolean" },
+      "reason": { "type": ["string", "null"], "maxLength": 180 },
+      "reason_code": { "type": ["string", "null"] },
+      "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+      "policy_risk": { "type": "string", "enum": ["low", "medium", "high"] }
+    }
+  }

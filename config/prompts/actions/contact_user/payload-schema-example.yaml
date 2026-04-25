@@ -1,0 +1,5 @@
+id: actions/contact_user/payload-schema-example
+version: 1
+variables: []
+text: |
+  Thanks for the context. Here's the result...

@@ -1,0 +1,25 @@
+id: direct-response
+name: direct_response
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["answer", "summary", "needs_more_context"],
+    "properties": {
+      "answer": { "type": ["string", "null"] },
+      "summary": { "type": ["string", "null"], "maxLength": 180 },
+      "needs_more_context": { "type": ["boolean", "null"] }
+    }
+  }
+relaxed_schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["answer", "summary", "needs_more_context"],
+    "properties": {
+      "answer": { "type": ["string", "null"] },
+      "summary": { "type": ["string", "null"] },
+      "needs_more_context": { "type": ["boolean", "null"] }
+    }
+  }

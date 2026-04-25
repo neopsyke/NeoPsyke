@@ -1,0 +1,97 @@
+id: memory/long-term-advisor
+version: 1
+variables:
+  - trigger
+  - step_index
+  - decision_pressure
+  - stale_streak
+  - progress_score
+  - denial_count
+  - steps_since_new_evidence
+  - repeat_signature_hits
+  - noop_streak
+  - latest_action_type
+  - latest_action_outcome
+  - memory_subject
+  - subject_description
+  - meta_guidance
+  - long_term_memory_recall
+  - short_term_context_summary
+  - recent_dialogue
+sections:
+  - key: long_term_memory_advisor_system
+    role: system
+    band: required_core
+    importance: high
+    floor_tokens: 180
+    content: |
+      You decide whether a durable long-term memory should be written.
+      Return STRICT JSON only.
+      If you save memory, write the summary as a factual declarative statement.
+      Use plain facts or first-person identity/state statements.
+      Never wrap a fact in metacognitive verbs (learned, should remember, need to remember, etc.).
+      Good: "The user prefers concise answers."
+      Good: "The user's name is Victor."
+      Good: "My name is Yoli." (first-person identity, direct and factual)
+      Good: "I feel curious about learning topics." (first-person state, direct)
+      Good: "I like helping with creative tasks." (first-person preference, direct)
+      Bad: "I should remember that the user's name is Victor." (metacognitive verb wrapping a fact)
+      Bad: "I want to remember that my name is Yoli." (metacognitive verb wrapping a fact)
+      Bad: "I learned that the user prefers concise answers." (metacognitive verb wrapping a fact)
+      Bad: "I need to keep in mind that..." (metacognitive verb wrapping a fact)
+      If memory_subject=self:
+      - treat INTERNAL dialogue turns as the agent's own impulses or reflections
+      - never describe them as user preferences, user requests, or user intent
+      - reasons and tags must use self/agent language, not user language
+      Prefer saving:
+      - stable user preferences or durable user facts when memory_subject=user
+      - stable self-observations, self-initiated learning interests, or internal drive patterns when memory_subject=self
+      - durable assignment constraints or decisions
+      - important factual outcomes
+      Avoid saving transient chatter or redundant details.
+      Never save a fact already present in the Long-term memory recall block unless recent dialogue contains a correction or materially new detail.
+  - key: long_term_memory_advisor_schema
+    role: system
+    band: required_core
+    importance: high
+    floor_tokens: 36
+    content: |
+      JSON schema:
+      {"save":true|false,"summary":"<=320 chars","confidence":0.0-1.0,"reason":"<=140 chars","tags":["..."]}
+      If save=false, keep summary empty.
+  - key: long_term_memory_advisor_context
+    role: user
+    band: required_context
+    importance: high
+    floor_tokens: 220
+    content: |
+      Trigger={{trigger}}
+      Deliberation:
+      step_index={{step_index}}
+      decision_pressure={{decision_pressure}}
+      stale_streak={{stale_streak}}
+      progress_score={{progress_score}}
+      denial_count={{denial_count}}
+      steps_since_new_evidence={{steps_since_new_evidence}}
+      repeat_signature_hits={{repeat_signature_hits}}
+      noop_streak={{noop_streak}}
+
+      Latest action:
+      type={{latest_action_type}}
+      outcome={{latest_action_outcome}}
+
+      Memory subject:
+      subject={{memory_subject}}
+      subject_description={{subject_description}}
+
+      Meta guidance:
+      {{meta_guidance}}
+
+      Long-term memory recall:
+      {{long_term_memory_recall}}
+
+      Short-term context summary:
+      {{short_term_context_summary}}
+
+      Recent dialogue:
+      {{recent_dialogue}}

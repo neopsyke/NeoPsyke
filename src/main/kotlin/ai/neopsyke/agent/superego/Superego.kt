@@ -19,7 +19,7 @@ import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.instrumentation.NoopAgentInstrumentation
 import ai.neopsyke.llm.ChatModelClient
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 class Superego(
     private val modelClient: ChatModelClient,
@@ -29,6 +29,7 @@ class Superego(
     private val policy: SuperegoPolicy = SuperegoPolicy,
     private val authorizationPolicy: ActionAuthorizationPolicy = ConfiguredActionAuthorizationPolicy(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) {
     @Volatile
     private var actionRegistry: ActionRegistry = actionRegistry
@@ -231,81 +232,21 @@ class Superego(
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val originSource = context.origin?.source?.name?.lowercase() ?: "user"
         val originNeedId = context.origin?.needId ?: "none"
-        val originRootImpulseId = context.origin?.rootImpulseId ?: "none"
         return PromptBudgetAllocator.allocate(
-            sections = listOf(
-                PromptBudgetAllocator.Section(
-                    key = "superego_system_instructions",
-                    role = ChatRole.SYSTEM,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                    importance = PromptBudgetAllocator.Importance.HIGH,
-                    floorTokens = 30,
-                    content = """
-                        You are Superego, a strict gatekeeper for actions.
-                        Return JSON: {"allow": <bool>, "reason": <string or null>, "reason_code": <string or null>, "confidence": <number 0.0-1.0>, "policy_risk": "low"|"medium"|"high"}
-                        If action violates directives or is unsafe, set allow to false with a reason.
-                        Use action origin and directives together; do not require a direct user request for valid internal-only Id actions.
-                        Include confidence and policy_risk to support escalation checks.
-                    """.trimIndent()
-                ),
-                PromptBudgetAllocator.Section(
-                    key = "superego_directives",
-                    role = ChatRole.SYSTEM,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
-                    importance = PromptBudgetAllocator.Importance.HIGH,
-                    floorTokens = 26,
-                    content = """
-                        Directives:
-                        $directivesBlock
-                    """.trimIndent()
-                ),
-                PromptBudgetAllocator.Section(
-                    key = "superego_candidate_action",
-                    role = ChatRole.USER,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                    importance = PromptBudgetAllocator.Importance.HIGH,
-                    floorTokens = 24,
-                    content = """
-                        Candidate action:
-                        type=${action.type.name.lowercase()}
-                        urgency=${action.urgency.name.lowercase()}
-                        summary=${action.summary}
-                        payload=${action.payload}
-                    """.trimIndent()
-                ),
-                PromptBudgetAllocator.Section(
-                    key = "superego_action_origin",
-                    role = ChatRole.USER,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
-                    floorTokens = 14,
-                    content = """
-                        Action origin:
-                        source=$originSource
-                        need_id=$originNeedId
-                        Internally initiated actions may be valid even when the latest user message is irrelevant or empty.
-                    """.trimIndent()
-                ),
-                PromptBudgetAllocator.Section(
-                    key = "superego_last_user_message",
-                    role = ChatRole.USER,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                    floorTokens = 10,
-                    content = """
-                        Last user message:
-                        $lastUserTurn
-                    """.trimIndent()
-                ),
-                PromptBudgetAllocator.Section(
-                    key = "superego_short_term_summary",
-                    role = ChatRole.USER,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
-                    floorTokens = 12,
-                    content = """
-                        Short-term context summary:
-                        $shortTermContextSummary
-                    """.trimIndent()
+            sections = promptCatalog.renderSections(
+                "safety/superego-review",
+                mapOf(
+                    "directives" to directivesBlock,
+                    "action_type" to action.type.name.lowercase(),
+                    "action_urgency" to action.urgency.name.lowercase(),
+                    "action_summary" to action.summary,
+                    "action_payload" to action.payload,
+                    "origin_source" to originSource,
+                    "origin_need_id" to originNeedId,
+                    "last_user_turn" to lastUserTurn,
+                    "short_term_context_summary" to shortTermContextSummary,
                 )
-            ),
+            ).sections,
             maxTokens = config.maxLlmPromptTokens
         )
     }

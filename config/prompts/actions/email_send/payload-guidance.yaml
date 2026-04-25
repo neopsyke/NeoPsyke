@@ -1,0 +1,5 @@
+id: actions/email_send/payload-guidance
+version: 1
+variables: []
+text: |
+  JSON object: sender/from, to[], cc[]?, bcc[]?, subject, body_text or body_html.

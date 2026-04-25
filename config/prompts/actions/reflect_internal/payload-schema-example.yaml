@@ -1,0 +1,5 @@
+id: actions/reflect_internal/payload-schema-example
+version: 1
+variables: []
+text: |
+  {"summary":"I should remember that the user prefers concise answers","keywords":["preference","style"]}

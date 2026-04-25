@@ -1,0 +1,5 @@
+id: actions/assignment_operation/payload-guidance
+version: 1
+variables: []
+text: |
+  Strict JSON using the typed AssignmentCommand contract: command, optional work_item_reference, and command-specific fields.

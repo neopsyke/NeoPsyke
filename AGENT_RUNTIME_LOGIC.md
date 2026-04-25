@@ -36,6 +36,7 @@ See details:
 - **Assignment Runtime** (`AssignmentGateway` / `AssignmentRuntime`) — Persistent multi-step objective manager with event-sourced `WorkItemStateMachine`, cron scheduling via `TimerScheduler`, and async wait conditions via `WaitConditionMonitor`.
 - **DeliberationEngine** — Tracks `DecisionPressure`, coordinates `MetaReasoner` assessments, enforces action retry budgets, and can force terminal answers under sustained pressure.
 - **Dashboard and Observability** (`DashboardServer` / `DashboardStateStore`) — Web UI for conversations, observability, and action control with SSE-based live updates.
+- **PromptCatalog** — Hot-reloadable prompt/schema asset loader. Runtime prompts, prompt fragments, and migrated structured-output schemas are loaded from `config/prompts/**` or `NEOPSYKE_PROMPTS_DIR`, with bundled resources as packaged defaults.
 
 ## L0: System-Level Component View
 
@@ -109,6 +110,8 @@ See details:
 - Superego and `LongTermMemoryAdvisor` read `token_weight` for dynamic completion-budget scaling.
 - When two-stage superego review is enabled, runtime resolves a cheaper primary model from the catalog and keeps the configured model for escalation.
 - Planner runtime inserts the `StructuredOutputMode` adapter in the LLM layer. Compatibility degradation is handled there, not in planner lanes.
+- Prompt text and migrated JSON schemas are prompt assets, not Kotlin literals. The runtime checks file mtimes before render; a valid edit replaces the active in-memory asset immediately, while an invalid edit logs `prompt_catalog.reload_failed` and keeps the current valid asset.
+- Migrated LLM metadata includes prompt/schema identity (`prompt_id`, `prompt_version`, `prompt_hash`, `schema_id`, `schema_hash`) so behavior can be correlated with prompt revisions.
 - `web_search` routing is configured independently via `web_search.provider`.
 - `TokenBudgetGate` can short-circuit outbound model calls using hard per-run, per-provider, and per-role caps.
 
@@ -201,6 +204,7 @@ See details:
 [Memory and Startup](docs/agent-logic/MEMORY_AND_STARTUP_DIAGRAM.md).
 
 - LLM callers use retry loops with bounded attempts.
+- Prompt/schema hot reload is fail-soft after startup: invalid edits do not replace the current valid prompt/schema and are logged with asset id, path, active version/hash, and validation failure. Startup still fails when no valid asset exists.
 - `TokenBudgetGate` can short-circuit projected over-budget model calls before dispatch.
 - Required JSON fields are validated after deserialization.
 - Blank assistant content is treated as transport/protocol failure and enters retry/fallback handling.

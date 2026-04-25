@@ -1,0 +1,5 @@
+id: actions/reflect_internal/planner-description
+version: 1
+variables: []
+text: |
+  reflect_internal: record a trusted self-observation or internal lesson to durable memory.

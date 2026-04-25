@@ -1,0 +1,5 @@
+id: actions/gmail_observe_message/payload-schema-example
+version: 1
+variables: []
+text: |
+  {"message_id":"185f6ab42b9"}

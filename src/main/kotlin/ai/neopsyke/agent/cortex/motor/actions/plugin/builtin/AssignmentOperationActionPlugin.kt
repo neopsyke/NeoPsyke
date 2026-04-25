@@ -10,6 +10,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ChannelValidation
@@ -43,16 +44,15 @@ private val logger = KotlinLogging.logger {}
 class AssignmentOperationActionPlugin(
     private val context: ActionPluginFactoryContext,
 ) : AgentActionPlugin {
+    private val promptDescriptor = ActionPromptDescriptors.load(ActionType.ASSIGNMENT_OPERATION.id)
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.ASSIGNMENT_OPERATION,
         dispatchable = context.config.assignment.enabled,
-        plannerDescription = "assignment_operation: create, update, status, list, review, pause, resume, reprioritize, complete, retire, delete, delete_all, or revise_plan recurrent tasks and responsibilities.",
-        payloadGuidance = "Strict JSON using the typed AssignmentCommand contract: command, optional work_item_reference, and command-specific fields.",
-        payloadSchemaExample = """
-            {"command":"create","work_item_kind":"RECURRENT_TASK","title":"Weather reminder","instruction":"Check the current weather and remind me every time this recurrent task runs.","priority":"HIGH","completion_criteria":"A weather reminder is delivered for the current scheduled run.","cron_expression":"*/5 * * * *"}
-        """.trimIndent(),
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
-        followUpPrefix = "Assignment operation completed.",
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Assignment operation completed.",
         capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT),
         effectClass = ActionEffectClass.CONTROL_PLANE,
         directCommitAllowed = true,

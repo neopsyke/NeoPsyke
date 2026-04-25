@@ -4,6 +4,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionCapability
 import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
@@ -21,17 +22,16 @@ import ai.neopsyke.agent.support.TextSecurity
 class ContactUserActionPlugin(
     private val conversationOutput: ConversationOutputGateway,
 ) : AgentActionPlugin {
+    private val promptDescriptor = ActionPromptDescriptors.load(ActionType.CONTACT_USER.id)
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.CONTACT_USER,
         dispatchable = true,
-        plannerDescription = "contact_user: payload is text to deliver to the interlocutor (responses, proactive messages, or any direct communication).",
-        payloadGuidance = "Plain text; concise unless detail is warranted.",
-        payloadSchemaExample = """Thanks for the context. Here's the result...""",
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
-        followUpPrefix = "Message delivered.",
-        superegoDirectives = listOf(
-            "Allow CONTACT_USER by default when it does not violate the general directives."
-        ),
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Message delivered.",
+        superegoDirectives = promptDescriptor.superegoDirectives,
         capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT),
         effectClass = ActionEffectClass.COMMIT_PRIVATE,
         directCommitAllowed = true,

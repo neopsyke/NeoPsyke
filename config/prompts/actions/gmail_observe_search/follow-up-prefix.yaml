@@ -1,0 +1,5 @@
+id: actions/gmail_observe_search/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Gmail search completed.

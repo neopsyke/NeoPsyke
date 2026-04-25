@@ -17,7 +17,7 @@ import ai.neopsyke.llm.ChatCallMetadata
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 private val logger = KotlinLogging.logger {}
 
@@ -46,10 +46,13 @@ class LlmScratchpadFinalizer(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) : ScratchpadFinalizer {
     override fun finalize(request: ScratchpadFinalizerRequest): ScratchpadFinalizerResult? {
         val mode = resolveMode(request.action)
-        val messages = buildMessages(request, mode)
+        val prompt = buildPrompt(request, mode)
+        val messages = prompt.sections.map { ChatMessage(role = it.role, content = it.content) }
+        val schema = promptCatalog.responseFormat("scratchpad-finalizer")
         val attempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         var response: String? = null
         var lastError: Exception? = null
@@ -60,10 +63,15 @@ class LlmScratchpadFinalizer(
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         maxTokens = config.memory.scratchpad.finalPassMaxTokens,
-                        metadata = ChatCallMetadata(
-                            actor = "ego",
-                            callSite = "scratchpad_finalizer",
-                            actionType = request.action.type.name.lowercase()
+                        responseFormat = schema.format,
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(
+                                actor = "ego",
+                                callSite = "scratchpad_finalizer",
+                                actionType = request.action.type.name.lowercase()
+                            ),
+                            prompt,
+                            schema,
                         )
                     )
                 ).content
@@ -115,7 +123,7 @@ class LlmScratchpadFinalizer(
         }
     }
 
-    private fun buildMessages(request: ScratchpadFinalizerRequest, mode: String): List<ChatMessage> {
+    private fun buildPrompt(request: ScratchpadFinalizerRequest, mode: String): PromptCatalog.RenderedPrompt {
         val recentDialogue = request.recentDialogue
             .takeLast(8)
             .joinToString("\n") { turn ->
@@ -144,31 +152,14 @@ class LlmScratchpadFinalizer(
                 """.trimIndent()
             }
         }
-        return listOf(
-            ChatMessage(
-                role = ChatRole.SYSTEM,
-                content = """
-                You rewrite a terminal action payload using an ephemeral scratchpad.
-                Return STRICT JSON only.
-                Never invent facts not present in workspace compilation.
-                JSON schema:
-                {"rewrite":"string","confidence":0.0-1.0,"grounded":true|false,"reason":"<=120 chars"}
-                """.trimIndent()
-            ),
-            ChatMessage(
-                role = ChatRole.USER,
-                content = """
-                $modeGuidance
-                Workspace confidence score=${"%.3f".format(request.workspaceConfidence)}
-                Existing candidate payload:
-                ${request.action.payload}
-
-                Workspace compilation:
-                ${request.workspaceCompilation}
-
-                Recent dialogue:
-                $recentDialogue
-                """.trimIndent()
+        return promptCatalog.renderSections(
+            "memory/scratchpad-finalizer",
+            mapOf(
+                "mode_guidance" to modeGuidance,
+                "workspace_confidence" to "%.3f".format(request.workspaceConfidence),
+                "existing_payload" to request.action.payload,
+                "workspace_compilation" to request.workspaceCompilation,
+                "recent_dialogue" to recentDialogue,
             )
         )
     }

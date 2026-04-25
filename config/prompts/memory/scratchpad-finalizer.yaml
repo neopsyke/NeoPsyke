@@ -1,0 +1,36 @@
+id: memory/scratchpad-finalizer
+version: 1
+variables:
+  - mode_guidance
+  - workspace_confidence
+  - existing_payload
+  - workspace_compilation
+  - recent_dialogue
+sections:
+  - key: scratchpad_finalizer_system
+    role: system
+    band: required_core
+    importance: high
+    floor_tokens: 80
+    content: |
+      You rewrite a terminal action payload using an ephemeral scratchpad.
+      Return STRICT JSON only.
+      Never invent facts not present in workspace compilation.
+      JSON schema:
+      {"rewrite":"string","confidence":0.0-1.0,"grounded":true|false,"reason":"<=120 chars"}
+  - key: scratchpad_finalizer_context
+    role: user
+    band: required_context
+    importance: high
+    floor_tokens: 180
+    content: |
+      {{mode_guidance}}
+      Workspace confidence score={{workspace_confidence}}
+      Existing candidate payload:
+      {{existing_payload}}
+
+      Workspace compilation:
+      {{workspace_compilation}}
+
+      Recent dialogue:
+      {{recent_dialogue}}

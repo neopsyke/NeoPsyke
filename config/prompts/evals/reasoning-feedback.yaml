@@ -1,0 +1,8 @@
+id: evals/reasoning-feedback
+version: 1
+variables:
+  - validation_errors
+text: |
+  Validator feedback:
+  {{validation_errors}}
+  Rewrite your answer as STRICT JSON only. Fix every issue.

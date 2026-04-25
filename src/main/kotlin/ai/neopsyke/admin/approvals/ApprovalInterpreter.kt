@@ -8,8 +8,7 @@ import ai.neopsyke.llm.ChatCallMetadata
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
-import ai.neopsyke.llm.ChatResponseFormat
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 import mu.KotlinLogging
 import java.text.Normalizer
 
@@ -30,6 +29,7 @@ fun interface ApprovalInterpreter {
 class DefaultApprovalInterpreter(
     private val config: AgentConfig,
     private val llmClient: ChatModelClient? = null,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) : ApprovalInterpreter {
     override fun classify(input: ApprovalInterpreterInput): ApprovalClassification {
         val canonical = canonicalize(input)
@@ -54,36 +54,30 @@ class DefaultApprovalInterpreter(
         var lastError: Exception? = null
         for (attempt in 1..retryAttempts) {
             try {
+                val prompt = promptCatalog.renderSections(
+                    "approvals/interpreter",
+                    mapOf(
+                        "canonical_summary" to input.canonicalSummary,
+                        "reply" to input.reply,
+                    )
+                )
+                val schema = promptCatalog.responseFormat("approval-interpreter-decision")
                 val completion = client.chat(
-                    messages = listOf(
-                        ChatMessage(
-                            role = ChatRole.SYSTEM,
-                            content = "Classify the user reply into: approve, deny, deny_and_reissue, explain, or unclear. " +
-                                "approve=reply clearly accepts with no changes. " +
-                                "deny=reply clearly rejects. " +
-                                "deny_and_reissue=reply adds instructions, requests changes, or approves with modifications. " +
-                                "explain=reply asks what/why about the action. " +
-                                "unclear=cannot determine intent."
-                        ),
-                        ChatMessage(
-                            role = ChatRole.USER,
-                            content = "Action: ${input.canonicalSummary} | Reply: ${input.reply}"
-                        )
-                    ),
+                    messages = prompt.sections.map { ChatMessage(role = it.role, content = it.content) },
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         maxTokens = MAX_COMPLETION_TOKENS,
-                        responseFormat = ChatResponseFormat.JsonSchema(
-                            name = "approval_interpreter_decision",
-                            schemaJson = APPROVAL_SCHEMA_JSON,
-                            strict = true,
-                        ),
-                        metadata = ChatCallMetadata(
-                            actor = "approval_interpreter",
-                            callSite = "approval_interpreter_classify",
-                            cognitiveRole = "approval_interpreter",
-                            sessionId = input.sessionId,
-                            rootInputId = input.rootInputId,
+                        responseFormat = schema.format,
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(
+                                actor = "approval_interpreter",
+                                callSite = "approval_interpreter_classify",
+                                cognitiveRole = "approval_interpreter",
+                                sessionId = input.sessionId,
+                                rootInputId = input.rootInputId,
+                            ),
+                            prompt,
+                            schema,
                         )
                     )
                 )
@@ -151,7 +145,5 @@ class DefaultApprovalInterpreter(
         private const val MAX_REPLY_CHARS: Int = 400
         private const val MAX_SUMMARY_CHARS: Int = 240
         private const val MAX_COMPLETION_TOKENS: Int = 10_000
-        private const val APPROVAL_SCHEMA_JSON: String =
-            """{"type":"object","additionalProperties":false,"properties":{"decision":{"type":"string","enum":["approve","deny","deny_and_reissue","explain","unclear"]}},"required":["decision"]}"""
     }
 }

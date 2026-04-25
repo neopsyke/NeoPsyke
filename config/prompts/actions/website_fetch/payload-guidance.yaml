@@ -1,0 +1,5 @@
+id: actions/website_fetch/payload-guidance
+version: 1
+variables: []
+text: |
+  JSON object with public https URL. max_chars optional.

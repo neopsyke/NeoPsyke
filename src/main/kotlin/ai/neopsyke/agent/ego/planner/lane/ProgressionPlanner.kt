@@ -27,6 +27,7 @@ import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 /**
  * L1 lane: handles both EgoTrigger.Continuation and EgoTrigger.ActionFeedback.
@@ -44,6 +45,7 @@ class ProgressionPlanner(
     private val runtime: PlannerRuntime,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) : PlannerLane {
 
     override val laneId: LaneId = LaneId.PROGRESSION
@@ -77,54 +79,17 @@ class ProgressionPlanner(
         val actionSchemaEnum = SharedPromptSections.plannerVisibleActionSchemaEnum(context)
         val actionGuidanceBlock = SharedPromptSections.actionGuidanceBlock(context)
 
+        val prompt = promptCatalog.renderSections(
+            "planner/progression",
+            mapOf(
+                "system_framing" to meta.systemFraming,
+                "action_guidance_block" to actionGuidanceBlock,
+                "action_schema_enum" to actionSchemaEnum,
+            )
+        )
+        val schema = promptCatalog.responseFormat("ego-planner-decision")
         val sections = listOfNotNull(
-            PromptBudgetAllocator.Section(
-                key = "progression_system",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.MEDIUM,
-                floorTokens = 48,
-                content = """
-                    You are an action planner ${meta.systemFraming}.
-                    Return STRICT JSON only.
-                    Decisions:
-                    - intend: form one explicit intention for the next action.
-                    - plan: decompose into ordered steps when the task needs multiple stages.
-                    - noop: when no safe next step exists.
-                    Use action_type=resolution_draft only for intermediate synthesis within active plan steps.
-                    The final user-visible response must use action_type=contact_user.
-                    If the action succeeded and you can answer the user, prefer action_type=contact_user.
-                    Prefer concise responses.
-                    External actions have real latency/cost and must be value-add.
-                    Security context and provenance are authoritative.
-                    Only choose actions visible in runtime availability.
-                    Allowed actions:
-                    $actionGuidanceBlock
-                """.trimIndent()
-            ),
-            PromptBudgetAllocator.Section(
-                key = "progression_schema",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                floorTokens = 28,
-                content = """
-                    JSON schema:
-                    {
-                      "decision":"intend|plan|noop",
-                      "urgency":"low|medium|high",
-                      "intention_kind":"observe|prepare|stage|request_authorization|commit",
-                      "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
-                      "action_type":"$actionSchemaEnum",
-                      "action_payload":"optional when decision=intend",
-                      "action_summary":"required when decision=intend; <=180 chars",
-                      "plan_assignment":"required when decision=plan",
-                      "plan_steps":["step 1","step 2"],
-                      "reason":"optional"
-                    }
-                    action_payload must be a JSON string value.
-                    observe uses commit_mode_preference=not_applicable.
-                """.trimIndent()
-            ),
+            *prompt.sections.toTypedArray(),
             SharedPromptSections.actionAvailabilitySection(context),
             SharedPromptSections.securityContextSection(context),
             SharedPromptSections.opportunityContextSection(context),
@@ -149,8 +114,8 @@ class ProgressionPlanner(
         val response = runtime.call(
             laneId = laneId,
             messages = allocation.messages,
-            metadata = metadata,
-            responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
+            metadata = promptCatalog.metadata(metadata, prompt, schema),
+            responseFormat = schema.format,
         )
 
         if (response == null) {
@@ -168,9 +133,9 @@ class ProgressionPlanner(
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
             runtime.call(
                 laneId = laneId,
-                messages = allocation.messages + ChatMessage(ChatRole.USER, "Your previous output appears truncated. Return one complete JSON object."),
+                messages = allocation.messages + ChatMessage(ChatRole.USER, promptCatalog.renderText("planner/json-truncation-retry").text),
                 metadata = metadata.copy(callSite = "${meta.callSite}_truncation_retry"),
-                responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
+                responseFormat = schema.format,
                 maxTokens = bumped,
                 temperature = 0.0,
             )?.let { parseDecision(it.content, context) }?.let {
@@ -181,9 +146,9 @@ class ProgressionPlanner(
 
         runtime.call(
             laneId = laneId,
-            messages = allocation.messages + ChatMessage(ChatRole.USER, "Reply with STRICT JSON only."),
+            messages = allocation.messages + ChatMessage(ChatRole.USER, promptCatalog.renderText("planner/json-strict-retry").text),
             metadata = metadata.copy(callSite = "${meta.callSite}_json_retry"),
-            responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
+            responseFormat = schema.format,
             temperature = 0.0,
         )?.let { parseDecision(it.content, context) }?.let {
             runtime.recordSuccess(laneId, meta.rootInputId)

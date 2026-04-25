@@ -1,0 +1,5 @@
+id: actions/web_search/payload-guidance
+version: 1
+variables: []
+text: |
+  Use a compact search query, not full instructions.

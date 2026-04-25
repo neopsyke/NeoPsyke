@@ -1,0 +1,27 @@
+id: scratchpad-finalizer
+name: scratchpad_finalizer
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["rewrite", "confidence", "grounded", "reason"],
+    "properties": {
+      "rewrite": { "type": ["string", "null"] },
+      "confidence": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+      "grounded": { "type": ["boolean", "null"] },
+      "reason": { "type": ["string", "null"], "maxLength": 120 }
+    }
+  }
+relaxed_schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["rewrite", "confidence", "grounded", "reason"],
+    "properties": {
+      "rewrite": { "type": ["string", "null"] },
+      "confidence": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+      "grounded": { "type": ["boolean", "null"] },
+      "reason": { "type": ["string", "null"] }
+    }
+  }

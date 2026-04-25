@@ -1,0 +1,5 @@
+id: actions/gmail_observe_search/planner-description
+version: 1
+variables: []
+text: |
+  gmail_observe_search: search Gmail messages with a JSON payload.

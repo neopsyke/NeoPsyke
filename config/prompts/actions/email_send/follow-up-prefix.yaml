@@ -1,0 +1,5 @@
+id: actions/email_send/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Email send completed.

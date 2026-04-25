@@ -1,0 +1,5 @@
+id: actions/email_send/planner-description
+version: 1
+variables: []
+text: |
+  email_send: payload is JSON with sender, recipients, subject, and body.

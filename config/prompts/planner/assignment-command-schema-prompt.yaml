@@ -1,0 +1,29 @@
+id: planner/assignment-command-schema-prompt
+version: 1
+variables: []
+text: |
+  JSON schema:
+  {
+    "command":"create|list|status|pause|resume|review|complete|retire|delete|delete_all|update|revise_plan|reprioritize|clarify|fallback",
+    "work_item_kind":"RECURRENT_TASK|RESPONSIBILITY|null",
+    "work_item_reference":{"type":"by_position|ambiguous|unresolved","id":"<number>","candidates":["<numbers>"],"original_text":"<user words>","resolved_from":"active_assignment|reviewable_responsibility_slate|null"},
+    "title":"for create/update",
+    "instruction":"for create/update",
+    "completion_criteria":"for create/update",
+    "priority":"low|medium|high|critical (for create/update/reprioritize)",
+    "cron_expression":"5-field cron or null (for create/update)",
+    "contact_channel":"delivery channel name or null",
+    "operator_summary":"brief operator-facing summary or null",
+    "plan_steps":[{"id":"step1","description":"...","acceptance_criteria":"...","grounding_requirement":"required|not_required","requires":[],"produces":["artifact"],"max_attempts":3}],
+    "assistant_response":"required when command=fallback",
+    "clarification_question":"question for responsibility intake when command=clarify",
+    "responsibility_summary":"summary for responsibility intake or null",
+    "known_preferences":["..."],
+    "known_constraints":["..."],
+    "known_signals_of_success":["..."],
+    "review_cadence_hint":"optional",
+    "delivery_hint":"optional",
+    "open_questions":["..."],
+    "ready_to_create":true,
+    "reason":"optional"
+  }

@@ -1,0 +1,14 @@
+id: assignment-step-verdict
+name: assignment_step_verdict
+strict: true
+schema: |
+  {
+    "type":"object",
+    "required":["verdict","reason"],
+    "properties":{
+      "verdict":{"type":"string","enum":["PASS","RETRY","BLOCK","CONTINUE","FAIL"]},
+      "reason":{"type":"string"},
+      "wait_wake_at":{"type":"string"}
+    },
+    "additionalProperties":false
+  }

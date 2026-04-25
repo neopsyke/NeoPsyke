@@ -1,0 +1,5 @@
+id: actions/web_search/planner-description
+version: 1
+variables: []
+text: |
+  web_search: payload is a concise search query.

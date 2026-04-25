@@ -1,0 +1,5 @@
+id: actions/contact_user/planner-description
+version: 1
+variables: []
+text: |
+  contact_user: payload is text to deliver to the interlocutor (responses, proactive messages, or any direct communication).

@@ -11,8 +11,7 @@ import ai.neopsyke.agent.model.PendingAction
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
-import ai.neopsyke.llm.ChatResponseFormat
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 import java.time.Instant
 
 private val verifierLogger = KotlinLogging.logger {}
@@ -59,6 +58,7 @@ class DeterministicWorkStepVerifier : WorkStepVerifier {
 class LlmWorkStepVerifier(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) : WorkStepVerifier {
     override fun evaluate(
         workItem: WorkItem,
@@ -71,32 +71,27 @@ class LlmWorkStepVerifier(
         var raw: String? = null
         for (attempt in 1..attempts) {
             try {
+                val prompt = promptCatalog.renderSections(
+                    "assignments/work-step-verifier",
+                    mapOf(
+                        "assignment_title" to workItem.title,
+                        "assignment_instruction" to workItem.instruction,
+                        "step_id" to step.id,
+                        "step_description" to step.description,
+                        "acceptance_criteria" to step.acceptanceCriteria,
+                        "action_type" to action.type.id,
+                        "action_summary" to action.summary,
+                        "action_payload" to action.payload,
+                        "outcome_status" to outcome.statusSummary,
+                        "observed_evidence" to observedEvidence.toString(),
+                    )
+                )
+                val schema = promptCatalog.responseFormat("assignment-step-verdict")
                 raw = modelClient.chat(
-                    messages = listOf(
-                        ChatMessage(ChatRole.SYSTEM, SYSTEM_PROMPT),
-                        ChatMessage(
-                            ChatRole.USER,
-                            """
-                            Evaluate the assignment step result.
-                            assignment_title=${workItem.title}
-                            assignment_instruction=${workItem.instruction}
-                            step_id=${step.id}
-                            step_description=${step.description}
-                            acceptance_criteria=${step.acceptanceCriteria}
-                            action_type=${action.type.id}
-                            action_summary=${action.summary}
-                            action_payload=${action.payload}
-                            outcome_status=${outcome.statusSummary}
-                            observed_evidence=$observedEvidence
-                            """.trimIndent()
-                        )
-                    ),
+                    messages = prompt.sections.map { ChatMessage(role = it.role, content = it.content) },
                     options = ChatRequestOptions(
                         maxTokens = config.planner.maxCompletionTokens,
-                        responseFormat = ChatResponseFormat.JsonSchema(
-                            name = "assignment_step_verdict",
-                            schemaJson = VERDICT_SCHEMA_JSON
-                        )
+                        responseFormat = schema.format,
                     )
                 ).content
                 break
@@ -150,23 +145,5 @@ class LlmWorkStepVerifier(
     private companion object {
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        val VERDICT_SCHEMA_JSON: String = """
-            {
-              "type":"object",
-              "required":["verdict","reason"],
-              "properties":{
-                "verdict":{"type":"string","enum":["PASS","RETRY","BLOCK","CONTINUE","FAIL"]},
-                "reason":{"type":"string"},
-                "wait_wake_at":{"type":"string"}
-              },
-              "additionalProperties":false
-            }
-        """.trimIndent()
-        val SYSTEM_PROMPT: String = """
-            You evaluate whether an assignment step has satisfied its acceptance criteria.
-            Return strict JSON only.
-            Use BLOCK only when the next action should wait until a later time.
-            If uncertain, prefer CONTINUE over PASS.
-        """.trimIndent()
     }
 }

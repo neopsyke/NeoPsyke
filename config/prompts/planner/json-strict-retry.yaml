@@ -1,0 +1,7 @@
+id: planner/json-strict-retry
+version: 1
+variables: []
+text: |
+  Your previous output was not valid JSON.
+  Reply with STRICT JSON only and no markdown/code fences.
+  Use the exact schema provided in the system message.

@@ -22,7 +22,7 @@ import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.llm.ChatResponseFormat
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
@@ -63,9 +63,9 @@ class LlmMetaReasoner(
     private val config: AgentConfig,
     private val fallbackModelClient: ChatModelClient? = null,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) : MetaReasoner {
     private val reasonMaxChars = config.metaReasoner.reasonMaxChars
-    private val responseFormatStrict = buildStrictResponseFormat(reasonMaxChars)
     private val circuitBreaker = LlmCallCircuitBreaker(
         tripThreshold = PARSE_FAILURE_TRIP_THRESHOLD,
         onTripBehavior = OnTripBehavior.BYPASS,
@@ -81,14 +81,16 @@ class LlmMetaReasoner(
                 reason = "Meta reasoner circuit breaker tripped; using safe default."
             )
         }
-        val messages = buildMessages(trigger, context)
+        val prompt = buildPrompt(trigger, context)
+        val messages = prompt.sections.map { ChatMessage(role = it.role, content = it.content) }
         val completionBudget = resolveCompletionTokenBudget(messages)
         emitPromptBudgetTelemetry(messages = messages, completionBudget = completionBudget)
         val primaryCall = callModel(
             client = modelClient,
             messages = messages,
             completionBudget = completionBudget,
-            callSite = CALL_SITE_PRIMARY
+            callSite = CALL_SITE_PRIMARY,
+            prompt = prompt,
         )
         var resolvedResponse = primaryCall.response
         var resolvedError = primaryCall.lastError
@@ -125,7 +127,8 @@ class LlmMetaReasoner(
                     client = fallbackModelClient,
                     messages = messages,
                     completionBudget = completionBudget,
-                    callSite = CALL_SITE_FALLBACK
+                    callSite = CALL_SITE_FALLBACK,
+                    prompt = prompt,
                 )
                 if (fallbackCall.response != null) {
                     resolvedResponse = fallbackCall.response
@@ -163,10 +166,12 @@ class LlmMetaReasoner(
         messages: List<ChatMessage>,
         completionBudget: CompletionBudgetResolution,
         callSite: String,
+        prompt: PromptCatalog.RenderedPrompt,
     ): ChatAttemptResult {
         var response: ChatCompletion? = null
         var lastError: Exception? = null
-        var responseFormat: ChatResponseFormat.JsonSchema = responseFormatStrict
+        val schema = promptCatalog.responseFormat("meta-reasoner-assessment")
+        var responseFormat: ChatResponseFormat.JsonSchema = schema.format
         var completionTokenBudget = completionBudget.budget
         val completionRetryCap = if (completionBudget.contextClamped) {
             completionBudget.budget
@@ -184,9 +189,13 @@ class LlmMetaReasoner(
                         temperature = 0.0,
                         maxTokens = completionTokenBudget,
                         responseFormat = responseFormat,
-                        metadata = ChatCallMetadata(
-                            actor = "ego",
-                            callSite = callSite
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(
+                                actor = "ego",
+                                callSite = callSite
+                            ),
+                            prompt,
+                            schema,
                         )
                     )
                 )
@@ -194,7 +203,9 @@ class LlmMetaReasoner(
             } catch (ex: Exception) {
                 lastError = ex
                 if (!relaxedSchemaAttempted && LlmFailureClassifier.isStructuredOutputSchemaValidationFailure(ex)) {
-                    responseFormat = META_REASONER_RESPONSE_FORMAT_RELAXED
+                    responseFormat = responseFormat.relaxedSchemaJson?.let {
+                        responseFormat.copy(schemaJson = it, relaxedSchemaJson = null)
+                    } ?: responseFormat
                     relaxedSchemaAttempted = true
                     logger.warn {
                         "MetaReasoner call failed for call_site=$callSite due to schema validation; " +
@@ -275,7 +286,7 @@ class LlmMetaReasoner(
         return reason.contains("parse fallback") || reason.contains("missing verdict")
     }
 
-    private fun buildMessages(trigger: EgoTrigger, context: PlannerContext): List<ChatMessage> {
+    private fun buildPrompt(trigger: EgoTrigger, context: PlannerContext): PromptCatalog.RenderedPrompt {
         val triggerLabel = when (trigger) {
             is EgoTrigger.IncomingInput -> "input"
             is EgoTrigger.Continuation -> "continuation"
@@ -299,49 +310,26 @@ class LlmMetaReasoner(
         val longTermMemoryRecall = context.longTermMemoryRecall.ifBlank { "none" }
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val deliberation = context.deliberation
-        return listOf(
-            ChatMessage(
-                role = ChatRole.SYSTEM,
-                content = """
-                You are MetaReasoner for Ego's continuation loop.
-                Decide if continued deliberation is productive or stale.
-                Return only data that matches the response format schema.
-                Use finalize_now when repeated loops or high pressure suggest diminishing returns.
-                Use request_tool_then_finalize only if one decisive external action can unlock a better final answer.
-                """.trimIndent()
-            ),
-            ChatMessage(
-                role = ChatRole.USER,
-                content = """
-                Trigger:
-                type=$triggerLabel
-                content=${TextSecurity.preview(triggerText, 240)}
-
-                Deliberation state:
-                step_index=${deliberation.stepIndex}
-                decision_pressure=${String.format(Locale.ROOT, "%.3f", deliberation.decisionPressure)}
-                stale_streak=${deliberation.staleStreak}
-                progress_score=${String.format(Locale.ROOT, "%.3f", deliberation.progressScore)}
-                denial_count=${deliberation.denialCount}
-                steps_since_new_evidence=${deliberation.stepsSinceNewEvidence}
-                repeat_signature_hits=${deliberation.repeatSignatureHits}
-                noop_streak=${deliberation.noopStreak}
-
-                Queue:
-                pending_inputs=${context.queue.pendingInputCount}
-                pending_continuations=${context.queue.continuationCount}
-                pending_actions=${context.queue.pendingActionCount}
-                pending_intentions=${context.queue.pendingIntentionCount}
-
-                Long-term memory recall:
-                $longTermMemoryRecall
-
-                Short-term context summary:
-                $shortTermContextSummary
-
-                Recent dialogue:
-                $dialogue
-                """.trimIndent()
+        return promptCatalog.renderSections(
+            "meta-reasoner/assessment",
+            mapOf(
+                "trigger_type" to triggerLabel,
+                "trigger_content" to TextSecurity.preview(triggerText, 240),
+                "step_index" to deliberation.stepIndex.toString(),
+                "decision_pressure" to String.format(Locale.ROOT, "%.3f", deliberation.decisionPressure),
+                "stale_streak" to deliberation.staleStreak.toString(),
+                "progress_score" to String.format(Locale.ROOT, "%.3f", deliberation.progressScore),
+                "denial_count" to deliberation.denialCount.toString(),
+                "steps_since_new_evidence" to deliberation.stepsSinceNewEvidence.toString(),
+                "repeat_signature_hits" to deliberation.repeatSignatureHits.toString(),
+                "noop_streak" to deliberation.noopStreak.toString(),
+                "pending_inputs" to context.queue.pendingInputCount.toString(),
+                "pending_continuations" to context.queue.continuationCount.toString(),
+                "pending_actions" to context.queue.pendingActionCount.toString(),
+                "pending_intentions" to context.queue.pendingIntentionCount.toString(),
+                "long_term_memory_recall" to longTermMemoryRecall,
+                "short_term_context_summary" to shortTermContextSummary,
+                "recent_dialogue" to dialogue,
             )
         )
     }
@@ -472,65 +460,8 @@ class LlmMetaReasoner(
         private const val PER_MESSAGE_OVERHEAD_TOKENS: Int = 4
         private const val EMPTY_CONTENT_RETRY_MULTIPLIER: Int = 2
 
-        private const val META_REASONER_RESPONSE_SCHEMA_RELAXED: String = """
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["verdict", "confidence", "reason"],
-              "properties": {
-                "verdict": {
-                  "type": "string",
-                  "enum": ["continue", "continue_with_constraints", "finalize_now", "request_tool_then_finalize"]
-                },
-                "confidence": {
-                  "type": "number",
-                  "minimum": 0.0,
-                  "maximum": 1.0
-                },
-                "reason": {
-                  "type": "string"
-                }
-              }
-            }
-        """
-
         val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-
-        fun buildStrictResponseFormat(reasonMaxChars: Int): ChatResponseFormat.JsonSchema =
-            ChatResponseFormat.JsonSchema(
-                name = "meta_reasoner_assessment",
-                schemaJson = """
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": ["verdict", "confidence", "reason"],
-                      "properties": {
-                        "verdict": {
-                          "type": "string",
-                          "enum": ["continue", "continue_with_constraints", "finalize_now", "request_tool_then_finalize"]
-                        },
-                        "confidence": {
-                          "type": "number",
-                          "minimum": 0.0,
-                          "maximum": 1.0
-                        },
-                        "reason": {
-                          "type": "string",
-                          "maxLength": $reasonMaxChars
-                        }
-                      }
-                    }
-                """.trimIndent(),
-                strict = true
-            )
-
-        val META_REASONER_RESPONSE_FORMAT_RELAXED: ChatResponseFormat.JsonSchema =
-            ChatResponseFormat.JsonSchema(
-                name = "meta_reasoner_assessment",
-                schemaJson = META_REASONER_RESPONSE_SCHEMA_RELAXED,
-                strict = true
-            )
 
         /** Matches `"verdict":"<value>"` even if the surrounding JSON is truncated. */
         internal val TRUNCATED_VERDICT_REGEX =

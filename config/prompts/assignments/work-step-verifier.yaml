@@ -1,0 +1,41 @@
+id: assignments/work-step-verifier
+version: 1
+variables:
+  - assignment_title
+  - assignment_instruction
+  - step_id
+  - step_description
+  - acceptance_criteria
+  - action_type
+  - action_summary
+  - action_payload
+  - outcome_status
+  - observed_evidence
+sections:
+  - key: work_step_verifier_system
+    role: system
+    band: required_core
+    importance: high
+    floor_tokens: 32
+    content: |
+      You evaluate whether an assignment step has satisfied its acceptance criteria.
+      Return strict JSON only.
+      Use BLOCK only when the next action should wait until a later time.
+      If uncertain, prefer CONTINUE over PASS.
+  - key: work_step_verifier_input
+    role: user
+    band: required_core
+    importance: high
+    floor_tokens: 80
+    content: |
+      Evaluate the assignment step result.
+      assignment_title={{assignment_title}}
+      assignment_instruction={{assignment_instruction}}
+      step_id={{step_id}}
+      step_description={{step_description}}
+      acceptance_criteria={{acceptance_criteria}}
+      action_type={{action_type}}
+      action_summary={{action_summary}}
+      action_payload={{action_payload}}
+      outcome_status={{outcome_status}}
+      observed_evidence={{observed_evidence}}

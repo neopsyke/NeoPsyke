@@ -1,0 +1,5 @@
+id: actions/gmail_observe_message/payload-guidance
+version: 1
+variables: []
+text: |
+  JSON object with required message_id field.

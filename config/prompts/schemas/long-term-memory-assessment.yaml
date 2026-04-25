@@ -1,0 +1,35 @@
+id: long-term-memory-assessment
+name: long_term_memory_assessment
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["save", "summary", "confidence", "reason", "tags"],
+    "properties": {
+      "save": { "type": ["boolean", "null"] },
+      "summary": { "type": ["string", "null"], "maxLength": 320 },
+      "confidence": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+      "reason": { "type": ["string", "null"], "maxLength": 140 },
+      "tags": {
+        "type": ["array", "null"],
+        "items": { "type": "string" }
+      }
+    }
+  }
+relaxed_schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["save", "summary", "confidence", "reason", "tags"],
+    "properties": {
+      "save": { "type": ["boolean", "null"] },
+      "summary": { "type": ["string", "null"] },
+      "confidence": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+      "reason": { "type": ["string", "null"] },
+      "tags": {
+        "type": ["array", "null"],
+        "items": { "type": "string" }
+      }
+    }
+  }

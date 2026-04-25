@@ -1,0 +1,5 @@
+id: llm/prompt-only-json-instruction
+version: 1
+variables: []
+text: |
+  Return one raw JSON object only. Never emit tool calls, function-call wrappers, named envelopes, markdown, or code fences.

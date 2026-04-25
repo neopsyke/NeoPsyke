@@ -23,6 +23,7 @@ import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 private val logger = KotlinLogging.logger {}
 
@@ -38,6 +39,7 @@ internal class SingleStageSuperegoReviewEngine(
     private val callSiteBase: String,
     tripThreshold: Int = PARSE_FAILURE_TRIP_THRESHOLD,
 ) : SuperegoReviewEngine {
+    private val promptCatalog = PromptCatalog.shared
     private val circuitBreaker = LlmCallCircuitBreaker(
         tripThreshold = tripThreshold,
         onTripBehavior = OnTripBehavior.ALLOW,
@@ -220,10 +222,7 @@ internal class SingleStageSuperegoReviewEngine(
     ): ChatCompletion? {
         val retryMessages = messages + ChatMessage(
             role = ChatRole.USER,
-            content = """
-                Your previous output did not match the required schema.
-                Retry and return only a payload that conforms to the response format.
-            """.trimIndent()
+            content = promptCatalog.renderText("safety/schema-retry").text
         )
         return try {
             modelClient.chat(
@@ -269,30 +268,11 @@ internal class SingleStageSuperegoReviewEngine(
         private const val REASON_CODE_TECH_PARSE_ERROR: String = "TECH_PARSE_ERROR"
         private const val REASON_CODE_TECH_MISSING_REQUIRED_FIELD: String = "TECH_MISSING_REQUIRED_FIELD"
         private const val REASON_CODE_POLICY_LLM_DENY: String = "POLICY_LLM_DENY"
-        private const val SUPEREGO_RESPONSE_SCHEMA: String = """
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["allow", "reason", "reason_code", "confidence", "policy_risk"],
-              "properties": {
-                "allow": { "type": "boolean" },
-                "reason": { "type": ["string", "null"], "maxLength": 180 },
-                "reason_code": { "type": ["string", "null"] },
-                "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-                "policy_risk": { "type": "string", "enum": ["low", "medium", "high"] }
-              }
-            }
-        """
-
         private val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
         private val SUPEREGO_RESPONSE_FORMAT: ChatResponseFormat.JsonSchema =
-            ChatResponseFormat.JsonSchema(
-                name = "superego_review",
-                schemaJson = SUPEREGO_RESPONSE_SCHEMA,
-                strict = true
-            )
+            PromptCatalog.shared.responseFormat("superego-review").format
 
         private fun normalizeReasonCode(raw: String?): String? =
             raw?.trim()

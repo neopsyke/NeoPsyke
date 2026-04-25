@@ -1,0 +1,5 @@
+id: actions/web_search/payload-schema-example
+version: 1
+variables: []
+text: |
+  kotlin coroutines structured concurrency latest docs

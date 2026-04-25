@@ -93,10 +93,7 @@ class StructuredOutputContractTest {
 
     @Test
     fun `strict-json prompt call sites without provider response_format stay on explicit allowlist`() {
-        val expectedUnstructuredCallsites = setOf(
-            "src/main/kotlin/ai/neopsyke/agent/ego/ScratchpadFinalizer.kt",
-            "src/main/kotlin/ai/neopsyke/agent/memory/longterm/LongTermMemoryAdvisor.kt"
-        )
+        val expectedUnstructuredCallsites = emptySet<String>()
         val actualUnstructuredCallsites = mutableSetOf<String>()
 
         Files.walk(agentSourceRoot).use { paths ->

@@ -1,0 +1,5 @@
+id: actions/resolution_draft/payload-guidance
+version: 1
+variables: []
+text: |
+  Plain text draft chunk used only for intermediate synthesis within plan execution.

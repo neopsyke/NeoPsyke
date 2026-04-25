@@ -1,0 +1,5 @@
+id: planner/json-truncation-retry
+version: 1
+variables: []
+text: |
+  Your previous output appears truncated. Return one complete JSON object only.

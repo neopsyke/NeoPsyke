@@ -1,0 +1,44 @@
+id: meta-reasoner-assessment
+name: meta_reasoner_assessment
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["verdict", "confidence", "reason"],
+    "properties": {
+      "verdict": {
+        "type": "string",
+        "enum": ["continue", "continue_with_constraints", "finalize_now", "request_tool_then_finalize"]
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0
+      },
+      "reason": {
+        "type": "string",
+        "maxLength": 180
+      }
+    }
+  }
+relaxed_schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["verdict", "confidence", "reason"],
+    "properties": {
+      "verdict": {
+        "type": "string",
+        "enum": ["continue", "continue_with_constraints", "finalize_now", "request_tool_then_finalize"]
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0
+      },
+      "reason": {
+        "type": "string"
+      }
+    }
+  }

@@ -17,6 +17,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginHealth
+import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.SecretHandle
@@ -42,6 +43,7 @@ private val logger = KotlinLogging.logger {}
 class MicrosoftGraphEmailActionPlugin(
     private val env: Map<String, String>,
 ) : AgentActionPlugin {
+    private val promptDescriptor = ActionPromptDescriptors.load(ActionType("email_send").id)
     private val client: OkHttpClient = OkHttpClient.Builder()
         .callTimeout(DEFAULT_TIMEOUT_SEC, TimeUnit.SECONDS)
         .build()
@@ -51,17 +53,12 @@ class MicrosoftGraphEmailActionPlugin(
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType("email_send"),
         dispatchable = true,
-        plannerDescription = "email_send: payload is JSON with sender, recipients, subject, and body.",
-        payloadGuidance = "JSON object: sender/from, to[], cc[]?, bcc[]?, subject, body_text or body_html.",
-        payloadSchemaExample = """{"sender":"employee@company.com","to":["user@example.com"],"subject":"Status update","body_text":"Done."}""",
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
-        followUpPrefix = "Email send completed.",
-        superegoDirectives = listOf(
-            "Deny EMAIL_SEND when recipients are missing or ambiguous.",
-            "Deny EMAIL_SEND when payload includes inline secrets, credentials, or key material.",
-            "Deny EMAIL_SEND to out-of-policy recipient domains when domain restrictions are configured.",
-            "Allow EMAIL_SEND only when sender identity is explicit or a configured default sender exists."
-        ),
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Email send completed.",
+        superegoDirectives = promptDescriptor.superegoDirectives,
         capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT),
         effectClass = ActionEffectClass.COMMIT_PRIVATE,
         supportsAutonomousCommit = true,

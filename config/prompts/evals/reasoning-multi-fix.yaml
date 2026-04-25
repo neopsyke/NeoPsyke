@@ -1,0 +1,6 @@
+id: evals/reasoning-multi-fix
+version: 1
+variables: []
+text: |
+  Return STRICT JSON exactly with:
+  {"left":7,"right":5,"total":12}

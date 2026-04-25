@@ -18,7 +18,7 @@ import ai.neopsyke.llm.ChatCallMetadata
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
@@ -72,10 +72,13 @@ class LlmLongTermMemoryAdvisor(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) : LongTermMemoryAdvisor {
     override fun assess(context: LongTermMemoryAssessmentContext): LongTermMemoryAssessmentDecision {
         val promptPayload = buildPromptPayload(context)
-        val messages = buildMessages(context, promptPayload)
+        val prompt = buildPrompt(context, promptPayload)
+        val messages = prompt.sections.map { ChatMessage(role = it.role, content = it.content) }
+        val schema = promptCatalog.responseFormat("long-term-memory-assessment")
         emitCompressionDiagnosticsIfNeeded(promptPayload)
         val completionTokenBudget = resolveCompletionTokenBudget(messages)
         var response: ai.neopsyke.llm.ChatCompletion? = null
@@ -88,9 +91,14 @@ class LlmLongTermMemoryAdvisor(
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         maxTokens = completionTokenBudget,
-                        metadata = ChatCallMetadata(
-                            actor = "ego",
-                            callSite = "long_term_memory_assessment"
+                        responseFormat = schema.format,
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(
+                                actor = "ego",
+                                callSite = "long_term_memory_assessment"
+                            ),
+                            prompt,
+                            schema,
                         )
                     )
                 )
@@ -185,10 +193,10 @@ class LlmLongTermMemoryAdvisor(
         )
     }
 
-    private fun buildMessages(
+    private fun buildPrompt(
         context: LongTermMemoryAssessmentContext,
         promptPayload: MemoryAdvisorPromptPayload,
-    ): List<ChatMessage> {
+    ): PromptCatalog.RenderedPrompt {
         val actionType = context.latestActionType?.name?.lowercase() ?: "none"
         val actionOutcome = context.latestActionOutcome?.let { TextSecurity.preview(it, 220) } ?: "none"
         val shortTermContextSummary = promptPayload.shortTermContextSummary
@@ -203,77 +211,26 @@ class LlmLongTermMemoryAdvisor(
             LongTermMemorySubject.SELF ->
                 "The candidate memory is about the agent's own internal drive, reflection, learning interest, or durable self-observation."
         }
-        return listOf(
-            ChatMessage(
-                role = ChatRole.SYSTEM,
-                content = """
-                You decide whether a durable long-term memory should be written.
-                Return STRICT JSON only.
-                If you save memory, write the summary as a factual declarative statement.
-                Use plain facts or first-person identity/state statements.
-                Never wrap a fact in metacognitive verbs (learned, should remember, need to remember, etc.).
-                Good: "The user prefers concise answers."
-                Good: "The user's name is Victor."
-                Good: "My name is Yoli." (first-person identity — direct and factual)
-                Good: "I feel curious about learning topics." (first-person state — direct)
-                Good: "I like helping with creative tasks." (first-person preference — direct)
-                Bad: "I should remember that the user's name is Victor." (metacognitive verb wrapping a fact)
-                Bad: "I want to remember that my name is Yoli." (metacognitive verb wrapping a fact)
-                Bad: "I learned that the user prefers concise answers." (metacognitive verb wrapping a fact)
-                Bad: "I need to keep in mind that..." (metacognitive verb wrapping a fact)
-                If memory_subject=self:
-                - treat INTERNAL dialogue turns as the agent's own impulses or reflections
-                - never describe them as user preferences, user requests, or user intent
-                - reasons and tags must use self/agent language, not user language
-                Prefer saving:
-                - stable user preferences or durable user facts when memory_subject=user
-                - stable self-observations, self-initiated learning interests, or internal drive patterns when memory_subject=self
-                - durable assignment constraints or decisions
-                - important factual outcomes
-                Avoid saving transient chatter or redundant details.
-                Never save a fact that is already present in the "Long-term memory recall" block
-                unless the recent dialogue contains a correction or materially new detail.
-                JSON schema:
-                {"save":true|false,"summary":"<=320 chars","confidence":0.0-1.0,"reason":"<=140 chars","tags":["..."]}
-                If save=false, keep summary empty.
-                """.trimIndent()
-            ),
-            ChatMessage(
-                role = ChatRole.USER,
-                content = """
-                Trigger=${
-                    context.trigger
-                }
-                Deliberation:
-                step_index=${d.stepIndex}
-                decision_pressure=${String.format(Locale.ROOT, "%.3f", d.decisionPressure)}
-                stale_streak=${d.staleStreak}
-                progress_score=${String.format(Locale.ROOT, "%.3f", d.progressScore)}
-                denial_count=${d.denialCount}
-                steps_since_new_evidence=${d.stepsSinceNewEvidence}
-                repeat_signature_hits=${d.repeatSignatureHits}
-                noop_streak=${d.noopStreak}
-
-                Latest action:
-                type=$actionType
-                outcome=$actionOutcome
-
-                Memory subject:
-                subject=$memorySubject
-                subject_description=$subjectDescription
-
-                Meta guidance:
-                $guidance
-
-                Long-term memory recall:
-                $longTermRecall
-
-                Short-term context summary:
-                $shortTermContextSummary
-
-                Recent dialogue:
-                $dialogue
-                """.trimIndent()
+        return promptCatalog.renderSections(
+            "memory/long-term-advisor",
+            mapOf(
+                "trigger" to context.trigger,
+                "step_index" to d.stepIndex.toString(),
+                "decision_pressure" to String.format(Locale.ROOT, "%.3f", d.decisionPressure),
+                "stale_streak" to d.staleStreak.toString(),
+                "progress_score" to String.format(Locale.ROOT, "%.3f", d.progressScore),
+                "denial_count" to d.denialCount.toString(),
+                "steps_since_new_evidence" to d.stepsSinceNewEvidence.toString(),
+                "repeat_signature_hits" to d.repeatSignatureHits.toString(),
+                "noop_streak" to d.noopStreak.toString(),
+                "latest_action_type" to actionType,
+                "latest_action_outcome" to actionOutcome,
+                "memory_subject" to memorySubject,
+                "subject_description" to subjectDescription,
+                "meta_guidance" to guidance,
+                "long_term_memory_recall" to longTermRecall,
+                "short_term_context_summary" to shortTermContextSummary,
+                "recent_dialogue" to dialogue,
             )
         )
     }

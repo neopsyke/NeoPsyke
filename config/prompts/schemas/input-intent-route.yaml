@@ -1,0 +1,14 @@
+id: input-intent-route
+name: input_intent_route
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["route", "reasoning"],
+    "properties": {
+      "route": { "type": "string" },
+      "assignment_target": { "type": ["string", "null"] },
+      "reasoning": { "type": ["string", "null"] }
+    }
+  }

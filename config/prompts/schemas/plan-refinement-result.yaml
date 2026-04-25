@@ -1,0 +1,42 @@
+id: plan-refinement-result
+name: plan_refinement_result
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["steps", "dropped_steps", "refinement_mode", "reason"],
+    "properties": {
+      "steps": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "description", "acceptance_criteria", "grounding_requirement", "requires", "produces", "max_attempts"],
+          "properties": {
+            "id": { "type": "string" },
+            "description": { "type": "string" },
+            "acceptance_criteria": { "type": "string" },
+            "grounding_requirement": { "type": "string", "enum": ["required", "not_required"] },
+            "requires": { "type": "array", "items": { "type": "string" } },
+            "produces": { "type": "array", "items": { "type": "string" } },
+            "max_attempts": { "type": "integer", "minimum": 1 }
+          }
+        }
+      },
+      "dropped_steps": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["original_id", "reason"],
+          "properties": {
+            "original_id": { "type": "string" },
+            "reason": { "type": "string" }
+          }
+        }
+      },
+      "refinement_mode": { "type": "string", "enum": ["unchanged", "llm_rewritten"] },
+      "reason": { "type": "string" }
+    }
+  }

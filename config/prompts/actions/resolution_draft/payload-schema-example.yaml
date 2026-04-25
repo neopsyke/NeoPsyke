@@ -1,0 +1,5 @@
+id: actions/resolution_draft/payload-schema-example
+version: 1
+variables: []
+text: |
+  Draft chunk: verified pricing table from official sources...

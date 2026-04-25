@@ -17,6 +17,7 @@ import ai.neopsyke.llm.ChatCallMetadata
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 private val logger = KotlinLogging.logger {}
 
@@ -31,43 +32,12 @@ class LegacyPromptWebSearchEngine(
 ) : WebSearchEngine {
 
     override fun search(query: String, maxResults: Int): WebSearchResult {
+        val prompt = PromptCatalog.shared.renderSections(
+            "integrations/legacy-web-search",
+            mapOf("query" to query, "max_results" to maxResults.toString())
+        )
         val promptAllocation = PromptBudgetAllocator.allocate(
-            sections = listOf(
-                PromptBudgetAllocator.Section(
-                    key = "legacy_web_search_system_instructions",
-                    role = ChatRole.SYSTEM,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                    importance = PromptBudgetAllocator.Importance.MEDIUM,
-                    floorTokens = 20,
-                    content = """
-                    You are a web research assistant.
-                    If your runtime has web access, use it. If not, provide best-effort knowledge and mark uncertainty.
-                    Return STRICT JSON only.
-                    """.trimIndent()
-                ),
-                PromptBudgetAllocator.Section(
-                    key = "legacy_web_search_json_schema",
-                    role = ChatRole.SYSTEM,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CONTEXT,
-                    floorTokens = 16,
-                    content = """
-                    JSON schema:
-                    {
-                      "summary":"short finding summary",
-                      "snippets":["bullet-sized snippet", "... up to $maxResults items"]
-                    }
-                    Keep snippets short and factual.
-                    """.trimIndent()
-                ),
-                PromptBudgetAllocator.Section(
-                    key = "legacy_web_search_query",
-                    role = ChatRole.USER,
-                    band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                    importance = PromptBudgetAllocator.Importance.HIGH,
-                    floorTokens = 12,
-                    content = "Search query: $query"
-                )
-            ),
+            sections = prompt.sections,
             maxTokens = config.maxLlmPromptTokens
         )
         instrumentation.emit(

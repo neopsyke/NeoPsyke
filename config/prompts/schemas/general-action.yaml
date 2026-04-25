@@ -1,0 +1,35 @@
+id: general-action
+name: general_action_decision
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["urgency", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "long_term_memory_recall_query", "reason"],
+    "properties": {
+      "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
+      "intention_kind": { "type": ["string", "null"], "enum": ["observe", "prepare", "stage", "request_authorization", "commit", null] },
+      "commit_mode_preference": { "type": ["string", "null"], "enum": ["not_applicable", "approval_backed", "policy_autonomous", "admin_override", null] },
+      "action_type": { "type": ["string", "null"] },
+      "action_payload": { "type": ["string", "null"], "maxLength": 4000 },
+      "action_summary": { "type": ["string", "null"], "maxLength": 180 },
+      "long_term_memory_recall_query": { "type": ["string", "null"], "maxLength": 600 },
+      "reason": { "type": ["string", "null"], "maxLength": 160 }
+    }
+  }
+relaxed_schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["urgency", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "long_term_memory_recall_query", "reason"],
+    "properties": {
+      "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
+      "intention_kind": { "type": ["string", "null"], "enum": ["observe", "prepare", "stage", "request_authorization", "commit", null] },
+      "commit_mode_preference": { "type": ["string", "null"], "enum": ["not_applicable", "approval_backed", "policy_autonomous", "admin_override", null] },
+      "action_type": { "type": ["string", "null"] },
+      "action_payload": { "type": ["string", "null"] },
+      "action_summary": { "type": ["string", "null"] },
+      "long_term_memory_recall_query": { "type": ["string", "null"] },
+      "reason": { "type": ["string", "null"] }
+    }
+  }

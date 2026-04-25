@@ -1,0 +1,6 @@
+id: safety/schema-retry
+version: 1
+variables: []
+text: |
+  Your previous output did not match the required schema.
+  Retry and return only a payload that conforms to the response format.

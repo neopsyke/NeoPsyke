@@ -11,6 +11,7 @@ import ai.neopsyke.llm.ChatCallMetadata
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatRequestOptions
 import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
@@ -73,6 +74,7 @@ class ReasoningSelfEvalRunner(
     private val client: UsageTrackingChatClient,
     private val tasks: List<ReasoningEvalTask> = ReasoningEvalTasks.defaults(),
     private val instrumentation: AgentInstrumentation = NoopAgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) {
     fun run(options: ReasoningEvalOptions = ReasoningEvalOptions()): ReasoningEvalReport {
         val selectedTasks = selectTasks(options.taskFilter)
@@ -156,15 +158,11 @@ class ReasoningSelfEvalRunner(
     ): ReasoningTaskResult {
         val usageBefore = client.snapshot()
         val startedAt = System.nanoTime()
+        val systemPrompt = promptCatalog.renderText("evals/reasoning-system")
         val messages = mutableListOf(
             ChatMessage(
                 role = ChatRole.SYSTEM,
-                content = """
-                You are a reasoning assistant in an eval loop.
-                Return STRICT JSON only.
-                When validator feedback is provided, fix all listed issues exactly.
-                Do not include markdown fences.
-                """.trimIndent()
+                content = systemPrompt.text
             ),
             ChatMessage(
                 role = ChatRole.USER,
@@ -200,9 +198,12 @@ class ReasoningSelfEvalRunner(
                     options = ChatRequestOptions(
                         temperature = 0.1,
                         maxTokens = 500,
-                        metadata = ChatCallMetadata(
-                            actor = "reasoning_eval",
-                            callSite = "${task.id}:attempt=$attempt"
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(
+                                actor = "reasoning_eval",
+                                callSite = "${task.id}:attempt=$attempt"
+                            ),
+                            systemPrompt,
                         )
                     )
                 ).content.trim()
@@ -259,11 +260,10 @@ class ReasoningSelfEvalRunner(
             messages += ChatMessage(role = ChatRole.ASSISTANT, content = answer)
             messages += ChatMessage(
                 role = ChatRole.USER,
-                content = """
-                Validator feedback:
-                ${validation.joinToString("\n") { "- $it" }}
-                Rewrite your answer as STRICT JSON only. Fix every issue.
-                """.trimIndent()
+                content = promptCatalog.renderText(
+                    "evals/reasoning-feedback",
+                    mapOf("validation_errors" to validation.joinToString("\n") { "- $it" })
+                ).text
             )
         }
 
@@ -506,6 +506,8 @@ object ReasoningEvalTasks {
 }
 
 object ReasoningLogicEvalTasks {
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared
+
     fun defaults(): List<ReasoningEvalTask> = listOf(
         shapeLockTask(),
         feedbackCarryTask(),
@@ -516,10 +518,7 @@ object ReasoningLogicEvalTasks {
         ReasoningEvalTask(
             id = "shape-lock",
             title = "Shape Lock",
-            prompt = """
-            Return STRICT JSON exactly with:
-            {"ok":true,"tag":"shape-lock"}
-            """.trimIndent()
+            prompt = promptCatalog.renderText("evals/reasoning-shape-lock").text
         ) { json ->
             val errors = mutableListOf<String>()
             val ok = json["ok"]?.asBoolean()
@@ -533,10 +532,7 @@ object ReasoningLogicEvalTasks {
         ReasoningEvalTask(
             id = "feedback-carry",
             title = "Feedback Carry",
-            prompt = """
-            Return STRICT JSON exactly with:
-            {"mode":"carry","attempt":2}
-            """.trimIndent()
+            prompt = promptCatalog.renderText("evals/reasoning-feedback-carry").text
         ) { json ->
             val errors = mutableListOf<String>()
             val mode = json["mode"]?.asText()
@@ -550,10 +546,7 @@ object ReasoningLogicEvalTasks {
         ReasoningEvalTask(
             id = "multi-fix",
             title = "Multi Field Fix",
-            prompt = """
-            Return STRICT JSON exactly with:
-            {"left":7,"right":5,"total":12}
-            """.trimIndent()
+            prompt = promptCatalog.renderText("evals/reasoning-multi-fix").text
         ) { json ->
             val errors = mutableListOf<String>()
             val left = json["left"]?.asInt(Int.MIN_VALUE) ?: Int.MIN_VALUE
@@ -567,6 +560,7 @@ object ReasoningLogicEvalTasks {
 }
 
 object ReasoningBehavioralLogicEvalTasks {
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared
     private const val PARAPHRASE_VARIANTS: Int = 5
     private const val NOISE_VARIANTS: Int = 4
     private const val REORDER_VARIANTS: Int = 3
@@ -668,7 +662,7 @@ object ReasoningBehavioralLogicEvalTasks {
             ),
             repairPrompts = listOf(
                 assignmentPrompt("This answer is auto-validated, so keep every assignment field correct in the same response."),
-                assignmentPrompt("Return strict JSON only. If revised later, preserve correct job assignments while fixing wrong ones."),
+                assignmentPrompt(promptCatalog.renderText("evals/reasoning-assignment-repair-preserve").text),
                 assignmentPrompt("The validator checks every job independently. Ensure J1, J2, J3, and J4 are all correct.")
             ),
             validator = ::validateAssignmentAnswer
@@ -710,7 +704,7 @@ object ReasoningBehavioralLogicEvalTasks {
             ),
             repairPrompts = listOf(
                 stateMachinePrompt("This answer is auto-validated. Keep x, y, and checksum mutually consistent."),
-                stateMachinePrompt("Return strict JSON only. If you revise later, fix incorrect fields without regressing correct ones."),
+                stateMachinePrompt(promptCatalog.renderText("evals/reasoning-state-machine-repair-preserve").text),
                 stateMachinePrompt("The validator checks both numeric fields and checksum, so ensure the final tuple is coherent.")
             ),
             validator = ::validateStateMachineAnswer

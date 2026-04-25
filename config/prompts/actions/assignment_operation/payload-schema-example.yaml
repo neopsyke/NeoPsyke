@@ -1,0 +1,5 @@
+id: actions/assignment_operation/payload-schema-example
+version: 1
+variables: []
+text: |
+  {"command":"create","work_item_kind":"RECURRENT_TASK","title":"Weather reminder","instruction":"Check the current weather and remind me every time this recurrent task runs.","priority":"HIGH","completion_criteria":"A weather reminder is delivered for the current scheduled run.","cron_expression":"*/5 * * * *"}

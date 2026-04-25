@@ -1,0 +1,5 @@
+id: evals/reasoning-assignment-repair-preserve
+version: 1
+variables: []
+text: |
+  Return strict JSON only. If revised later, preserve correct job assignments while fixing wrong ones.

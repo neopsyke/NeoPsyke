@@ -1,0 +1,5 @@
+id: actions/assignment_operation/planner-description
+version: 1
+variables: []
+text: |
+  assignment_operation: create, update, status, list, review, pause, resume, reprioritize, complete, retire, delete, delete_all, or revise_plan recurrent tasks and responsibilities.

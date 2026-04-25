@@ -1,0 +1,12 @@
+id: grounding-classification
+name: grounding_classification
+strict: true
+schema: |
+  {
+    "type": "object",
+    "properties": {
+      "grounding_required": { "type": "boolean" }
+    },
+    "required": ["grounding_required"],
+    "additionalProperties": false
+  }

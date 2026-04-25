@@ -43,6 +43,11 @@ data class ChatCallMetadata(
     val planTotalSteps: Int? = null,
     val planStepDescription: String? = null,
     val structuredOutputMode: String? = null,
+    val promptId: String? = null,
+    val promptVersion: Int? = null,
+    val promptHash: String? = null,
+    val schemaId: String? = null,
+    val schemaHash: String? = null,
     val sessionId: String? = null,
     val rootInputId: String? = null,
 )

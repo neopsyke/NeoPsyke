@@ -1,0 +1,5 @@
+id: evals/reasoning-state-machine-repair-preserve
+version: 1
+variables: []
+text: |
+  Return strict JSON only. If you revise later, fix incorrect fields without regressing correct ones.

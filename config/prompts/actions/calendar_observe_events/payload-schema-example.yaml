@@ -1,0 +1,5 @@
+id: actions/calendar_observe_events/payload-schema-example
+version: 1
+variables: []
+text: |
+  {"calendar_id":"primary","max_results":10}

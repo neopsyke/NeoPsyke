@@ -1,0 +1,5 @@
+id: actions/assignment_operation/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Assignment operation completed.

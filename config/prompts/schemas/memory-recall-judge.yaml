@@ -1,0 +1,14 @@
+id: memory-recall-judge
+name: memory_recall_judge
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["pass", "score", "reason"],
+    "properties": {
+      "pass": { "type": ["boolean", "null"] },
+      "score": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+      "reason": { "type": ["string", "null"], "maxLength": 140 }
+    }
+  }

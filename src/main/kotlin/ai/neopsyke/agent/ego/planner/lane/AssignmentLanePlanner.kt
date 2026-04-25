@@ -24,6 +24,7 @@ import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 /**
  * L1 lane: handles EgoTrigger.Assignment with an assignment-step prompt.
@@ -33,6 +34,7 @@ class AssignmentLanePlanner(
     private val runtime: PlannerRuntime,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) : PlannerLane {
 
     override val laneId: LaneId = LaneId.ASSIGNMENT
@@ -55,47 +57,16 @@ class AssignmentLanePlanner(
         val actionSchemaEnum = SharedPromptSections.plannerVisibleActionSchemaEnum(context)
         val actionGuidanceBlock = SharedPromptSections.actionGuidanceBlock(context)
 
+        val prompt = promptCatalog.renderSections(
+            "planner/assignment-lane",
+            mapOf(
+                "action_guidance_block" to actionGuidanceBlock,
+                "action_schema_enum" to actionSchemaEnum,
+            )
+        )
+        val schema = promptCatalog.responseFormat("ego-planner-decision")
         val sections = listOfNotNull(
-            PromptBudgetAllocator.Section(
-                key = "assignment_system",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.MEDIUM,
-                floorTokens = 48,
-                content = """
-                    You are an action planner executing an assignment step.
-                    Return STRICT JSON only.
-                    Decisions: intend, plan, noop.
-                    You are working on a persistent assignment step. The trigger contains the step details and acceptance criteria.
-                    Execute the step by choosing an appropriate action.
-                    If the step is already satisfied by available evidence, deliver the result using contact_user.
-                    If you need more information, use available tools.
-                    Only choose actions visible in runtime availability.
-                    Allowed actions:
-                    $actionGuidanceBlock
-                """.trimIndent()
-            ),
-            PromptBudgetAllocator.Section(
-                key = "assignment_schema",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                floorTokens = 28,
-                content = """
-                    JSON schema:
-                    {
-                      "decision":"intend|plan|noop",
-                      "urgency":"low|medium|high",
-                      "intention_kind":"observe|prepare|stage|request_authorization|commit",
-                      "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
-                      "action_type":"$actionSchemaEnum",
-                      "action_payload":"optional when decision=intend",
-                      "action_summary":"required when decision=intend; <=180 chars",
-                      "plan_assignment":"required when decision=plan",
-                      "plan_steps":["step 1","step 2"],
-                      "reason":"optional"
-                    }
-                """.trimIndent()
-            ),
+            *prompt.sections.toTypedArray(),
             SharedPromptSections.actionAvailabilitySection(context),
             SharedPromptSections.securityContextSection(context),
             SharedPromptSections.shortTermSummarySection(context),
@@ -112,8 +83,8 @@ class AssignmentLanePlanner(
         runtime.emitPromptBudgetTelemetry(laneId, allocation.diagnostics)
 
         val response = runtime.call(
-            laneId = laneId, messages = allocation.messages, metadata = metadata,
-            responseFormat = StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT,
+            laneId = laneId, messages = allocation.messages, metadata = promptCatalog.metadata(metadata, prompt, schema),
+            responseFormat = schema.format,
         )
 
         if (response == null) return EgoDecision.Noop("AssignmentLanePlanner unavailable.")
@@ -127,16 +98,16 @@ class AssignmentLanePlanner(
         if (TruncationRetry.isLikelyTruncated(response)) {
             runtime.notifyTruncationRetry()
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
-            runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, "Return one complete JSON object."),
-                metadata.copy(callSite = "assignment_truncation_retry"), StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT, maxTokens = bumped, temperature = 0.0)
+            runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, promptCatalog.renderText("planner/json-truncation-retry").text),
+                metadata.copy(callSite = "assignment_truncation_retry"), schema.format, maxTokens = bumped, temperature = 0.0)
                 ?.let { parseAssignmentDecision(it.content, context) }?.let {
                     runtime.recordSuccess(laneId, rootInputId)
                     return toEgoDecision(it, context)
                 }
         }
 
-        runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, "Reply with STRICT JSON only."),
-            metadata.copy(callSite = "assignment_json_retry"), StructuredOutputHandler.PLANNER_DECISION_RESPONSE_FORMAT, temperature = 0.0)
+        runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, promptCatalog.renderText("planner/json-strict-retry").text),
+            metadata.copy(callSite = "assignment_json_retry"), schema.format, temperature = 0.0)
             ?.let { parseAssignmentDecision(it.content, context) }?.let {
                 runtime.recordSuccess(laneId, rootInputId)
                 return toEgoDecision(it, context)

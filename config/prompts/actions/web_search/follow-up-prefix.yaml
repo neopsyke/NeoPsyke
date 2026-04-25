@@ -1,0 +1,5 @@
+id: actions/web_search/follow-up-prefix
+version: 1
+variables: []
+text: |
+  Web search completed.

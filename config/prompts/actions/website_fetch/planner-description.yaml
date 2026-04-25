@@ -1,0 +1,5 @@
+id: actions/website_fetch/planner-description
+version: 1
+variables: []
+text: |
+  website_fetch: payload is JSON like {"url":"https://example.com","max_chars":1200}.

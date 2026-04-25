@@ -51,6 +51,9 @@ tasks.processResources {
         )
         into("")
     }
+    from(project.projectDir.resolve("config/prompts")) {
+        into("prompts")
+    }
 }
 
 tasks.withType<KotlinCompile>().configureEach {

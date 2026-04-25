@@ -16,8 +16,7 @@ import ai.neopsyke.agent.support.PromptBudgetAllocator
 import ai.neopsyke.instrumentation.AgentEvent
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatCallMetadata
-import ai.neopsyke.llm.ChatResponseFormat
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 private val logger = KotlinLogging.logger {}
 
@@ -37,6 +36,7 @@ class GroundingClassifier(
     private val runtime: PlannerRuntime,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) {
 
     /**
@@ -113,45 +113,15 @@ class GroundingClassifier(
             rootInputId = rootInputId,
         )
 
-        val sections = listOf(
-            PromptBudgetAllocator.Section(
-                key = "grounding_system",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.HIGH,
-                floorTokens = 40,
-                content = """
-                    You are a grounding classifier. Given a user request, determine whether
-                    answering it requires fetching up-to-date information from external sources
-                    (web search, APIs, live data feeds).
-
-                    Answer true ONLY if the user is asking for facts that change over time and
-                    cannot be answered from general knowledge alone. Examples of grounding-required:
-                    current weather, live prices, today's news, recent events, real-time scores.
-
-                    Answer false for: opinions, reasoning, explanations, transformations, memory
-                    recall, assignment management, static facts, creative tasks, coding help.
-
-                    Return STRICT JSON only: {"grounding_required": true} or {"grounding_required": false}
-                """.trimIndent()
-            ),
-            PromptBudgetAllocator.Section(
-                key = "grounding_input",
-                role = ChatRole.USER,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.HIGH,
-                floorTokens = 10,
-                content = trigger.input.content,
-            ),
+        val prompt = promptCatalog.renderSections(
+            "planner/grounding-classifier",
+            mapOf("user_input" to trigger.input.content)
         )
+        val schema = promptCatalog.responseFormat("grounding-classification")
+        val sections = prompt.sections
 
         val allocation = PromptBudgetAllocator.allocate(sections, config.maxLlmPromptTokens)
         val messages = allocation.messages
-        val responseFormat = ChatResponseFormat.JsonSchema(
-            name = "grounding_classification",
-            schemaJson = GROUNDING_SCHEMA,
-            strict = true,
-        )
 
         val attempts = maxOf(1, config.llmRetryAttempts)
         for (attempt in 1..attempts) {
@@ -159,8 +129,8 @@ class GroundingClassifier(
                 val response = runtime.call(
                     laneId = LaneId.GROUNDING_CLASSIFIER,
                     messages = messages,
-                    metadata = metadata,
-                    responseFormat = responseFormat,
+                    metadata = promptCatalog.metadata(metadata, prompt, schema),
+                    responseFormat = schema.format,
                 ) ?: continue
                 val parsed = StructuredOutputHandler.parseWithRepair<GroundingClassificationResponse>(response.content)
                 if (parsed?.groundingRequired != null) {
@@ -227,16 +197,4 @@ class GroundingClassifier(
         @param:JsonProperty("grounding_required") val groundingRequired: Boolean?,
     )
 
-    private companion object {
-        private val GROUNDING_SCHEMA: String = """
-            {
-              "type": "object",
-              "properties": {
-                "grounding_required": { "type": "boolean" }
-              },
-              "required": ["grounding_required"],
-              "additionalProperties": false
-            }
-        """.trimIndent()
-    }
 }

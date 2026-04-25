@@ -4,6 +4,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
+import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.model.ActionEffect
@@ -16,18 +17,16 @@ import ai.neopsyke.agent.model.SuperegoContext
 import ai.neopsyke.agent.support.TextSecurity
 
 class ResolutionDraftActionPlugin : AgentActionPlugin {
+    private val promptDescriptor = ActionPromptDescriptors.load(ActionType.RESOLUTION_DRAFT.id)
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.RESOLUTION_DRAFT,
         dispatchable = true,
-        plannerDescription = "resolution_draft: payload is an internal draft chunk for workspace synthesis; not user-visible.",
-        payloadGuidance = "Plain text draft chunk used only for intermediate synthesis within plan execution.",
-        payloadSchemaExample = """Draft chunk: verified pricing table from official sources...""",
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
-        followUpPrefix = "Resolution draft captured.",
-        superegoDirectives = listOf(
-            "Allow RESOLUTION_DRAFT always",
-            "Do not treat RESOLUTION_DRAFT as a user-visible final response."
-        )
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Resolution draft captured.",
+        superegoDirectives = promptDescriptor.superegoDirectives,
     )
 
     override fun deterministicReview(

@@ -5,6 +5,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginHealth
+import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
@@ -21,20 +22,16 @@ import ai.neopsyke.agent.support.ActionPayloadSecurity
 class WebSearchActionPlugin(
     private val handler: WebSearchActionHandler?,
 ) : AgentActionPlugin {
+    private val promptDescriptor = ActionPromptDescriptors.load(ActionType.WEB_SEARCH.id)
     override val descriptor: ActionDescriptor = ActionDescriptor(
         actionType = ActionType.WEB_SEARCH,
         dispatchable = true,
-        plannerDescription = "web_search: payload is a concise search query.",
-        payloadGuidance = "Use a compact search query, not full instructions.",
-        payloadSchemaExample = "kotlin coroutines structured concurrency latest docs",
+        plannerDescription = promptDescriptor.plannerDescription,
+        payloadGuidance = promptDescriptor.payloadGuidance,
+        payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = true,
-        followUpPrefix = "Web search completed.",
-        superegoDirectives = listOf(
-            "Allow WEB_SEARCH for general-information or public data queries by default.",
-            "Deny WEB_SEARCH when payload includes unencrypted credentials, API keys, tokens, cookies, private keys, or other software secrets.",
-            "Deny WEB_SEARCH when payload seeks credentials, API keys, tokens, cookies, private keys, or other software secrets.",
-            "Deny WEB_SEARCH when the request includes private sensitive data unless the user explicitly provided it for this task."
-        ),
+        followUpPrefix = promptDescriptor.followUpPrefix ?: "Web search completed.",
+        superegoDirectives = promptDescriptor.superegoDirectives,
         capabilities = setOf(ActionCapability.GATHERS_EVIDENCE),
         effectClass = ActionEffectClass.OBSERVE,
         directCommitAllowed = true,

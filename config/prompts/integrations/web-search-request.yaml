@@ -1,0 +1,17 @@
+id: integrations/web-search-request
+version: 1
+variables:
+  - query
+  - max_results
+text: |
+  Search query: {{query}}
+  Return STRICT JSON only:
+  {
+    "summary":"short finding summary",
+    "snippets":["bullet-sized snippet", "... up to {{max_results}} items"],
+    "sources":[{"title":"source title","url":"https://...","snippet":"optional source snippet"}]
+  }
+  Keep snippets factual and concise.
+  Prioritize primary sources (official vendor docs, official pricing pages, standards, research papers).
+  Avoid forums, social posts, link-aggregators, and SEO summaries unless primary sources are unavailable.
+  If only secondary/community sources are available, state that clearly in summary.

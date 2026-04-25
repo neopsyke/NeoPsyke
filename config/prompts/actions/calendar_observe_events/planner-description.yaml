@@ -1,0 +1,5 @@
+id: actions/calendar_observe_events/planner-description
+version: 1
+variables: []
+text: |
+  calendar_observe_events: list upcoming Google Calendar events with a JSON payload.

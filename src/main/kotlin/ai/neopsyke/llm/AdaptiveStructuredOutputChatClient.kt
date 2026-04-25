@@ -1,5 +1,6 @@
 package ai.neopsyke.llm
 
+import ai.neopsyke.prompt.PromptCatalog
 import mu.KotlinLogging
 import java.util.concurrent.ConcurrentHashMap
 
@@ -236,7 +237,7 @@ private data class StructuredOutputExecutionPlan(
         val attemptMessages = if (mode == StructuredOutputMode.PROMPT_ONLY_JSON) {
             messages + ChatMessage(
                 role = ChatRole.SYSTEM,
-                content = promptOnlyInstruction ?: DEFAULT_PROMPT_ONLY_INSTRUCTION
+                content = promptOnlyInstruction ?: PromptCatalog.shared.renderText("llm/prompt-only-json-instruction").text
             )
         } else {
             messages
@@ -250,10 +251,6 @@ private data class StructuredOutputExecutionPlan(
         )
     }
 
-    companion object {
-        private const val DEFAULT_PROMPT_ONLY_INSTRUCTION: String =
-            "Return one raw JSON object only. Never emit tool calls, function-call wrappers, named envelopes, markdown, or code fences."
-    }
 }
 
 private data class StructuredOutputAttempt(

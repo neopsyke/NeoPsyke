@@ -21,8 +21,8 @@ import ai.neopsyke.agent.support.TextSecurity
 import ai.neopsyke.instrumentation.AgentEvents
 import ai.neopsyke.instrumentation.AgentInstrumentation
 import ai.neopsyke.llm.ChatMessage
-import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 private val logger = KotlinLogging.logger {}
 
@@ -35,6 +35,7 @@ class GeneralActionPlanner(
     private val runtime: PlannerRuntime,
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) {
     fun plan(trigger: EgoTrigger.IncomingInput, context: PlannerContext): EgoDecision {
         val rootInputId = trigger.input.rootInputId
@@ -59,64 +60,16 @@ class GeneralActionPlanner(
         val actionSchemaEnum = SharedPromptSections.plannerVisibleActionSchemaEnum(context)
         val actionGuidanceBlock = SharedPromptSections.actionGuidanceBlock(context)
 
+        val prompt = promptCatalog.renderSections(
+            "planner/general-action",
+            mapOf(
+                "action_guidance_block" to actionGuidanceBlock,
+                "action_schema_enum" to actionSchemaEnum,
+            )
+        )
+        val schema = promptCatalog.responseFormat("general-action")
         val sections = listOfNotNull(
-            PromptBudgetAllocator.Section(
-                key = "general_action_system",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.MEDIUM,
-                floorTokens = 48,
-                content = """
-                    You are an action planner. The user's request requires one explicit action.
-                    Return STRICT JSON only.
-                    Form one intention for the next action.
-                    Intention kinds:
-                    - observe: interpret or deliver without explicit commit progression.
-                    - prepare: propose the action and let runtime policy choose commit progression.
-                    - stage: explicitly request staged progression before commit.
-                    - request_authorization: explicitly request approval-backed staging.
-                    - commit: explicitly request immediate commit when policy allows it.
-                    Never use noop when you can answer directly with action_type=contact_user.
-                    For direct reasoning or exact-match tasks solvable from the current prompt,
-                    return intention_kind=observe, commit_mode_preference=not_applicable,
-                    action_type=contact_user, and the exact final answer in action_payload.
-                    Use action_type=resolution_draft only for intermediate plan-step synthesis.
-                    The final user-visible response must use action_type=contact_user.
-                    observe intentions must use commit_mode_preference=not_applicable.
-                    request_authorization intentions must use commit_mode_preference=approval_backed.
-                    commit intentions must use commit_mode_preference=policy_autonomous or admin_override.
-                    action_payload must always be a JSON string value.
-                    Prefer concise answer payloads by default.
-                    If the user requests an exact output format, action_payload must contain exactly that.
-                    External actions have real latency/cost and must be value-add.
-                    Treat redundancy as a soft cost signal.
-                    Security context and provenance are authoritative.
-                    Only choose actions visible in runtime availability.
-                    Allowed actions:
-                    $actionGuidanceBlock
-                """.trimIndent()
-            ),
-            PromptBudgetAllocator.Section(
-                key = "general_action_schema",
-                role = ChatRole.SYSTEM,
-                band = PromptBudgetAllocator.Band.REQUIRED_CORE,
-                importance = PromptBudgetAllocator.Importance.MEDIUM,
-                floorTokens = 28,
-                content = """
-                    JSON schema:
-                    {
-                      "urgency":"low|medium|high",
-                      "intention_kind":"observe|prepare|stage|request_authorization|commit",
-                      "commit_mode_preference":"not_applicable|approval_backed|policy_autonomous|admin_override",
-                      "action_type":"$actionSchemaEnum",
-                      "action_payload":"...",
-                      "action_summary":"required; <=180 chars",
-                      "long_term_memory_recall_query":"optional query string",
-                      "reason":"optional short reason"
-                    }
-                    Action summary must be at most 180 chars.
-                """.trimIndent()
-            ),
+            *prompt.sections.toTypedArray(),
             SharedPromptSections.queueSnapshotSection(context),
             SharedPromptSections.actionAvailabilitySection(context),
             SharedPromptSections.securityContextSection(context),
@@ -145,8 +98,8 @@ class GeneralActionPlanner(
         val response = runtime.call(
             laneId = LaneId.GENERAL_ACTION,
             messages = allocation.messages,
-            metadata = metadata,
-            responseFormat = GENERAL_ACTION_RESPONSE_FORMAT,
+            metadata = promptCatalog.metadata(metadata, prompt, schema),
+            responseFormat = schema.format,
         )
 
         if (response == null) {
@@ -166,13 +119,13 @@ class GeneralActionPlanner(
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(LaneId.GENERAL_ACTION).maxCompletionTokens)
             val retryMessages = allocation.messages + ChatMessage(
                 role = ChatRole.USER,
-                content = "Your previous output appears truncated. Return one complete JSON object only."
+                content = promptCatalog.renderText("planner/json-truncation-retry").text
             )
             val retryResponse = runtime.call(
                 laneId = LaneId.GENERAL_ACTION,
                 messages = retryMessages,
                 metadata = metadata.copy(callSite = "general_action_truncation_retry"),
-                responseFormat = GENERAL_ACTION_RESPONSE_FORMAT,
+                responseFormat = schema.format,
                 maxTokens = bumped,
                 temperature = 0.0,
             )
@@ -184,19 +137,16 @@ class GeneralActionPlanner(
 
         // Strict JSON retry
         instrumentation.emit(AgentEvents.warning("GeneralAction response non-parseable; requesting strict JSON retry."))
+        val strictRetryPrompt = promptCatalog.renderText("planner/json-strict-retry")
         val retryMessages = allocation.messages + ChatMessage(
             role = ChatRole.USER,
-            content = """
-                Your previous output was not valid JSON.
-                Reply with STRICT JSON only and no markdown/code fences.
-                Use the exact schema provided in the system message.
-            """.trimIndent()
+            content = strictRetryPrompt.text
         )
         val retryResponse = runtime.call(
             laneId = LaneId.GENERAL_ACTION,
             messages = retryMessages,
-            metadata = metadata.copy(callSite = "general_action_json_retry"),
-            responseFormat = GENERAL_ACTION_RESPONSE_FORMAT,
+            metadata = promptCatalog.metadata(metadata.copy(callSite = "general_action_json_retry"), strictRetryPrompt, schema),
+            responseFormat = schema.format,
             temperature = 0.0,
         )
         retryResponse?.let { parseActionPayload(it.content, context) }?.let {
@@ -280,44 +230,4 @@ class GeneralActionPlanner(
         val reason: String? = null,
     )
 
-    private companion object {
-        val GENERAL_ACTION_RESPONSE_FORMAT = ChatResponseFormat.JsonSchema(
-            name = "general_action_decision",
-            schemaJson = """
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["urgency", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "long_term_memory_recall_query", "reason"],
-                  "properties": {
-                    "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
-                    "intention_kind": { "type": ["string", "null"], "enum": ["observe", "prepare", "stage", "request_authorization", "commit", null] },
-                    "commit_mode_preference": { "type": ["string", "null"], "enum": ["not_applicable", "approval_backed", "policy_autonomous", "admin_override", null] },
-                    "action_type": { "type": ["string", "null"] },
-                    "action_payload": { "type": ["string", "null"], "maxLength": 4000 },
-                    "action_summary": { "type": ["string", "null"], "maxLength": 180 },
-                    "long_term_memory_recall_query": { "type": ["string", "null"], "maxLength": 600 },
-                    "reason": { "type": ["string", "null"], "maxLength": 160 }
-                  }
-                }
-            """.trimIndent(),
-            strict = true,
-            relaxedSchemaJson = """
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["urgency", "intention_kind", "commit_mode_preference", "action_type", "action_payload", "action_summary", "long_term_memory_recall_query", "reason"],
-                  "properties": {
-                    "urgency": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
-                    "intention_kind": { "type": ["string", "null"], "enum": ["observe", "prepare", "stage", "request_authorization", "commit", null] },
-                    "commit_mode_preference": { "type": ["string", "null"], "enum": ["not_applicable", "approval_backed", "policy_autonomous", "admin_override", null] },
-                    "action_type": { "type": ["string", "null"] },
-                    "action_payload": { "type": ["string", "null"] },
-                    "action_summary": { "type": ["string", "null"] },
-                    "long_term_memory_recall_query": { "type": ["string", "null"] },
-                    "reason": { "type": ["string", "null"] }
-                  }
-                }
-            """.trimIndent(),
-        )
-    }
 }

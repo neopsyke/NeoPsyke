@@ -1,0 +1,6 @@
+id: actions/reflect_evidence/superego-directives
+version: 1
+variables: []
+text: |
+  - Allow REFLECT_EVIDENCE only when same-request evidence artifacts exist in scope.
+  - Deny REFLECT_EVIDENCE when no evidence artifacts are available for the current request.
