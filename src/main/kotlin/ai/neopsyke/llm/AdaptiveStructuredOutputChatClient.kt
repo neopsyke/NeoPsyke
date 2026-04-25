@@ -234,19 +234,34 @@ private data class StructuredOutputExecutionPlan(
 
             StructuredOutputMode.PROMPT_ONLY_JSON -> null
         }
-        val attemptMessages = if (mode == StructuredOutputMode.PROMPT_ONLY_JSON) {
+        val promptOnlyPrompt = if (mode == StructuredOutputMode.PROMPT_ONLY_JSON) {
+            PromptCatalog.shared.renderText("llm/prompt-only-json-instruction")
+        } else {
+            null
+        }
+        val attemptMessages = if (promptOnlyPrompt != null) {
             messages + ChatMessage(
                 role = ChatRole.SYSTEM,
-                content = promptOnlyInstruction ?: PromptCatalog.shared.renderText("llm/prompt-only-json-instruction").text
+                content = promptOnlyInstruction ?: promptOnlyPrompt.text
             )
         } else {
             messages
         }
+        val metadata = options.metadata.copy(structuredOutputMode = mode.telemetryValue())
+            .let { base ->
+                promptOnlyPrompt?.let {
+                    base.copy(
+                        promptId = it.id,
+                        promptVersion = it.version,
+                        promptHash = it.hash,
+                    )
+                } ?: base
+            }
         return StructuredOutputAttempt(
             messages = attemptMessages,
             options = options.copy(
                 responseFormat = responseFormat,
-                metadata = options.metadata.copy(structuredOutputMode = mode.telemetryValue())
+                metadata = metadata
             )
         )
     }

@@ -117,14 +117,15 @@ class GeneralActionPlanner(
             runtime.notifyTruncationRetry()
             instrumentation.emit(AgentEvents.warning("GeneralAction response appears truncated; retrying."))
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(LaneId.GENERAL_ACTION).maxCompletionTokens)
+            val truncationPrompt = promptCatalog.renderText("planner/json-truncation-retry")
             val retryMessages = allocation.messages + ChatMessage(
                 role = ChatRole.USER,
-                content = promptCatalog.renderText("planner/json-truncation-retry").text
+                content = truncationPrompt.text
             )
             val retryResponse = runtime.call(
                 laneId = LaneId.GENERAL_ACTION,
                 messages = retryMessages,
-                metadata = metadata.copy(callSite = "general_action_truncation_retry"),
+                metadata = promptCatalog.metadata(metadata.copy(callSite = "general_action_truncation_retry"), truncationPrompt, schema),
                 responseFormat = schema.format,
                 maxTokens = bumped,
                 temperature = 0.0,

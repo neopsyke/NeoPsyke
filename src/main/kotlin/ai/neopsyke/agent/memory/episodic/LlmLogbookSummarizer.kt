@@ -11,7 +11,7 @@ import ai.neopsyke.llm.ChatCallMetadata
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
-import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 
 private val logger = KotlinLogging.logger {}
 
@@ -23,21 +23,39 @@ class LlmLogbookSummarizer(
     private val modelClient: ChatModelClient,
     private val config: AgentConfig,
     private val fallback: LogbookSummarizer = DeterministicLogbookSummarizer(config.logbook),
+    private val promptCatalog: PromptCatalog = PromptCatalog.shared,
 ) : LogbookSummarizer {
 
     override fun extractKeywords(text: String): List<String> {
         if (text.isBlank()) return emptyList()
-        val result = callLlm(keywordExtractionMessages(text)) ?: return fallback.extractKeywords(text)
+        val prompt = keywordExtractionPrompt(text)
+        val schema = promptCatalog.responseFormat("logbook-keyword-extraction")
+        val result = callLlm(
+            prompt = prompt,
+            schema = schema,
+            callSite = "logbook_keyword_extraction",
+        ) ?: return fallback.extractKeywords(text)
         return parseKeywords(result) ?: fallback.extractKeywords(text)
     }
 
     override fun summarizeInput(content: String, maxChars: Int): String {
         if (content.isBlank()) return "User: "
-        val result = callLlm(summarizationMessages(content, maxChars)) ?: return fallback.summarizeInput(content, maxChars)
+        val prompt = summarizationPrompt(content, maxChars)
+        val schema = promptCatalog.responseFormat("logbook-input-summary")
+        val result = callLlm(
+            prompt = prompt,
+            schema = schema,
+            callSite = "logbook_input_summary",
+        ) ?: return fallback.summarizeInput(content, maxChars)
         return parseSummary(result, maxChars) ?: fallback.summarizeInput(content, maxChars)
     }
 
-    private fun callLlm(messages: List<ChatMessage>): String? {
+    private fun callLlm(
+        prompt: PromptCatalog.RenderedPrompt,
+        schema: PromptCatalog.RenderedSchema,
+        callSite: String,
+    ): String? {
+        val messages = prompt.sections.map { ChatMessage(role = it.role, content = it.content) }
         val retryAttempts = RetryPolicy.boundedLlmRetryAttempts(config.llmRetryAttempts)
         var lastError: Exception? = null
         for (attempt in 1..retryAttempts) {
@@ -47,7 +65,12 @@ class LlmLogbookSummarizer(
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         maxTokens = LOGBOOK_SUMMARIZER_MAX_TOKENS,
-                        metadata = ChatCallMetadata(actor = "ego", callSite = "logbook_summarization"),
+                        responseFormat = schema.format,
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(actor = "ego", callSite = callSite),
+                            prompt,
+                            schema,
+                        ),
                     ),
                 )
                 return response.content
@@ -62,37 +85,21 @@ class LlmLogbookSummarizer(
         return null
     }
 
-    private fun keywordExtractionMessages(text: String): List<ChatMessage> {
+    private fun keywordExtractionPrompt(text: String): PromptCatalog.RenderedPrompt {
         val capped = TextSecurity.preview(text, MAX_INPUT_PREVIEW_CHARS)
-        return listOf(
-            ChatMessage(
-                role = ChatRole.SYSTEM,
-                content = """
-                Extract 3-10 keywords from the following text. Return JSON: {"keywords":["k1","k2",...]}.
-                Only include meaningful content words. Omit stopwords, articles, prepositions.
-                """.trimIndent()
-            ),
-            ChatMessage(
-                role = ChatRole.USER,
-                content = "Text: $capped"
-            ),
+        return promptCatalog.renderSections(
+            "memory/logbook-keyword-extraction",
+            mapOf("text" to capped),
         )
     }
 
-    private fun summarizationMessages(content: String, maxChars: Int): List<ChatMessage> {
+    private fun summarizationPrompt(content: String, maxChars: Int): PromptCatalog.RenderedPrompt {
         val capped = TextSecurity.preview(content, MAX_INPUT_PREVIEW_CHARS)
-        return listOf(
-            ChatMessage(
-                role = ChatRole.SYSTEM,
-                content = """
-                Summarize the following user input in at most $maxChars characters for an episodic logbook.
-                Start with "User: ". Be concise but preserve intent and key entities.
-                Return JSON: {"summary":"User: ..."}.
-                """.trimIndent()
-            ),
-            ChatMessage(
-                role = ChatRole.USER,
-                content = "Input: $capped"
+        return promptCatalog.renderSections(
+            "memory/logbook-input-summary",
+            mapOf(
+                "max_chars" to maxChars.toString(),
+                "input" to capped,
             ),
         )
     }

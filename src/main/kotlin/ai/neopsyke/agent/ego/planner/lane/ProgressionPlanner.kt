@@ -131,10 +131,11 @@ class ProgressionPlanner(
         if (TruncationRetry.isLikelyTruncated(response)) {
             runtime.notifyTruncationRetry()
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
+            val truncationPrompt = promptCatalog.renderText("planner/json-truncation-retry")
             runtime.call(
                 laneId = laneId,
-                messages = allocation.messages + ChatMessage(ChatRole.USER, promptCatalog.renderText("planner/json-truncation-retry").text),
-                metadata = metadata.copy(callSite = "${meta.callSite}_truncation_retry"),
+                messages = allocation.messages + ChatMessage(ChatRole.USER, truncationPrompt.text),
+                metadata = promptCatalog.metadata(metadata.copy(callSite = "${meta.callSite}_truncation_retry"), truncationPrompt, schema),
                 responseFormat = schema.format,
                 maxTokens = bumped,
                 temperature = 0.0,
@@ -144,10 +145,11 @@ class ProgressionPlanner(
             }
         }
 
+        val strictRetryPrompt = promptCatalog.renderText("planner/json-strict-retry")
         runtime.call(
             laneId = laneId,
-            messages = allocation.messages + ChatMessage(ChatRole.USER, promptCatalog.renderText("planner/json-strict-retry").text),
-            metadata = metadata.copy(callSite = "${meta.callSite}_json_retry"),
+            messages = allocation.messages + ChatMessage(ChatRole.USER, strictRetryPrompt.text),
+            metadata = promptCatalog.metadata(metadata.copy(callSite = "${meta.callSite}_json_retry"), strictRetryPrompt, schema),
             responseFormat = schema.format,
             temperature = 0.0,
         )?.let { parseDecision(it.content, context) }?.let {

@@ -1,0 +1,489 @@
+version: 1
+prompts:
+  - id: actions/assignment_operation/follow-up-prefix
+    version: 1
+    file: actions/assignment_operation/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/assignment_operation/payload-guidance
+    version: 1
+    file: actions/assignment_operation/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/assignment_operation/payload-schema-example
+    version: 1
+    file: actions/assignment_operation/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/assignment_operation/planner-description
+    version: 1
+    file: actions/assignment_operation/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/calendar_observe_events/follow-up-prefix
+    version: 1
+    file: actions/calendar_observe_events/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/calendar_observe_events/payload-guidance
+    version: 1
+    file: actions/calendar_observe_events/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/calendar_observe_events/payload-schema-example
+    version: 1
+    file: actions/calendar_observe_events/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/calendar_observe_events/planner-description
+    version: 1
+    file: actions/calendar_observe_events/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/contact_user/follow-up-prefix
+    version: 1
+    file: actions/contact_user/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/contact_user/payload-guidance
+    version: 1
+    file: actions/contact_user/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/contact_user/payload-schema-example
+    version: 1
+    file: actions/contact_user/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/contact_user/planner-description
+    version: 1
+    file: actions/contact_user/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/contact_user/superego-directives
+    version: 1
+    file: actions/contact_user/superego-directives.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/email_send/follow-up-prefix
+    version: 1
+    file: actions/email_send/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/email_send/payload-guidance
+    version: 1
+    file: actions/email_send/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/email_send/payload-schema-example
+    version: 1
+    file: actions/email_send/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/email_send/planner-description
+    version: 1
+    file: actions/email_send/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/email_send/superego-directives
+    version: 1
+    file: actions/email_send/superego-directives.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/gmail_observe_message/follow-up-prefix
+    version: 1
+    file: actions/gmail_observe_message/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/gmail_observe_message/payload-guidance
+    version: 1
+    file: actions/gmail_observe_message/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/gmail_observe_message/payload-schema-example
+    version: 1
+    file: actions/gmail_observe_message/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/gmail_observe_message/planner-description
+    version: 1
+    file: actions/gmail_observe_message/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/gmail_observe_search/follow-up-prefix
+    version: 1
+    file: actions/gmail_observe_search/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/gmail_observe_search/payload-guidance
+    version: 1
+    file: actions/gmail_observe_search/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/gmail_observe_search/payload-schema-example
+    version: 1
+    file: actions/gmail_observe_search/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/gmail_observe_search/planner-description
+    version: 1
+    file: actions/gmail_observe_search/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_evidence/follow-up-prefix
+    version: 1
+    file: actions/reflect_evidence/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_evidence/payload-guidance
+    version: 1
+    file: actions/reflect_evidence/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_evidence/payload-schema-example
+    version: 1
+    file: actions/reflect_evidence/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_evidence/planner-description
+    version: 1
+    file: actions/reflect_evidence/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_evidence/superego-directives
+    version: 1
+    file: actions/reflect_evidence/superego-directives.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_internal/follow-up-prefix
+    version: 1
+    file: actions/reflect_internal/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_internal/payload-guidance
+    version: 1
+    file: actions/reflect_internal/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_internal/payload-schema-example
+    version: 1
+    file: actions/reflect_internal/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_internal/planner-description
+    version: 1
+    file: actions/reflect_internal/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/reflect_internal/superego-directives
+    version: 1
+    file: actions/reflect_internal/superego-directives.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/resolution_draft/follow-up-prefix
+    version: 1
+    file: actions/resolution_draft/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/resolution_draft/payload-guidance
+    version: 1
+    file: actions/resolution_draft/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/resolution_draft/payload-schema-example
+    version: 1
+    file: actions/resolution_draft/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/resolution_draft/planner-description
+    version: 1
+    file: actions/resolution_draft/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/resolution_draft/superego-directives
+    version: 1
+    file: actions/resolution_draft/superego-directives.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/web_search/follow-up-prefix
+    version: 1
+    file: actions/web_search/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/web_search/payload-guidance
+    version: 1
+    file: actions/web_search/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/web_search/payload-schema-example
+    version: 1
+    file: actions/web_search/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/web_search/planner-description
+    version: 1
+    file: actions/web_search/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/web_search/superego-directives
+    version: 1
+    file: actions/web_search/superego-directives.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/website_fetch/follow-up-prefix
+    version: 1
+    file: actions/website_fetch/follow-up-prefix.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/website_fetch/payload-guidance
+    version: 1
+    file: actions/website_fetch/payload-guidance.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/website_fetch/payload-schema-example
+    version: 1
+    file: actions/website_fetch/payload-schema-example.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/website_fetch/planner-description
+    version: 1
+    file: actions/website_fetch/planner-description.yaml
+    domain: actions
+    owner: action-registry
+  - id: actions/website_fetch/superego-directives
+    version: 1
+    file: actions/website_fetch/superego-directives.yaml
+    domain: actions
+    owner: action-registry
+  - id: approvals/interpreter
+    version: 1
+    file: approvals/interpreter.yaml
+    domain: approvals
+    owner: approval-interpreter
+    schema: approval-interpreter-decision
+  - id: assignments/work-step-verifier
+    version: 1
+    file: assignments/work-step-verifier.yaml
+    domain: assignments
+    owner: assignment-verifier
+    schema: assignment-step-verdict
+  - id: evals/memory-recall-judge
+    version: 1
+    file: evals/memory-recall-judge.yaml
+    domain: evals
+    owner: memory-live-eval
+    schema: memory-recall-judge
+  - id: evals/reasoning-assignment-repair-preserve
+    version: 1
+    file: evals/reasoning-assignment-repair-preserve.yaml
+    domain: evals
+    owner: reasoning-eval
+  - id: evals/reasoning-feedback
+    version: 1
+    file: evals/reasoning-feedback.yaml
+    domain: evals
+    owner: reasoning-eval
+  - id: evals/reasoning-feedback-carry
+    version: 1
+    file: evals/reasoning-feedback-carry.yaml
+    domain: evals
+    owner: reasoning-eval
+  - id: evals/reasoning-multi-fix
+    version: 1
+    file: evals/reasoning-multi-fix.yaml
+    domain: evals
+    owner: reasoning-eval
+  - id: evals/reasoning-shape-lock
+    version: 1
+    file: evals/reasoning-shape-lock.yaml
+    domain: evals
+    owner: reasoning-eval
+  - id: evals/reasoning-state-machine-repair-preserve
+    version: 1
+    file: evals/reasoning-state-machine-repair-preserve.yaml
+    domain: evals
+    owner: reasoning-eval
+  - id: evals/reasoning-system
+    version: 1
+    file: evals/reasoning-system.yaml
+    domain: evals
+    owner: reasoning-eval
+  - id: integrations/legacy-web-search
+    version: 1
+    file: integrations/legacy-web-search.yaml
+    domain: integrations
+    owner: web-search
+  - id: integrations/web-search-request
+    version: 1
+    file: integrations/web-search-request.yaml
+    domain: integrations
+    owner: web-search
+  - id: llm/prompt-only-json-instruction
+    version: 1
+    file: llm/prompt-only-json-instruction.yaml
+    domain: llm
+    owner: structured-output
+  - id: memory/logbook-input-summary
+    version: 1
+    file: memory/logbook-input-summary.yaml
+    domain: memory
+    owner: logbook
+    schema: logbook-input-summary
+  - id: memory/logbook-keyword-extraction
+    version: 1
+    file: memory/logbook-keyword-extraction.yaml
+    domain: memory
+    owner: logbook
+    schema: logbook-keyword-extraction
+  - id: memory/long-term-advisor
+    version: 1
+    file: memory/long-term-advisor.yaml
+    domain: memory
+    owner: long-term-memory
+    schema: long-term-memory-assessment
+  - id: memory/scratchpad-finalizer
+    version: 1
+    file: memory/scratchpad-finalizer.yaml
+    domain: memory
+    owner: scratchpad
+    schema: scratchpad-finalizer
+  - id: meta-reasoner/assessment
+    version: 1
+    file: meta-reasoner/assessment.yaml
+    domain: meta-reasoner
+    owner: ego
+    schema: meta-reasoner-assessment
+  - id: planner/assignment-command-generic
+    version: 1
+    file: planner/assignment-command-generic.yaml
+    domain: planner
+    owner: assignment-command-builder
+    schema: assignment-operation
+  - id: planner/assignment-command-recurrent-task
+    version: 1
+    file: planner/assignment-command-recurrent-task.yaml
+    domain: planner
+    owner: assignment-command-builder
+    schema: assignment-operation
+  - id: planner/assignment-command-responsibility
+    version: 1
+    file: planner/assignment-command-responsibility.yaml
+    domain: planner
+    owner: assignment-command-builder
+    schema: assignment-operation
+  - id: planner/assignment-command-schema-prompt
+    version: 1
+    file: planner/assignment-command-schema-prompt.yaml
+    domain: planner
+    owner: assignment-command-builder
+    schema: assignment-operation
+  - id: planner/assignment-lane
+    version: 1
+    file: planner/assignment-lane.yaml
+    domain: planner
+    owner: assignment-lane
+    schema: ego-planner-decision
+  - id: planner/direct-response
+    version: 1
+    file: planner/direct-response.yaml
+    domain: planner
+    owner: direct-responder
+    schema: direct-response
+  - id: planner/general-action
+    version: 1
+    file: planner/general-action.yaml
+    domain: planner
+    owner: general-action-planner
+    schema: general-action
+  - id: planner/grounding-classifier
+    version: 1
+    file: planner/grounding-classifier.yaml
+    domain: planner
+    owner: grounding-classifier
+    schema: grounding-classification
+  - id: planner/impulse
+    version: 1
+    file: planner/impulse.yaml
+    domain: planner
+    owner: impulse-lane
+    schema: ego-planner-decision
+  - id: planner/input-intent-router
+    version: 1
+    file: planner/input-intent-router.yaml
+    domain: planner
+    owner: input-router
+    schema: input-intent-route
+  - id: planner/json-strict-retry
+    version: 1
+    file: planner/json-strict-retry.yaml
+    domain: planner
+    owner: structured-output
+  - id: planner/json-truncation-retry
+    version: 1
+    file: planner/json-truncation-retry.yaml
+    domain: planner
+    owner: structured-output
+  - id: planner/plan-refiner
+    version: 1
+    file: planner/plan-refiner.yaml
+    domain: planner
+    owner: plan-refiner
+    schema: plan-refinement-result
+  - id: planner/progression
+    version: 1
+    file: planner/progression.yaml
+    domain: planner
+    owner: progression-lane
+    schema: ego-planner-decision
+  - id: planner/task-decomposition
+    version: 1
+    file: planner/task-decomposition.yaml
+    domain: planner
+    owner: task-decomposition
+    schema: task-decomposition
+  - id: safety/schema-retry
+    version: 1
+    file: safety/schema-retry.yaml
+    domain: safety
+    owner: superego
+  - id: safety/superego-review
+    version: 1
+    file: safety/superego-review.yaml
+    domain: safety
+    owner: superego
+    schema: superego-review
+schemas:
+  - id: approval-interpreter-decision
+    file: schemas/approval-interpreter-decision.yaml
+  - id: assignment-operation
+    file: schemas/assignment-operation.yaml
+  - id: assignment-step-verdict
+    file: schemas/assignment-step-verdict.yaml
+  - id: direct-response
+    file: schemas/direct-response.yaml
+  - id: ego-planner-decision
+    file: schemas/ego-planner-decision.yaml
+  - id: general-action
+    file: schemas/general-action.yaml
+  - id: grounding-classification
+    file: schemas/grounding-classification.yaml
+  - id: input-intent-route
+    file: schemas/input-intent-route.yaml
+  - id: logbook-input-summary
+    file: schemas/logbook-input-summary.yaml
+  - id: logbook-keyword-extraction
+    file: schemas/logbook-keyword-extraction.yaml
+  - id: long-term-memory-assessment
+    file: schemas/long-term-memory-assessment.yaml
+  - id: memory-recall-judge
+    file: schemas/memory-recall-judge.yaml
+  - id: meta-reasoner-assessment
+    file: schemas/meta-reasoner-assessment.yaml
+  - id: plan-refinement-result
+    file: schemas/plan-refinement-result.yaml
+  - id: scratchpad-finalizer
+    file: schemas/scratchpad-finalizer.yaml
+  - id: superego-review
+    file: schemas/superego-review.yaml
+  - id: task-decomposition
+    file: schemas/task-decomposition.yaml

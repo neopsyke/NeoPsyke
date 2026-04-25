@@ -58,10 +58,13 @@ class LegacyPromptWebSearchEngine(
                     options = ChatRequestOptions(
                         temperature = 0.1,
                         maxTokens = config.planner.maxCompletionTokens,
-                        metadata = ChatCallMetadata(
-                            actor = "ego",
-                            callSite = "web_search",
-                            actionType = "web_search"
+                        metadata = PromptCatalog.shared.metadata(
+                            ChatCallMetadata(
+                                actor = "ego",
+                                callSite = "web_search",
+                                actionType = "web_search"
+                            ),
+                            prompt,
                         )
                     )
                 )

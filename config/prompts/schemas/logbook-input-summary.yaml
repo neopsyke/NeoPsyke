@@ -1,0 +1,12 @@
+id: logbook-input-summary
+name: logbook_input_summary
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["summary"],
+    "properties": {
+      "summary": { "type": ["string", "null"] }
+    }
+  }

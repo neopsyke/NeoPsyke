@@ -1,0 +1,15 @@
+id: logbook-keyword-extraction
+name: logbook_keyword_extraction
+strict: true
+schema: |
+  {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["keywords"],
+    "properties": {
+      "keywords": {
+        "type": ["array", "null"],
+        "items": { "type": "string" }
+      }
+    }
+  }

@@ -147,20 +147,26 @@ class Superego(
             return policyAuthorization
         }
 
-        val promptAllocation = buildMessages(action, context, resolvedDirectives)
+        val promptAllocation = buildPrompt(action, context, resolvedDirectives)
         instrumentation.emit(
             AgentEvent(
                 type = "prompt_budget_allocation",
-                data = promptAllocation.diagnostics.toTelemetryData(callSite = "superego_prompt"),
+                data = promptAllocation.allocation.diagnostics.toTelemetryData(callSite = "superego_prompt"),
             )
         )
-        val messages = promptAllocation.messages
         val effectiveEngine = when {
             action.type == ActionType.CONTACT_USER && config.superego.twoStageSkipForContactUserActions -> primaryEngine
             action.type == ActionType.WEB_SEARCH && config.superego.twoStageSkipForWebSearchActions -> primaryEngine
             else -> reviewEngine
         }
-        val decision = effectiveEngine.review(action, messages)
+        val decision = effectiveEngine.review(
+            action,
+            SuperegoReviewPrompt(
+                messages = promptAllocation.allocation.messages,
+                renderedPrompt = promptAllocation.renderedPrompt,
+                schema = promptAllocation.schema,
+            )
+        )
         instrumentation.emit(
             AgentEvents.superegoReviewOutput(
                 actionId = action.id,
@@ -222,18 +228,17 @@ class Superego(
     private val deterministicConscience: SuperegoDeterministicConscience
         get() = SuperegoDeterministicConscience(config, actionRegistry)
 
-    private fun buildMessages(
+    private fun buildPrompt(
         action: PendingAction,
         context: SuperegoContext,
         directives: List<String>,
-    ): PromptBudgetAllocator.AllocationResult {
+    ): SuperegoPromptAllocation {
         val directivesBlock = directives.joinToString(separator = "\n") { "- $it" }
         val lastUserTurn = context.recentDialogue.lastOrNull { it.role == DialogueRole.USER }?.content ?: "none"
         val shortTermContextSummary = context.shortTermContextSummary.ifBlank { "none" }
         val originSource = context.origin?.source?.name?.lowercase() ?: "user"
         val originNeedId = context.origin?.needId ?: "none"
-        return PromptBudgetAllocator.allocate(
-            sections = promptCatalog.renderSections(
+        val prompt = promptCatalog.renderSections(
                 "safety/superego-review",
                 mapOf(
                     "directives" to directivesBlock,
@@ -246,10 +251,23 @@ class Superego(
                     "last_user_turn" to lastUserTurn,
                     "short_term_context_summary" to shortTermContextSummary,
                 )
-            ).sections,
-            maxTokens = config.maxLlmPromptTokens
+        )
+        val schema = promptCatalog.responseFormat("superego-review")
+        return SuperegoPromptAllocation(
+            allocation = PromptBudgetAllocator.allocate(
+                sections = prompt.sections,
+                maxTokens = config.maxLlmPromptTokens
+            ),
+            renderedPrompt = prompt,
+            schema = schema,
         )
     }
+
+    private data class SuperegoPromptAllocation(
+        val allocation: PromptBudgetAllocator.AllocationResult,
+        val renderedPrompt: PromptCatalog.RenderedPrompt,
+        val schema: PromptCatalog.RenderedSchema,
+    )
 
     companion object {
         private const val MAX_DENY_REASON_CHARS: Int = 180

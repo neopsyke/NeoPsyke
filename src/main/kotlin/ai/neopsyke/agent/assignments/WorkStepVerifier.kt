@@ -8,6 +8,7 @@ import mu.KotlinLogging
 import ai.neopsyke.agent.config.AgentConfig
 import ai.neopsyke.agent.model.ActionOutcome
 import ai.neopsyke.agent.model.PendingAction
+import ai.neopsyke.llm.ChatCallMetadata
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
@@ -92,6 +93,15 @@ class LlmWorkStepVerifier(
                     options = ChatRequestOptions(
                         maxTokens = config.planner.maxCompletionTokens,
                         responseFormat = schema.format,
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(
+                                actor = "assignment_verifier",
+                                callSite = "assignment_work_step_verifier",
+                                actionType = action.type.id,
+                            ),
+                            prompt,
+                            schema,
+                        ),
                     )
                 ).content
                 break

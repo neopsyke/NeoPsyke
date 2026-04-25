@@ -1,0 +1,22 @@
+id: memory/logbook-input-summary
+version: 1
+variables:
+  - max_chars
+  - input
+sections:
+  - key: logbook_input_summary_system
+    role: system
+    band: required_core
+    importance: medium
+    floor_tokens: 48
+    content: |
+      Summarize the following user input in at most {{max_chars}} characters for an episodic logbook.
+      Start with "User: ". Be concise but preserve intent and key entities.
+      Return JSON: {"summary":"User: ..."}.
+  - key: logbook_input_summary_input
+    role: user
+    band: required_context
+    importance: high
+    floor_tokens: 80
+    content: |
+      Input: {{input}}

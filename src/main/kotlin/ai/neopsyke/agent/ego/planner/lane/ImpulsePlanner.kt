@@ -101,16 +101,20 @@ class ImpulsePlanner(
         if (TruncationRetry.isLikelyTruncated(response)) {
             runtime.notifyTruncationRetry()
             val bumped = TruncationRetry.bumpCompletionBudget(runtime.resolvedConfig(laneId).maxCompletionTokens)
-            runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, promptCatalog.renderText("planner/json-truncation-retry").text),
-                metadata.copy(callSite = "impulse_truncation_retry"), schema.format, maxTokens = bumped, temperature = 0.0)
+            val truncationPrompt = promptCatalog.renderText("planner/json-truncation-retry")
+            runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, truncationPrompt.text),
+                promptCatalog.metadata(metadata.copy(callSite = "impulse_truncation_retry"), truncationPrompt, schema),
+                schema.format, maxTokens = bumped, temperature = 0.0)
                 ?.let { parseImpulseDecision(it.content, context) }?.let {
                     runtime.recordSuccess(laneId, rootInputId)
                     return toEgoDecision(it, context)
                 }
         }
 
-        runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, promptCatalog.renderText("planner/json-strict-retry").text),
-            metadata.copy(callSite = "impulse_json_retry"), schema.format, temperature = 0.0)
+        val strictRetryPrompt = promptCatalog.renderText("planner/json-strict-retry")
+        runtime.call(laneId, allocation.messages + ChatMessage(ChatRole.USER, strictRetryPrompt.text),
+            promptCatalog.metadata(metadata.copy(callSite = "impulse_json_retry"), strictRetryPrompt, schema),
+            schema.format, temperature = 0.0)
             ?.let { parseImpulseDecision(it.content, context) }?.let {
                 runtime.recordSuccess(laneId, rootInputId)
                 return toEgoDecision(it, context)

@@ -120,7 +120,7 @@ class PromptCatalogTest {
         val root = repoRoot().resolve("config/prompts")
         val catalog = PromptCatalog.fromRoot(root)
         val promptFiles = Files.walk(root).use { stream ->
-            stream.filter { it.isRegularFile() && it.extension == "yaml" && !slashPath(it).contains("/schemas/") }
+            stream.filter { it.isRegularFile() && it.extension == "yaml" && it.fileName.toString() != "catalog.yaml" && !slashPath(it).contains("/schemas/") }
                 .toList()
         }
         val schemaFiles = Files.walk(root.resolve("schemas")).use { stream ->
@@ -150,6 +150,8 @@ class PromptCatalogTest {
             assertTrue(rendered.hash.isNotBlank(), "Schema hash should be present for $schemaId")
             assertTrue(rendered.format.schemaJson.isNotBlank(), "Schema JSON should be present for $schemaId")
         }
+
+        assertCatalogCoversAssets(root, promptFiles, schemaFiles)
     }
 
     @Test
@@ -177,6 +179,29 @@ class PromptCatalogTest {
 
     private fun isAllowedFixtureData(line: String): Boolean =
         line.contains("userStatement = \"You are friendly and like to be direct.\"")
+
+    private fun assertCatalogCoversAssets(root: Path, promptFiles: List<Path>, schemaFiles: List<Path>) {
+        val catalog = yamlMapper.readTree(root.resolve("catalog.yaml").toFile())
+        assertEquals(1, catalog.path("version").asInt(), "Prompt catalog manifest version should be 1")
+        val catalogPromptFiles = catalog.path("prompts").map { it.path("file").asText() }.toSet()
+        val catalogSchemaFiles = catalog.path("schemas").map { it.path("file").asText() }.toSet()
+        val actualPromptFiles = promptFiles.map { slashPath(it.relativeTo(root)) }.toSet()
+        val actualSchemaFiles = schemaFiles.map { slashPath(it.relativeTo(root)) }.toSet()
+
+        assertEquals(actualPromptFiles, catalogPromptFiles, "catalog.yaml must list every prompt asset file")
+        assertEquals(actualSchemaFiles, catalogSchemaFiles, "catalog.yaml must list every schema asset file")
+
+        catalog.path("prompts").forEach { entry ->
+            val id = entry.path("id").asText()
+            assertTrue(id.isNotBlank(), "catalog prompt entry has blank id")
+            assertTrue(entry.path("version").asInt() > 0, "catalog prompt entry $id has invalid version")
+            assertTrue(entry.path("domain").asText().isNotBlank(), "catalog prompt entry $id has blank domain")
+            assertTrue(entry.path("owner").asText().isNotBlank(), "catalog prompt entry $id has blank owner")
+            entry.path("schema").takeIf { !it.isMissingNode && !it.isNull }?.let {
+                assertTrue(catalogSchemaFiles.any { schemaFile -> schemaFile == "schemas/${it.asText()}.yaml" }, "catalog prompt entry $id references missing schema ${it.asText()}")
+            }
+        }
+    }
 
     private companion object {
         private val yamlMapper = ObjectMapper(YAMLFactory())

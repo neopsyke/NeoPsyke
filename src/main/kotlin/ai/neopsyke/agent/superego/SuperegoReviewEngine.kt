@@ -21,15 +21,20 @@ import ai.neopsyke.llm.ChatCompletion
 import ai.neopsyke.llm.ChatMessage
 import ai.neopsyke.llm.ChatModelClient
 import ai.neopsyke.llm.ChatRequestOptions
-import ai.neopsyke.llm.ChatResponseFormat
 import ai.neopsyke.llm.ChatRole
 import ai.neopsyke.prompt.PromptCatalog
 
 private val logger = KotlinLogging.logger {}
 
 internal interface SuperegoReviewEngine {
-    fun review(action: PendingAction, messages: List<ChatMessage>): GateDecision
+    fun review(action: PendingAction, prompt: SuperegoReviewPrompt): GateDecision
 }
+
+internal data class SuperegoReviewPrompt(
+    val messages: List<ChatMessage>,
+    val renderedPrompt: PromptCatalog.RenderedPrompt,
+    val schema: PromptCatalog.RenderedSchema,
+)
 
 internal class SingleStageSuperegoReviewEngine(
     private val modelClient: ChatModelClient,
@@ -45,10 +50,10 @@ internal class SingleStageSuperegoReviewEngine(
         onTripBehavior = OnTripBehavior.ALLOW,
     )
 
-    override fun review(action: PendingAction, messages: List<ChatMessage>): GateDecision =
-        reviewDetailed(action, messages).decision
+    override fun review(action: PendingAction, prompt: SuperegoReviewPrompt): GateDecision =
+        reviewDetailed(action, prompt).decision
 
-    fun reviewDetailed(action: PendingAction, messages: List<ChatMessage>): SuperegoStageOutcome {
+    fun reviewDetailed(action: PendingAction, prompt: SuperegoReviewPrompt): SuperegoStageOutcome {
         if (circuitBreaker.isTripped()) {
             instrumentation.emit(
                 AgentEvents.warning("Superego($stageLabel) circuit breaker tripped; allowing action to prevent denial loop.")
@@ -61,6 +66,7 @@ internal class SingleStageSuperegoReviewEngine(
                 technicalFallback = true,
             )
         }
+        val messages = prompt.messages
         val completionTokenBudget = resolveCompletionTokenBudget(messages)
         var response: ChatCompletion? = null
         var lastError: Exception? = null
@@ -72,11 +78,15 @@ internal class SingleStageSuperegoReviewEngine(
                     options = ChatRequestOptions(
                         temperature = 0.0,
                         maxTokens = completionTokenBudget,
-                        responseFormat = SUPEREGO_RESPONSE_FORMAT,
-                        metadata = ChatCallMetadata(
-                            actor = "superego",
-                            callSite = callSiteBase,
-                            actionType = action.type.name.lowercase()
+                        responseFormat = prompt.schema.format,
+                        metadata = promptCatalog.metadata(
+                            ChatCallMetadata(
+                                actor = "superego",
+                                callSite = callSiteBase,
+                                actionType = action.type.name.lowercase()
+                            ),
+                            prompt.renderedPrompt,
+                            prompt.schema,
                         )
                     )
                 )
@@ -124,7 +134,7 @@ internal class SingleStageSuperegoReviewEngine(
                 )
             )
             val retryResponse = requestStrictJsonRetry(
-                messages = messages,
+                prompt = prompt,
                 action = action,
                 completionTokenBudget = completionTokenBudget
             )
@@ -216,13 +226,14 @@ internal class SingleStageSuperegoReviewEngine(
     }
 
     private fun requestStrictJsonRetry(
-        messages: List<ChatMessage>,
+        prompt: SuperegoReviewPrompt,
         action: PendingAction,
         completionTokenBudget: Int,
     ): ChatCompletion? {
-        val retryMessages = messages + ChatMessage(
+        val retryPrompt = promptCatalog.renderText("safety/schema-retry")
+        val retryMessages = prompt.messages + ChatMessage(
             role = ChatRole.USER,
-            content = promptCatalog.renderText("safety/schema-retry").text
+            content = retryPrompt.text
         )
         return try {
             modelClient.chat(
@@ -230,11 +241,15 @@ internal class SingleStageSuperegoReviewEngine(
                 options = ChatRequestOptions(
                     temperature = 0.0,
                     maxTokens = completionTokenBudget,
-                    responseFormat = SUPEREGO_RESPONSE_FORMAT,
-                    metadata = ChatCallMetadata(
-                        actor = "superego",
-                        callSite = "${callSiteBase}_json_retry",
-                        actionType = action.type.name.lowercase()
+                    responseFormat = prompt.schema.format,
+                    metadata = promptCatalog.metadata(
+                        ChatCallMetadata(
+                            actor = "superego",
+                            callSite = "${callSiteBase}_json_retry",
+                            actionType = action.type.name.lowercase()
+                        ),
+                        retryPrompt,
+                        prompt.schema,
                     )
                 )
             )
@@ -271,9 +286,6 @@ internal class SingleStageSuperegoReviewEngine(
         private val mapper = jacksonObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
-        private val SUPEREGO_RESPONSE_FORMAT: ChatResponseFormat.JsonSchema =
-            PromptCatalog.shared.responseFormat("superego-review").format
-
         private fun normalizeReasonCode(raw: String?): String? =
             raw?.trim()
                 ?.uppercase()
@@ -289,8 +301,8 @@ internal class TwoStageSuperegoReviewEngine(
     private val config: AgentConfig,
     private val instrumentation: AgentInstrumentation,
 ) : SuperegoReviewEngine {
-    override fun review(action: PendingAction, messages: List<ChatMessage>): GateDecision {
-        val primaryOutcome = primary.reviewDetailed(action, messages)
+    override fun review(action: PendingAction, prompt: SuperegoReviewPrompt): GateDecision {
+        val primaryOutcome = primary.reviewDetailed(action, prompt)
         emitStageEvent(stage = "primary", escalated = false, outcome = primaryOutcome)
 
         val escalationReason = resolveEscalationReason(primaryOutcome) ?: return primaryOutcome.decision
@@ -298,7 +310,7 @@ internal class TwoStageSuperegoReviewEngine(
             AgentEvents.warning("Superego two-stage escalation triggered: $escalationReason")
         )
 
-        val escalationOutcome = escalation.reviewDetailed(action, messages)
+        val escalationOutcome = escalation.reviewDetailed(action, prompt)
         emitStageEvent(stage = "escalation", escalated = true, outcome = escalationOutcome)
         if (escalationOutcome.technicalFallback) {
             instrumentation.emit(
