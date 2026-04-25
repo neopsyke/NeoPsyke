@@ -427,7 +427,7 @@ class LlmRuntimeConfigLoaderTest {
 
         val lowRouter = lowLlmConfig.cognitiveRoles.plannerLanes["input_intent_router"]!!
         assertEquals(LlmProvider.GROQ, lowRouter.provider)
-        assertEquals("openai/gpt-oss-20b", lowRouter.model)
+        assertEquals("openai/gpt-oss-120b", lowRouter.model)
 
         val highRouter = highLlmConfig.cognitiveRoles.plannerLanes["input_intent_router"]!!
         assertEquals(LlmProvider.GROQ, highRouter.provider)

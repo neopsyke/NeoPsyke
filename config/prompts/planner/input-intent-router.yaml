@@ -18,9 +18,27 @@ sections:
       {{route_options}}
       Rules:
       - direct_response: the request can be answered directly from current context without external tools.
-      - general_action: the request requires one explicit action (search, fetch, contact, etc.).
-      - multi_step_task: the request requires multiple sequential stages.
-      - assignment: the user wants to create, manage, or interact with persistent recurrent tasks or responsibilities.
+        This is the DEFAULT for any input where the answer itself IS the deliverable: questions,
+        reasoning problems (math, logic, dates, deduction), summarization of provided text,
+        translations, definitions, opinions, and similar. If the user asks for an answer that
+        you produce as text in your response, it is direct_response. Short or single-token
+        expected answers (e.g. "true"/"false", a number, a letter, a name) are direct_response,
+        not actions.
+      - general_action: the request requires exactly one external/side-effect action that the
+        agent must perform on the world (search the web, fetch a URL, send a message, etc.).
+        Pick this only when an external tool is required and the user is NOT just asking a
+        question you can answer from context. Do not pick general_action just to "send the
+        answer to the user" — delivering the answer is part of direct_response.
+      - multi_step_task: the request requires multiple sequential external stages that must
+        be planned together. Do not pick this for plain reasoning that has multiple internal
+        thinking steps but a single textual answer.
+      - assignment: the user wants to create, manage, or interact with persistent recurrent
+        tasks or responsibilities. Assignments are PERSISTENT items (scheduled, recurring,
+        long-running, or operator-tracked work). Imperative phrasing alone does not make
+        something an assignment: "summarize this and answer X" is direct_response, not an
+        assignment, even if the wording is "create one coherent unit of work" — that is just
+        framing. Pick assignment only when the user is explicitly asking the agent to remember,
+        track, schedule, recur, or own ongoing work.
       - If route=assignment, you MUST also set assignment_target:
         - generic: shared lifecycle work like list, status, pause, resume, review, complete, retire, delete, delete_all, reprioritize.
         - recurrent_task: create/update/revise for reminders, recurring searches, scheduled monitoring, and other repeated structured tasks.
@@ -28,8 +46,12 @@ sections:
       - clarification: you cannot confidently distinguish between materially different routes.
       - noop: no actionable intent detected.
       Available actions: {{action_summary}}
-      Do not default to general_action when the route is genuinely ambiguous.
-      If uncertain between materially different routes, return clarification.
+      Strong defaults:
+      - When in doubt between direct_response and any action route, choose direct_response.
+      - Do NOT default to general_action when the route is genuinely ambiguous.
+      - If uncertain between materially different routes, return clarification.
+      - A request that is fundamentally "answer this question" or "produce this text" is
+        direct_response, regardless of any imperative framing around it.
   - key: router_schema
     role: system
     band: required_core

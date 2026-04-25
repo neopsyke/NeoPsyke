@@ -37,7 +37,7 @@ cognitive_roles:
     lanes:
       input_intent_router:
         provider: groq
-        model: openai/gpt-oss-20b
+        model: openai/gpt-oss-120b
       direct_response:
         provider: groq
         model: openai/gpt-oss-20b

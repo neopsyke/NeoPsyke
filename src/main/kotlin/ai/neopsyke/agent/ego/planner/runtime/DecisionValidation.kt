@@ -50,7 +50,15 @@ object DecisionValidation {
             return CommitMode.NOT_APPLICABLE
         }
         val explicit = CommitMode.entries.firstOrNull { it.name.equals(rawCommitMode?.trim(), ignoreCase = true) }
-        return explicit ?: preferredCommitMode(allowedCommitModes, intentionKind)
+        // If the model picked a commit mode that is not valid for the chosen intention
+        // (e.g. intention=COMMIT with commit_mode=APPROVAL_BACKED), do not pass it through —
+        // that would force a noop downstream and burn assignment retry budget. Auto-correct
+        // to a valid preferred mode for the intention so a single bad combination does not
+        // wedge the assignment loop.
+        if (explicit != null && intentionKind != null && isCommitModeValidForIntention(intentionKind, explicit)) {
+            return explicit
+        }
+        return preferredCommitMode(allowedCommitModes, intentionKind)
     }
 
     fun preferredCommitMode(
@@ -60,11 +68,10 @@ object DecisionValidation {
         if (intentionKind == null || intentionKind == IntentionKind.OBSERVE) {
             return CommitMode.NOT_APPLICABLE
         }
-        return when {
-            CommitMode.APPROVAL_BACKED in allowedCommitModes -> CommitMode.APPROVAL_BACKED
-            CommitMode.POLICY_AUTONOMOUS in allowedCommitModes -> CommitMode.POLICY_AUTONOMOUS
-            CommitMode.ADMIN_OVERRIDE in allowedCommitModes -> CommitMode.ADMIN_OVERRIDE
-            else -> CommitMode.NOT_APPLICABLE
-        }
+        // Walk the preferred ladder but skip entries that are not valid for this intention,
+        // so callers always get a runnable combination (e.g. COMMIT must not get APPROVAL_BACKED).
+        val ladder = listOf(CommitMode.APPROVAL_BACKED, CommitMode.POLICY_AUTONOMOUS, CommitMode.ADMIN_OVERRIDE)
+        return ladder.firstOrNull { it in allowedCommitModes && isCommitModeValidForIntention(intentionKind, it) }
+            ?: CommitMode.NOT_APPLICABLE
     }
 }

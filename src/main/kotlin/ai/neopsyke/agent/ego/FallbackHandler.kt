@@ -185,7 +185,11 @@ internal class FallbackHandler(
         }
         val evidence = deliberation.evidenceFor(continuation.rootInputId, sessionId)
         val parseFailureLikely = continuation.content.contains("non-parseable", ignoreCase = true)
+        val salvagedDirectAnswer = salvageContactUserPayload(continuation)
         val (payload, summary) = when {
+            salvagedDirectAnswer != null -> {
+                salvagedDirectAnswer to "Direct answer salvaged after format-only denial of contact_user."
+            }
             !continuation.denialReason.isNullOrBlank() -> {
                 val message = "I cannot complete the previous action because it was blocked by policy " +
                     "(${continuation.denialReason ?: "no reason provided"}). " +
@@ -313,6 +317,29 @@ internal class FallbackHandler(
                     "Try a different safe action than the denied one. " +
                     "If no safe alternative exists, prepare a concise explanation for the interlocutor."
         }
+
+    /**
+     * If the most recent denial was for a [ActionType.CONTACT_USER] action that was rejected
+     * for payload-format reasons (rather than content-policy reasons), the denied payload IS
+     * the agent's intended user-facing answer. Deliver it directly instead of replacing it
+     * with the canned "blocked by policy" message.
+     *
+     * Gated strictly on the typed `reason_code` to avoid free-text parsing of the deny reason.
+     * Codes that match payload-format denials contain "PAYLOAD", "FORMAT", or "SCHEMA";
+     * content-policy codes (e.g. POLICY_DENIED, TEMP_RETRY, UNAUTHORIZED) do not match and
+     * therefore fall through to the existing canned-message path.
+     */
+    private fun salvageContactUserPayload(continuation: QueuedContinuation): String? {
+        if (continuation.deniedActionType != ActionType.CONTACT_USER) return null
+        val payload = continuation.deniedActionPayload?.trim()
+        if (payload.isNullOrEmpty()) return null
+        val reasonCode = continuation.denialReasonCode?.trim()
+        if (reasonCode.isNullOrEmpty()) return null
+        val upper = reasonCode.uppercase()
+        val isPayloadFormatDenial = "PAYLOAD" in upper || "FORMAT" in upper || "SCHEMA" in upper
+        if (!isPayloadFormatDenial) return null
+        return payload
+    }
 
     fun isRepeatOfDeniedAction(continuation: QueuedContinuation, decision: EgoDecision.FormIntention): Boolean {
         val deniedType = continuation.deniedActionType ?: return false
