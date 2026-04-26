@@ -267,6 +267,11 @@ prompts:
     domain: assignments
     owner: assignment-verifier
     schema: assignment-step-verdict
+  - id: ego/persona
+    version: 1
+    file: ego/persona.yaml
+    domain: ego
+    owner: ego
   - id: evals/memory-recall-judge
     version: 1
     file: evals/memory-recall-judge.yaml

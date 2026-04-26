@@ -60,6 +60,7 @@ class GeneralActionPlanner(
         val actionSchemaEnum = SharedPromptSections.plannerVisibleActionSchemaEnum(context)
         val actionGuidanceBlock = SharedPromptSections.actionGuidanceBlock(context)
 
+        val personaSections = SharedPromptSections.egoPersonaSections(promptCatalog)
         val prompt = promptCatalog.renderSections(
             "planner/general-action",
             mapOf(
@@ -69,6 +70,7 @@ class GeneralActionPlanner(
         )
         val schema = promptCatalog.responseFormat("general-action")
         val sections = listOfNotNull(
+            *personaSections.toTypedArray(),
             *prompt.sections.toTypedArray(),
             SharedPromptSections.queueSnapshotSection(context),
             SharedPromptSections.actionAvailabilitySection(context),

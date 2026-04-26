@@ -79,6 +79,7 @@ class ProgressionPlanner(
         val actionSchemaEnum = SharedPromptSections.plannerVisibleActionSchemaEnum(context)
         val actionGuidanceBlock = SharedPromptSections.actionGuidanceBlock(context)
 
+        val personaSections = SharedPromptSections.egoPersonaSections(promptCatalog)
         val prompt = promptCatalog.renderSections(
             "planner/progression",
             mapOf(
@@ -89,6 +90,7 @@ class ProgressionPlanner(
         )
         val schema = promptCatalog.responseFormat("ego-planner-decision")
         val sections = listOfNotNull(
+            *personaSections.toTypedArray(),
             *prompt.sections.toTypedArray(),
             SharedPromptSections.actionAvailabilitySection(context),
             SharedPromptSections.securityContextSection(context),

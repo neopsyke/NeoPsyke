@@ -7,6 +7,7 @@ import ai.neopsyke.agent.model.PlannerContext
 import ai.neopsyke.agent.support.DenialReasonClassifier
 import ai.neopsyke.agent.support.PromptBudgetAllocator
 import ai.neopsyke.llm.ChatRole
+import ai.neopsyke.prompt.PromptCatalog
 import java.util.Locale
 
 /**
@@ -16,6 +17,28 @@ import java.util.Locale
 object SharedPromptSections {
 
     const val ASSIGNMENTING_CONTEXT_MAX_CHARS: Int = 1_200
+
+    /**
+     * Default name surfaced to the model in the ego persona prompt.
+     * Single source of truth — referenced only by [egoPersonaSections]. To
+     * rename the agent, change this constant; the persona yaml renders it
+     * via the `agent_name` variable.
+     */
+    const val DEFAULT_AGENT_NAME: String = "Neo"
+
+    /**
+     * Render the ego persona sections (name, voice, formatting rules) for
+     * inclusion in a user-facing lane prompt. Only lanes that produce
+     * user-visible text should call this; plan-shaping lanes should skip it.
+     */
+    fun egoPersonaSections(
+        promptCatalog: PromptCatalog,
+        agentName: String = DEFAULT_AGENT_NAME,
+    ): List<PromptBudgetAllocator.Section> =
+        promptCatalog.renderSections(
+            "ego/persona",
+            mapOf("agent_name" to agentName),
+        ).sections
 
     fun formatTriggerText(trigger: EgoTrigger): String =
         when (trigger) {
