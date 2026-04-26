@@ -11,6 +11,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginHealth
 import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
+import ai.neopsyke.agent.cortex.motor.actions.ActionSuperegoDirectives
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
@@ -40,7 +41,7 @@ class WebsiteFetchActionPlugin(
         payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = true,
         followUpPrefix = promptDescriptor.followUpPrefix ?: "Fetch completed.",
-        superegoDirectives = promptDescriptor.superegoDirectives,
+        superegoDirectives = ActionSuperegoDirectives.forAction(ActionType.WEBSITE_FETCH),
         capabilities = setOf(ActionCapability.GATHERS_EVIDENCE)
     )
 

@@ -173,6 +173,19 @@ class PromptCatalogTest {
         assertTrue(findings.isEmpty(), "Embedded prompt-like Kotlin text found:\n${findings.joinToString("\n")}")
     }
 
+    @Test
+    fun `superego directives are not prompt assets`() {
+        val root = repoRoot().resolve("config/prompts")
+        val findings = Files.walk(root).use { stream ->
+            stream.filter { it.isRegularFile() }
+                .map { slashPath(it.relativeTo(root)) }
+                .filter { it.endsWith("superego-directives.yaml") }
+                .toList()
+        }
+
+        assertTrue(findings.isEmpty(), "Superego directives must stay in Kotlin, not prompt assets:\n${findings.joinToString("\n")}")
+    }
+
     private fun repoRoot(): Path = Paths.get("").toAbsolutePath().normalize()
 
     private fun slashPath(path: Path): String = path.toString().replace('\\', '/')

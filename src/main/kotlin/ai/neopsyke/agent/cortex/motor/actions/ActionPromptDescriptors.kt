@@ -7,7 +7,6 @@ data class ActionPromptDescriptor(
     val payloadGuidance: String,
     val payloadSchemaExample: String? = null,
     val followUpPrefix: String? = null,
-    val superegoDirectives: List<String> = emptyList(),
 )
 
 object ActionPromptDescriptors {
@@ -17,19 +16,11 @@ object ActionPromptDescriptors {
         val guidance = catalog.renderText("$base/payload-guidance").text
         val example = runCatching { catalog.renderText("$base/payload-schema-example").text }.getOrNull()
         val followUpPrefix = runCatching { catalog.renderText("$base/follow-up-prefix").text }.getOrNull()
-        val directives = runCatching { catalog.renderText("$base/superego-directives").text }
-            .getOrNull()
-            ?.lineSequence()
-            ?.map { it.trim().removePrefix("-").trim() }
-            ?.filter { it.isNotBlank() }
-            ?.toList()
-            .orEmpty()
         return ActionPromptDescriptor(
             plannerDescription = description,
             payloadGuidance = guidance,
             payloadSchemaExample = example,
             followUpPrefix = followUpPrefix,
-            superegoDirectives = directives,
         )
     }
 }

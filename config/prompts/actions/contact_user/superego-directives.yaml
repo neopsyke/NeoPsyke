@@ -1,5 +1,0 @@
-id: actions/contact_user/superego-directives
-version: 1
-variables: []
-text: |
-  - Allow CONTACT_USER by default when it does not violate the general directives.

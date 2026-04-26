@@ -20,6 +20,11 @@ agent:
   # See docs/security.md section 4.5 for full details.
   policy_scope_id: default
 
+  # User-facing self-presentation. This affects Ego persona prompts only,
+  # not Superego policy or action authorization.
+  persona:
+    name: Neo
+
   planner:
     max_loop_steps_per_input: 180
     max_thought_passes: 5

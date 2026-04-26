@@ -16,6 +16,7 @@ import ai.neopsyke.agent.config.LogbookConfig
 import ai.neopsyke.agent.config.MemoryConfig
 import ai.neopsyke.agent.config.MetaReasonerConfig
 import ai.neopsyke.agent.config.NativeIntegrationsConfig
+import ai.neopsyke.agent.config.PersonaConfig
 import ai.neopsyke.agent.config.GoogleWorkspaceConfig
 import ai.neopsyke.agent.config.TelegramChannelConfig
 import ai.neopsyke.agent.config.TelegramIngressMode
@@ -56,6 +57,7 @@ private data class AgentRuntimeYamlEval(
 
 private data class AgentRuntimeYamlAgent(
     val policyScopeId: String? = null,
+    val persona: AgentRuntimeYamlPersona? = null,
     val planner: AgentRuntimeYamlPlanner? = null,
     val superego: AgentRuntimeYamlSuperego? = null,
     val memory: AgentRuntimeYamlMemory? = null,
@@ -69,6 +71,10 @@ private data class AgentRuntimeYamlAgent(
     val innerVoice: AgentRuntimeYamlInnerVoice? = null,
     val assignment: AgentRuntimeYamlAssignment? = null,
     val runtime: AgentRuntimeYamlRuntime? = null,
+)
+
+private data class AgentRuntimeYamlPersona(
+    val name: String? = null,
 )
 
 private data class AgentRuntimeYamlPlanner(
@@ -330,6 +336,7 @@ object AgentRuntimeSettingsLoader {
         val appYaml = yaml.app!!
         val evalYaml = yaml.eval!!
         val agentYaml = yaml.agent!!
+        val personaYaml = agentYaml.persona!!
         val plannerYaml = agentYaml.planner!!
         val superegoYaml = agentYaml.superego!!
         val memoryYaml = agentYaml.memory!!
@@ -358,6 +365,13 @@ object AgentRuntimeSettingsLoader {
 
         val agentConfig = AgentConfig(
             policyScope = policyScope,
+            persona = PersonaConfig(
+                name = readNonBlank(
+                    env["NEOPSYKE_AGENT_NAME"],
+                    personaYaml.name,
+                    defaults.persona.name
+                )
+            ),
             planner = PlannerConfig(
                 maxLoopStepsPerInput = readPositiveInt(
                     env["EGO_MAX_LOOP_STEPS"],
@@ -1243,6 +1257,7 @@ object AgentRuntimeSettingsLoader {
         requireSection(yaml.app, "app")
         requireSection(yaml.eval, "eval")
         val agent = yaml.agent ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent")
+        requireSection(agent.persona, "agent.persona")
         requireSection(agent.planner, "agent.planner")
         requireSection(agent.superego, "agent.superego")
         val memory = agent.memory ?: throw IllegalStateException("agent-runtime.yaml is missing required section: agent.memory")

@@ -36,7 +36,8 @@ See details:
 - **Assignment Runtime** (`AssignmentGateway` / `AssignmentRuntime`) — Persistent multi-step objective manager with event-sourced `WorkItemStateMachine`, cron scheduling via `TimerScheduler`, and async wait conditions via `WaitConditionMonitor`.
 - **DeliberationEngine** — Tracks `DecisionPressure`, coordinates `MetaReasoner` assessments, enforces action retry budgets, and can force terminal answers under sustained pressure.
 - **Dashboard and Observability** (`DashboardServer` / `DashboardStateStore`) — Web UI for conversations, observability, and action control with SSE-based live updates.
-- **PromptCatalog** — Hot-reloadable prompt/schema asset loader. Runtime prompts, prompt fragments, and migrated structured-output schemas are loaded from `config/prompts/**` or `NEOPSYKE_PROMPTS_DIR`, with bundled resources as packaged defaults.
+- **PromptCatalog** — Hot-reloadable prompt/schema asset loader. Runtime prompts, planner-facing prompt fragments, and migrated structured-output schemas are loaded from `config/prompts/**` or `NEOPSYKE_PROMPTS_DIR`, with bundled resources as packaged defaults. Superego action directives are Kotlin-owned governance instructions and are not prompt assets.
+- **PersonaConfig** — Typed `agent.persona` runtime config. The user-facing agent name is supplied to Ego persona prompts as styling only; it does not flow into Superego policy or action authorization.
 
 ## L0: System-Level Component View
 
@@ -110,7 +111,7 @@ See details:
 - Superego and `LongTermMemoryAdvisor` read `token_weight` for dynamic completion-budget scaling.
 - When two-stage superego review is enabled, runtime resolves a cheaper primary model from the catalog and keeps the configured model for escalation.
 - Planner runtime inserts the `StructuredOutputMode` adapter in the LLM layer. Compatibility degradation is handled there, not in planner lanes.
-- Prompt text and migrated JSON schemas are prompt assets, not Kotlin literals. The runtime checks file mtimes before render; a valid edit replaces the active in-memory asset immediately, while an invalid edit logs `prompt_catalog.reload_failed` and keeps the current valid asset.
+- Prompt text and migrated JSON schemas are prompt assets, not Kotlin literals. The runtime checks file mtimes before render; a valid edit replaces the active in-memory asset immediately, while an invalid edit logs `prompt_catalog.reload_failed` and keeps the current valid asset. Superego action directives are excluded from hot reload and remain in Kotlin action governance.
 - Migrated LLM metadata includes prompt/schema identity (`prompt_id`, `prompt_version`, `prompt_hash`, `schema_id`, `schema_hash`) so behavior can be correlated with prompt revisions.
 - `web_search` routing is configured independently via `web_search.provider`.
 - `TokenBudgetGate` can short-circuit outbound model calls using hard per-run, per-provider, and per-role caps.

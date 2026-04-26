@@ -19,21 +19,13 @@ object SharedPromptSections {
     const val ASSIGNMENTING_CONTEXT_MAX_CHARS: Int = 1_200
 
     /**
-     * Default name surfaced to the model in the ego persona prompt.
-     * Single source of truth — referenced only by [egoPersonaSections]. To
-     * rename the agent, change this constant; the persona yaml renders it
-     * via the `agent_name` variable.
-     */
-    const val DEFAULT_AGENT_NAME: String = "Neo"
-
-    /**
      * Render the ego persona sections (name, voice, formatting rules) for
      * inclusion in a user-facing lane prompt. Only lanes that produce
      * user-visible text should call this; plan-shaping lanes should skip it.
      */
     fun egoPersonaSections(
         promptCatalog: PromptCatalog,
-        agentName: String = DEFAULT_AGENT_NAME,
+        agentName: String,
     ): List<PromptBudgetAllocator.Section> =
         promptCatalog.renderSections(
             "ego/persona",

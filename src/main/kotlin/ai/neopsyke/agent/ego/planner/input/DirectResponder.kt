@@ -38,7 +38,7 @@ class DirectResponder(
             rootInputId = trigger.input.rootInputId,
         )
 
-        val personaSections = SharedPromptSections.egoPersonaSections(promptCatalog)
+        val personaSections = SharedPromptSections.egoPersonaSections(promptCatalog, config.persona.name)
         val prompt = promptCatalog.renderSections("planner/direct-response")
         val schema = promptCatalog.responseFormat("direct-response")
         val sections = listOfNotNull(

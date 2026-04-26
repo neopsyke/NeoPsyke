@@ -168,7 +168,8 @@ sequenceDiagram
 - Discovery uses `ServiceLoader<AgentActionPluginFactory>` plus the optional connector runtime.
 - Each plugin self-describes through `ActionDescriptor`.
 - `MotorCortex.availableActionTypes()` filters by both `dispatchable` and `available`, so planner prompts only see runtime-available actions.
-- Built-in action planner descriptions, payload guidance, payload examples, follow-up prefixes, and Superego directives are prompt-backed descriptor fragments under `config/prompts/actions/**`.
+- Built-in action planner descriptions, payload guidance, payload examples, and follow-up prefixes are prompt-backed descriptor fragments under `config/prompts/actions/**`.
+- Superego directives are Kotlin-owned action governance in `ActionSuperegoDirectives` and flow through `ActionDescriptor.superegoDirectives`.
 
 ### Built-in Action Plugins
 - `contact_user` -> user-facing output, private commit

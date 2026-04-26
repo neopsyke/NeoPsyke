@@ -1,6 +1,0 @@
-id: actions/resolution_draft/superego-directives
-version: 1
-variables: []
-text: |
-  - Allow RESOLUTION_DRAFT always
-  - Do not treat RESOLUTION_DRAFT as a user-visible final response.

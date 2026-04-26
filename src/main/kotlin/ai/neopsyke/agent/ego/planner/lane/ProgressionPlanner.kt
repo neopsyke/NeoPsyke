@@ -79,7 +79,7 @@ class ProgressionPlanner(
         val actionSchemaEnum = SharedPromptSections.plannerVisibleActionSchemaEnum(context)
         val actionGuidanceBlock = SharedPromptSections.actionGuidanceBlock(context)
 
-        val personaSections = SharedPromptSections.egoPersonaSections(promptCatalog)
+        val personaSections = SharedPromptSections.egoPersonaSections(promptCatalog, config.persona.name)
         val prompt = promptCatalog.renderSections(
             "planner/progression",
             mapOf(

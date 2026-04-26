@@ -56,8 +56,8 @@ object SuperegoPolicy {
     /**
      * Resolves action-specific superego directives.
      *
-     * The plugin's [ActionDescriptor.superegoDirectives] is the single source
-     * of truth for all action directives.
+     * The action descriptor's Kotlin-owned [ActionDescriptor.superegoDirectives]
+     * is the source of truth for action directives.
      */
     private fun actionSpecificDirectives(actionType: ActionType, actionRegistry: ActionRegistry): List<String> =
         actionRegistry.superegoDirectives(actionType)

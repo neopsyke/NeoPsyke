@@ -187,6 +187,17 @@ The model catalog is YAML-only and supports source-review timestamps through `me
 
 This is the largest configuration file, covering the Ego planner, Superego, memory system, meta-reasoner, episodic logbook, assignments, integrations, and runtime behavior.
 
+### Persona (`agent.persona`)
+
+| Key | Default | Description |
+|---|---|---|
+| `name` | `Neo` | User-facing name inserted into Ego persona prompts. This is styling only and does not affect Superego policy or action authorization. |
+
+**Safety notes:**
+- Persona config is treated as self-presentation, not policy.
+- Superego directives and action authorization remain Kotlin-owned governance.
+- Names must be non-blank, at most 64 characters, and cannot contain control characters.
+
 ### Planner (`agent.planner`)
 
 | Key | Default | Description |

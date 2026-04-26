@@ -5,6 +5,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
+import ai.neopsyke.agent.cortex.motor.actions.ActionSuperegoDirectives
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.model.ActionEffect
@@ -26,7 +27,7 @@ class ResolutionDraftActionPlugin : AgentActionPlugin {
         payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
         followUpPrefix = promptDescriptor.followUpPrefix ?: "Resolution draft captured.",
-        superegoDirectives = promptDescriptor.superegoDirectives,
+        superegoDirectives = ActionSuperegoDirectives.forAction(ActionType.RESOLUTION_DRAFT),
     )
 
     override fun deterministicReview(

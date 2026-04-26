@@ -60,11 +60,6 @@ prompts:
     file: actions/contact_user/planner-description.yaml
     domain: actions
     owner: action-registry
-  - id: actions/contact_user/superego-directives
-    version: 1
-    file: actions/contact_user/superego-directives.yaml
-    domain: actions
-    owner: action-registry
   - id: actions/email_send/follow-up-prefix
     version: 1
     file: actions/email_send/follow-up-prefix.yaml
@@ -83,11 +78,6 @@ prompts:
   - id: actions/email_send/planner-description
     version: 1
     file: actions/email_send/planner-description.yaml
-    domain: actions
-    owner: action-registry
-  - id: actions/email_send/superego-directives
-    version: 1
-    file: actions/email_send/superego-directives.yaml
     domain: actions
     owner: action-registry
   - id: actions/gmail_observe_message/follow-up-prefix
@@ -150,11 +140,6 @@ prompts:
     file: actions/reflect_evidence/planner-description.yaml
     domain: actions
     owner: action-registry
-  - id: actions/reflect_evidence/superego-directives
-    version: 1
-    file: actions/reflect_evidence/superego-directives.yaml
-    domain: actions
-    owner: action-registry
   - id: actions/reflect_internal/follow-up-prefix
     version: 1
     file: actions/reflect_internal/follow-up-prefix.yaml
@@ -173,11 +158,6 @@ prompts:
   - id: actions/reflect_internal/planner-description
     version: 1
     file: actions/reflect_internal/planner-description.yaml
-    domain: actions
-    owner: action-registry
-  - id: actions/reflect_internal/superego-directives
-    version: 1
-    file: actions/reflect_internal/superego-directives.yaml
     domain: actions
     owner: action-registry
   - id: actions/resolution_draft/follow-up-prefix
@@ -200,11 +180,6 @@ prompts:
     file: actions/resolution_draft/planner-description.yaml
     domain: actions
     owner: action-registry
-  - id: actions/resolution_draft/superego-directives
-    version: 1
-    file: actions/resolution_draft/superego-directives.yaml
-    domain: actions
-    owner: action-registry
   - id: actions/web_search/follow-up-prefix
     version: 1
     file: actions/web_search/follow-up-prefix.yaml
@@ -225,11 +200,6 @@ prompts:
     file: actions/web_search/planner-description.yaml
     domain: actions
     owner: action-registry
-  - id: actions/web_search/superego-directives
-    version: 1
-    file: actions/web_search/superego-directives.yaml
-    domain: actions
-    owner: action-registry
   - id: actions/website_fetch/follow-up-prefix
     version: 1
     file: actions/website_fetch/follow-up-prefix.yaml
@@ -248,11 +218,6 @@ prompts:
   - id: actions/website_fetch/planner-description
     version: 1
     file: actions/website_fetch/planner-description.yaml
-    domain: actions
-    owner: action-registry
-  - id: actions/website_fetch/superego-directives
-    version: 1
-    file: actions/website_fetch/superego-directives.yaml
     domain: actions
     owner: action-registry
   - id: approvals/interpreter

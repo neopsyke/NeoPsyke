@@ -25,7 +25,9 @@ import ai.neopsyke.agent.model.PerceptFamily
 import ai.neopsyke.support.RecordingInstrumentation
 import ai.neopsyke.support.StubChatModelClient
 import ai.neopsyke.support.buildTestHierarchicalPlanner
+import ai.neopsyke.prompt.PromptCatalog
 import java.time.Instant
+import java.nio.file.Paths
 import kotlin.test.Test
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -51,6 +53,15 @@ class GroundingPromptVisibilityTest {
         val section = SharedPromptSections.groundingRequirementSection(context)
         assertNotNull(section)
         assertTrue(section.content.contains("GROUNDING REQUIREMENT"))
+    }
+
+    @Test
+    fun `egoPersonaSections renders configured agent name`() {
+        val catalog = PromptCatalog.fromRoot(Paths.get("config/prompts"))
+        val sections = SharedPromptSections.egoPersonaSections(catalog, agentName = "Yoli")
+
+        assertTrue(sections.any { it.content.contains("Your name is Yoli.") })
+        assertTrue(sections.none { it.content.contains("Your name is Neo.") })
     }
 
     // --- Per-lane prompt injection via HierarchicalPlanner ---

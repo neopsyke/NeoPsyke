@@ -1,8 +1,0 @@
-id: actions/email_send/superego-directives
-version: 1
-variables: []
-text: |
-  - Deny EMAIL_SEND when recipients are missing or ambiguous.
-  - Deny EMAIL_SEND when payload includes inline secrets, credentials, or key material.
-  - Deny EMAIL_SEND to out-of-policy recipient domains when domain restrictions are configured.
-  - Allow EMAIL_SEND only when sender identity is explicit or a configured default sender exists.

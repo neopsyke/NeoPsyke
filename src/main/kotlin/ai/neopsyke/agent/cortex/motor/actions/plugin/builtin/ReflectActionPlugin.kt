@@ -9,6 +9,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
+import ai.neopsyke.agent.cortex.motor.actions.ActionSuperegoDirectives
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ReflectionMemoryRecorder
@@ -40,7 +41,7 @@ class ReflectInternalActionPlugin(
         payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
         followUpPrefix = promptDescriptor.followUpPrefix ?: "Trusted reflection recorded.",
-        superegoDirectives = promptDescriptor.superegoDirectives,
+        superegoDirectives = ActionSuperegoDirectives.forAction(ActionType.REFLECT_INTERNAL),
         capabilities = emptySet(),
         allowedArgumentDataTrust = setOf(DataTrust.TRUSTED_DATA),
     )
@@ -112,7 +113,7 @@ class ReflectEvidenceActionPlugin(
         payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
         followUpPrefix = promptDescriptor.followUpPrefix ?: "Evidence-backed reflection recorded.",
-        superegoDirectives = promptDescriptor.superegoDirectives,
+        superegoDirectives = ActionSuperegoDirectives.forAction(ActionType.REFLECT_EVIDENCE),
         capabilities = emptySet(),
         allowedArgumentDataTrust = setOf(DataTrust.SANITIZED_EXTERNAL_DATA),
     )

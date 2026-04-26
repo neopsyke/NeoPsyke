@@ -6,6 +6,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginHealth
 import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
+import ai.neopsyke.agent.cortex.motor.actions.ActionSuperegoDirectives
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
@@ -31,7 +32,7 @@ class WebSearchActionPlugin(
         payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = true,
         followUpPrefix = promptDescriptor.followUpPrefix ?: "Web search completed.",
-        superegoDirectives = promptDescriptor.superegoDirectives,
+        superegoDirectives = ActionSuperegoDirectives.forAction(ActionType.WEB_SEARCH),
         capabilities = setOf(ActionCapability.GATHERS_EVIDENCE),
         effectClass = ActionEffectClass.OBSERVE,
         directCommitAllowed = true,

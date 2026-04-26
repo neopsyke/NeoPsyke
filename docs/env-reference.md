@@ -76,6 +76,7 @@ Variable names are configured in `config/llm-runtime.yaml` under `providers.<nam
 
 | Variable | Default | Description |
 |---|---|---|
+| `NEOPSYKE_AGENT_NAME` | `Neo` | User-facing agent name inserted into Ego persona prompts. Does not affect Superego policy or action authorization. |
 | `EGO_MAX_LOOP_STEPS` | `180` | Maximum Ego loop iterations per input. |
 | `EGO_MAX_THOUGHT_PASSES` | `5` | Maximum consecutive thought passes before the planner must act. |
 | `EGO_MAX_PROMPT_TOKENS` | `2400` | Planner prompt token budget. |

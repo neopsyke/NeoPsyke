@@ -212,7 +212,9 @@ For `Assignment`, `assignment_target` is one of `generic`, `recurrent_task`, or 
 ### L2: Prompt Budget and Assembly
 - `PromptBudgetAllocator` reserves required-core and context floors with message-overhead accounting.
 - `PromptCatalog` loads hot-reloadable prompt and schema assets from `config/prompts/**` or `NEOPSYKE_PROMPTS_DIR`.
-- Static lane instructions, retry text, action descriptor fragments, and migrated JSON schemas live as prompt assets.
+- Static lane instructions, retry text, planner-facing action descriptor fragments, and migrated JSON schemas live as prompt assets.
+- Ego persona prompts receive the typed `agent.persona.name` value at render time.
+- Superego action directives are Kotlin-owned governance instructions, not hot-reloadable prompt assets.
 - `SharedPromptSections` provides typed runtime context sections across lanes; prompt assets provide human-editable instruction and schema-framing text.
 - Rendered LLM calls carry prompt/schema id and hash metadata for observability.
 - `prompt_budget_allocation` telemetry is emitted per lane.

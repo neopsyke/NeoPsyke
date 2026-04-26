@@ -18,6 +18,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginHealth
 import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
+import ai.neopsyke.agent.cortex.motor.actions.ActionSuperegoDirectives
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.SecretHandle
@@ -58,7 +59,7 @@ class MicrosoftGraphEmailActionPlugin(
         payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
         followUpPrefix = promptDescriptor.followUpPrefix ?: "Email send completed.",
-        superegoDirectives = promptDescriptor.superegoDirectives,
+        superegoDirectives = ActionSuperegoDirectives.forAction(ActionType("email_send")),
         capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT),
         effectClass = ActionEffectClass.COMMIT_PRIVATE,
         supportsAutonomousCommit = true,

@@ -10,6 +10,8 @@ app:
   dashboard_port: 8787
 
 agent:
+  persona:
+    name: Neo
   assignment:
     enabled: false
   action_control:

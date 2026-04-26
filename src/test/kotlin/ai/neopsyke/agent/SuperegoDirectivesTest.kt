@@ -2,6 +2,7 @@ package ai.neopsyke.agent
 
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionRegistry
+import ai.neopsyke.agent.cortex.motor.actions.ActionSuperegoDirectives
 import ai.neopsyke.agent.cortex.motor.actions.NoopReflectionMemoryRecorder
 import ai.neopsyke.agent.config.AgentConfig
 import kotlin.test.Test
@@ -77,7 +78,7 @@ class SuperegoDirectivesTest {
     @Test
     fun `plugin directives are the single source of truth`() {
         // Verify that all plugin-registered actions provide directives via the plugin,
-        // not via any inline fallback.
+        // not via prompt assets or any inline SuperegoPolicy fallback.
         registry.actionTypes().forEach { actionType ->
             val descriptor = registry.descriptor(actionType)!!
             val pluginDirectives = descriptor.superegoDirectives
@@ -85,6 +86,17 @@ class SuperegoDirectivesTest {
             assertTrue(
                 pluginDirectives == resolved,
                 "Directives for $actionType should come from the plugin descriptor, not from an inline fallback."
+            )
+        }
+    }
+
+    @Test
+    fun `action directives are kotlin-owned governance instructions`() {
+        registry.actionTypes().forEach { actionType ->
+            val descriptor = registry.descriptor(actionType)!!
+            assertTrue(
+                descriptor.superegoDirectives == ActionSuperegoDirectives.forAction(actionType),
+                "Directives for $actionType should be Kotlin-owned action governance, not prompt-catalog text."
             )
         }
     }

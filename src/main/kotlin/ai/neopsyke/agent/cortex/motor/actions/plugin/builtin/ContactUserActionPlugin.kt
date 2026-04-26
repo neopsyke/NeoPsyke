@@ -5,6 +5,7 @@ import ai.neopsyke.agent.cortex.motor.actions.ActionDescriptor
 import ai.neopsyke.agent.cortex.motor.actions.ActionDeterministicReview
 import ai.neopsyke.agent.cortex.motor.actions.ActionExecutionContext
 import ai.neopsyke.agent.cortex.motor.actions.ActionPromptDescriptors
+import ai.neopsyke.agent.cortex.motor.actions.ActionSuperegoDirectives
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPlugin
 import ai.neopsyke.agent.cortex.motor.actions.AgentActionPluginFactory
 import ai.neopsyke.agent.cortex.motor.actions.ActionPluginFactoryContext
@@ -31,7 +32,7 @@ class ContactUserActionPlugin(
         payloadSchemaExample = promptDescriptor.payloadSchemaExample,
         requiresFollowUpThought = false,
         followUpPrefix = promptDescriptor.followUpPrefix ?: "Message delivered.",
-        superegoDirectives = promptDescriptor.superegoDirectives,
+        superegoDirectives = ActionSuperegoDirectives.forAction(ActionType.CONTACT_USER),
         capabilities = setOf(ActionCapability.PRODUCES_USER_OUTPUT),
         effectClass = ActionEffectClass.COMMIT_PRIVATE,
         directCommitAllowed = true,

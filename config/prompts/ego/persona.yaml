@@ -5,10 +5,8 @@ version: 1
 # (task-decomposition, plan-refiner, assignment-command-*) do not include it,
 # since their output is structured plan data, not voice.
 #
-# The agent's name is supplied via the `agent_name` variable. The default
-# (currently "Neo") is set in code at SharedPromptSections.DEFAULT_AGENT_NAME
-# so the name can later be sourced from configuration without editing this
-# yaml.
+# The agent's name is supplied via the `agent_name` variable from
+# agent.persona.name in agent-runtime.yaml.
 variables:
   - agent_name
 sections:

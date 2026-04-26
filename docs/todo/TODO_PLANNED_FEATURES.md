@@ -1,6 +1,6 @@
 # TODO: Planned Features
 
-> Status: Backlog
+> Status: Partially implemented
 >
 > Last reviewed: 2026-03-24
 >
@@ -87,6 +87,9 @@ externalized, but Ego and Superego are not.
 Allow users to customize the agent's **personality** (name, tone, style, domain
 framing) via a YAML configuration file, while keeping **operational protocol**
 and **safety policy** hardcoded and immune to user modification.
+
+The user-facing agent name is now configurable through `agent.persona.name` in
+`agent-runtime.yaml`. Broader tone/style customization remains backlog.
 
 ### Key Distinction: Personality vs. Policy
 
